@@ -1,0 +1,102 @@
+:root {
+  color-scheme: light;
+  --ink: #172033;
+  --muted: #667085;
+  --line: #dce3ec;
+  --panel: rgba(255, 255, 255, 0.94);
+  --brand: #2457d6;
+  --success: #138a5b;
+  --danger: #c43d4b;
+  --warning: #b36b00;
+  font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+}
+* { box-sizing: border-box; }
+body {
+  margin: 0;
+  color: var(--ink);
+  background:
+    radial-gradient(circle at 8% 2%, #dbe8ff 0, transparent 34rem),
+    linear-gradient(145deg, #f7f9fc, #edf2f8);
+  min-height: 100vh;
+}
+button, textarea { font: inherit; }
+.hero {
+  padding: 34px clamp(20px, 5vw, 72px) 26px;
+  color: white;
+  background: linear-gradient(115deg, #132d63, #2457d6 58%, #0c8b87);
+  box-shadow: 0 12px 35px rgba(22, 43, 80, 0.22);
+}
+.hero-row, .content { max-width: 1380px; margin: 0 auto; }
+.hero-row { display: flex; justify-content: space-between; gap: 28px; align-items: center; }
+/* The wordmark and the run title are one cluster, so ``space-between`` keeps
+ * them together on the left and the buttons on the right rather than pushing
+ * three items apart.  The mark is a data URI; see the note in cascade.css. */
+.hero-brand { display: flex; align-items: center; gap: 16px; min-width: 0; }
+.hero-brand .brand-mark { width: auto; height: 58px; flex: none; }
+.eyebrow { opacity: .78; text-transform: uppercase; letter-spacing: .14em; font-size: 12px; }
+h1 { margin: 6px 0; font-size: clamp(28px, 4vw, 44px); }
+.hero p { margin: 0; opacity: .88; }
+.actions { display: flex; flex-wrap: wrap; gap: 10px; justify-content: flex-end; }
+.button {
+  border: 1px solid rgba(255,255,255,.4); border-radius: 10px; padding: 10px 15px;
+  cursor: pointer; font-weight: 700; background: white; color: #173e96;
+}
+.button.ghost { background: rgba(255,255,255,.12); color: white; }
+.content { padding: 26px clamp(16px, 4vw, 56px) 60px; }
+.summary-grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 14px; }
+.metric, .panel, .stage-card, .reason-card {
+  background: var(--panel); border: 1px solid var(--line); border-radius: 14px;
+  box-shadow: 0 9px 26px rgba(36, 55, 89, .07);
+}
+.metric { padding: 17px; }
+.metric span { display: block; color: var(--muted); font-size: 13px; }
+.metric strong { display: block; margin-top: 7px; font-size: 22px; overflow-wrap: anywhere; }
+.section-head { margin: 32px 0 14px; display: flex; justify-content: space-between; align-items: end; gap: 16px; }
+.section-head h2 { margin: 0; font-size: 22px; }
+.section-head p { margin: 3px 0 0; color: var(--muted); }
+.timeline { display: grid; gap: 12px; }
+.stage-card { padding: 17px 18px; display: grid; grid-template-columns: 54px minmax(0, 1fr) auto; gap: 16px; align-items: start; }
+.stage-number { width: 42px; height: 42px; border-radius: 50%; display: grid; place-items: center; color: white; background: var(--brand); font-weight: 800; }
+.stage-card h3 { margin: 0 0 4px; font-size: 17px; }
+.stage-subtitle { color: var(--muted); overflow-wrap: anywhere; font-size: 13px; }
+.stage-facts { display: flex; flex-wrap: wrap; gap: 7px; margin-top: 12px; }
+.pill { border-radius: 999px; padding: 4px 8px; background: #eef2f8; color: #40506a; font-size: 12px; }
+.status { font-weight: 800; font-size: 13px; border-radius: 999px; padding: 6px 9px; }
+.status.succeeded, .status.cached { color: var(--success); background: #e8f7f0; }
+.status.failed { color: var(--danger); background: #fdecef; }
+.status.pending, .status.running { color: var(--warning); background: #fff5df; }
+.error { margin-top: 12px; border-left: 3px solid var(--danger); background: #fff2f3; padding: 10px; color: #8e2631; white-space: pre-wrap; }
+.panel { padding: 18px; }
+.config-grid { display: grid; grid-template-columns: minmax(0, 1fr) 320px; gap: 18px; }
+#next-config { width: 100%; min-height: 420px; resize: vertical; border: 1px solid #b9c5d6; border-radius: 10px; padding: 13px; background: #101828; color: #e8eef8; font-family: ui-monospace, SFMono-Regular, Consolas, monospace; font-size: 13px; line-height: 1.5; }
+.guide { color: var(--muted); line-height: 1.65; }
+.guide code { color: #244da9; overflow-wrap: anywhere; }
+.notice { margin-top: 10px; min-height: 24px; font-weight: 700; }
+.notice.ok { color: var(--success); }
+.notice.bad { color: var(--danger); }
+.reason-card { padding: 17px 18px; }
+.reason-card h3 { margin: 0 0 4px; font-size: 17px; overflow-wrap: anywhere; }
+.reason-table { width: 100%; border-collapse: collapse; margin-top: 12px; font-size: 13px; }
+.reason-table td { border-top: 1px solid var(--line); padding: 6px 8px; vertical-align: top; }
+.reason-table .outcome { font-weight: 800; white-space: nowrap; }
+.reason-table .outcome.reject { color: var(--danger); }
+.reason-table .outcome.warn { color: var(--warning); }
+.reason-table .reason-code { font-family: ui-monospace, SFMono-Regular, Consolas, monospace; overflow-wrap: anywhere; }
+.reason-table .reason-kind { color: var(--muted); white-space: nowrap; }
+.reason-table .reason-rows { text-align: right; white-space: nowrap; font-weight: 700; font-variant-numeric: tabular-nums; }
+.pill.reject { background: #fdecef; color: #8e2631; }
+.pill.warn { background: #fff5df; color: #7a4a00; }
+.pill.pass { background: #e8f7f0; color: #106b48; }
+.caveat, .empty { margin: 10px 0 0; color: var(--muted); font-size: 13px; }
+@media (max-width: 900px) {
+  .hero-row { align-items: flex-start; flex-direction: column; }
+  .actions { justify-content: flex-start; }
+  .summary-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .config-grid { grid-template-columns: 1fr; }
+}
+@media (max-width: 560px) {
+  .summary-grid { grid-template-columns: 1fr; }
+  .stage-card { grid-template-columns: 42px minmax(0, 1fr); }
+  .stage-card > .status { grid-column: 2; justify-self: start; }
+}
+

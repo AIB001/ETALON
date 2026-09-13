@@ -1,0 +1,251 @@
+# CLAUDE.md
+
+This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
+
+## Project Overview
+
+PRISM (Protein Receptor Interaction Simulation Modeler) is a comprehensive Python tool for building protein-ligand systems for molecular dynamics simulations in GROMACS. It supports multiple force fields including GAFF (via AmberTools) and OpenFF (Open Force Field).
+
+**Documentation**: Official tutorials and guides at https://prism-tutorial.com/ (the PRISM-Tutorial project).
+
+## Code Search and Navigation
+
+**📝 LSP Tools Preferred**: For code navigation, use LSP tools over grep when available:
+- **LSP tools** (`mcp__cclsp__` series): Semantic understanding, direct symbol location
+  - `mcp__cclsp__find_definition` - Find symbol definitions accurately
+  - `mcp__cclsp__find_references` - Find all symbol references
+  - `mcp__cclsp__find_workspace_symbols` - Search workspace symbols
+  - Benefits: More accurate, skips comments/strings, reduces token usage
+- **Grep**: Text search requiring human interpretation
+- **Availability**: LSP tools available in Claude Code tool context only
+- **Fallback**: Use `Grep` tool when LSP tools are unavailable
+
+## Quick Start
+
+### Installation
+```bash
+pip install -e .                    # Development mode
+pip install -e .[all]               # All force fields
+```
+
+### Basic Usage
+```bash
+# CLI - Single ligand
+python prism/builder.py protein.pdb ligand.mol2 -o output_dir
+
+# CLI - Multiple ligands
+prism -pf protein.pdb -lf ligand1.mol2 -lf ligand2.mol2 -o output_dir -lff gaff -ff amber14sb
+
+# CLI - CGenFF (requires one -ffp per ligand)
+prism -pf protein.pdb -lf ligand1.mol2 -lf ligand2.mol2 -o output_dir \
+  --ligand-forcefield cgenff -ffp /path/to/cgenff1 -ffp /path/to/cgenff2
+
+# Python API
+import prism as pm
+system = pm.system("protein.pdb", "ligand.mol2")
+output_dir = system.build()
+```
+
+## Architecture Overview
+
+**Core Modules**:
+- `prism.builder` - Main entry point and workflow orchestration
+- `prism.core` - High-level Python API with `PRISMSystem` class
+- `prism.forcefield/` - Force field generation (GAFF, OpenFF)
+- `prism.utils/` - GROMACS environment, configuration, system assembly
+- `prism.sim/` - Simulation execution (GROMACS, OpenMM)
+- `prism.pmf/` - PMF calculation via steered MD and umbrella sampling
+- `prism.analysis/` - Trajectory analysis tools
+  - `prism.analysis.calc/` - Calculation modules (RMSD, contacts, clustering, etc.)
+  - `prism.analysis.plots/` - Hierarchical plotting modules organized by analysis type
+  - `prism.analysis.contact/` - HTML visualization generation
+
+**Configuration**: CLI args > config file > defaults (`prism/configs/default_config.yaml`)
+
+**Output Structure**:
+- Single ligand: `output_dir/LIG.amb2gmx/` or `LIG.openff2gmx/` (backward compatible)
+- Multi-ligand: `output_dir/Ligand_Forcefield/LIG.amb2gmx_1/`, `LIG.amb2gmx_2/`, etc.
+- GROMACS files: `output_dir/GMX_PROLIG_MD/`
+- MD parameters: `output_dir/mdps/`
+
+## Key Development Principles
+
+- **Force field detection**: Auto-detect GROMACS environment
+- **Dynamic ion addition**: Auto-detect water groups (not hardcoded)
+- **Error handling**: Comprehensive error messages with troubleshooting guidance
+- **Modularity**: Clean separation between force field generators, system building, and simulation
+- **GPU support**: Optimized GROMACS commands for GPU acceleration
+- **Resume capability**: Check for existing files and resume from checkpoints
+- **Naming consistency**: Follow standardized naming conventions (see `NAMING_CONVENTIONS.md`)
+
+## Standard Naming Conventions
+
+**CRITICAL**: All new code MUST follow the standardized naming conventions defined in `NAMING_CONVENTIONS.md`.
+
+### Key Rules
+
+1. **System Directories**: Always use `GMX_PROLIG_*` prefix
+   - ✅ `GMX_PROLIG_MD/`, `GMX_PROLIG_FEP/`, `GMX_PROLIG_PMF/`
+   - ❌ `FEP_SYSTEM/`, `output/`, `my_system/`
+
+2. **Force Field Directories**: Use `ffgen.get_output_dir_name()` method
+   - ✅ `ff_dir = output_dir / ffgen.get_output_dir_name()`
+   - ❌ `ff_dir = output_dir / "LIG.amb2gmx"`
+
+3. **Test Directories**: Use descriptive, forcefield-specific names
+   - ✅ `gaff_test/`, `openff_test/`, `test_42_38/`
+   - ❌ `gaff2_e2e_test/`, `ligand_42/`, `test_output_final/`
+
+4. **Never hardcode paths**:
+   - ✅ `prism_dir = ligand_output / ffgen.get_output_dir_name()`
+   - ❌ `prism_dir = "output/LIG.amb2gmx"`
+
+5. **No nested duplicate system directories**:
+   - ✅ `tests/gxf/FEP/unit_test/oMeEtPh-EtPh/charmm36m-mut_mmff/GMX_PROLIG_FEP/`
+   - ❌ `tests/gxf/FEP/unit_test/oMeEtPh-EtPh/charmm36m-mut_mmff_pkgfix2/GMX_PROLIG_FEP/GMX_PROLIG_FEP/`
+
+6. **Case directory naming must stay simple and readable**:
+   - ✅ `<protein_ff>-mut_<ligand_ff>` (example: `charmm36m-mut_mmff`)
+   - ❌ `*_pkgfix*`, `*_final*`, `*_new*`, or other ad-hoc suffixes
+
+### Examples
+
+```python
+# ✅ Correct - Using standardized methods
+ffgen = GAFFForceFieldGenerator(ligand_path="lig.mol2", output_dir="gaff_test")
+ffgen.run()
+prism_dir = Path(ffgen.output_dir) / ffgen.get_output_dir_name()
+
+# ✅ Correct - Standard system naming
+builder = FEPScaffoldBuilder(output_dir="GMX_PROLIG_FEP")
+
+# ❌ Wrong - Hardcoded path
+prism_dir = "gaff_test/LIG.amb2gmx"
+
+# ❌ Wrong - Non-standard naming
+builder = FEPScaffoldBuilder(output_dir="FEP_SYSTEM")
+```
+
+**See `NAMING_CONVENTIONS.md` for complete specification.**
+
+## Common Issues
+
+1. **Argument parsing**: Use positional args (protein ligand options) or flags (--protein-file --ligand-file)
+2. **Multi-ligand CLI**: For multiple ligands, use `-pf` and `-lf` flags (not positional) for best compatibility
+3. **CGenFF multi-ligand**: Requires one `--forcefield-path` (or `-ffp`) per ligand
+4. **Ion addition failures**: Ensure system contains water molecules, check GROMACS can find solvent groups
+5. **Force field errors**: Install required dependencies (GAFF needs AmberTools/ACPYPE, OpenFF needs openff-toolkit)
+6. **Memory errors**: Large systems may require more RAM during parameterization
+
+## Module-Specific Documentation
+
+- **FEP Module**: See `prism/fep/CLAUDE.md` for FEP-specific guidelines and troubleshooting
+- **PMF Module**: See `prism/pmf/CLAUDE.md` for PMF-specific guidelines
+- **Generation Module**: See `prism/generation/CLAUDE.md` for the six generative
+  models, the quality-control invariants, cluster deployment, and the measured
+  findings behind the current thresholds. Read it before changing anything under
+  `prism/generation/`.
+
+## Entry Points
+
+- CLI: `python prism/builder.py` or `prism` (if installed)
+- Python API: `import prism as pm; pm.system()` or `pm.build_system()`
+- Direct builder: `from prism.builder import PRISMBuilder`
+- Simulation: `from prism.sim import model`
+
+## Testing
+
+Test data in `test/4xb4/` contains complete protein-ligand example. MDP templates generated dynamically based on configuration.
+
+### FEP System Testing
+
+**Comprehensive FEP validation**: Use `tests/gxf/FEP/unit_test/test_run_fep.py` for complete FEP system testing:
+- System building and directory structure validation
+- Topology and coordinate file verification
+- Grompp validation for both bound/unbound legs
+- Mapping HTML quality checks
+- Atom classification validation
+
+**Usage** (works for all test systems):
+```bash
+# 42-38 system (HIF-2α)
+cd tests/gxf/FEP/unit_test/42-38
+python ../test_run_fep.py --forcefield amber14sb --ligand-forcefield gaff2
+
+# 25-36 system (HIF-2α)
+cd tests/gxf/FEP/unit_test/25-36
+python ../test_run_fep.py --forcefield amber14sb --ligand-forcefield opls
+
+# oMeEtPh-EtPh system (T4 lysozyme L99A)
+cd tests/gxf/FEP/unit_test/oMeEtPh-EtPh
+python ../test_run_fep.py --forcefield amber14sb --ligand-forcefield openff
+
+# p38-19-24 system (p38α MAPK)
+cd tests/gxf/FEP/unit_test/p38-19-24
+python ../test_run_fep.py --forcefield charmm36-jul2022 --ligand-forcefield rtf
+```
+
+Git commit message format: `[module] description;xxx`. Don't be too long!
+
+## Development Notes
+
+- **LSP vs grep**: Prefer LSP tools (mcp__cclsp*) for symbol finding - more accurate, skips comments/strings
+- **Commit messages**: Should reflect all recent changes in the commit
+- **File creation**: Avoid creating files in root directory
+
+### Compute Resource Guidance (adapt to the host — never hardcode)
+
+PRISM and its generated run scripts must adapt to whatever machine they run on.
+Do **not** hardcode a specific core count, GPU count, or GPU id anywhere in the
+software or in generated scripts — detect them at runtime.
+
+- **CPU threads**: derive `-ntomp` from the available cores (e.g. `nproc` /
+  `os.cpu_count()`). When running several jobs concurrently, leave headroom:
+  `threads_per_job ≈ total_cores / n_parallel_jobs`.
+- **GPUs**: detect with `nvidia-smi -L`; assign one job per GPU and select it
+  with `CUDA_VISIBLE_DEVICES=<id>`. Do not assume a fixed number of GPUs.
+- **Parallelism**: cap concurrency at `min(n_gpus, total_cores // threads_per_job)`.
+- **Monitoring**: `ps aux | grep "gmx mdrun" | grep -v grep`.
+
+### Working notes
+
+- Reuse existing test scripts where possible rather than writing new ones.
+- Avoid creating files in the repository root; keep the package tree clean.
+- Benchmark, model-deployment, and planning artifacts live OUTSIDE the package
+  (in the surrounding project folder), never inside `PRISM-main/`.
+
+## Where Things Get Pushed
+
+Two repositories, two accounts. **Code goes to one, model weights go to the
+other — never mix them.**
+
+| What | Repository | Account | Remote |
+|---|---|---|---|
+| PRISM source, docs, tests, the weights **manifest** | `AIB001/PRISM`, branch `main` | AIB001 | `git@github.com:AIB001/PRISM.git` |
+| The mirrored **checkpoints** (all 7 artifacts, ~966 MiB) | `AIB002/PRISM_Model_Weights`, release assets | AIB002 | `git@github-aib002:AIB002/PRISM_Model_Weights.git` |
+
+Rules:
+
+1. **No checkpoint bytes in the code repository, ever.** `.gitignore` blocks
+   `*.ckpt`, `*.pt`, `*.pth`, `*.part` under `prism/data/model_weights/` and the
+   `prism-models/` trees. Only `prism/data/model_weights/manifest.json` — which
+   describes the weights — is tracked in `AIB001/PRISM`.
+2. **Every artifact is served from the mirror.** TargetDiff, Pocket2Mol and
+   MolCRAFT publish through Google Drive, which defeats scripted download at
+   all. PocketXMol, FLOWR and DiffSBDD are scriptable on Zenodo but measured
+   ~15 KB/s, against all 966 MiB from the release CDN in 261 s — eleven hours
+   for FLOWR alone instead — so they are mirrored too. Giving an artifact a `download_url`
+   instead of a `mirror_asset` does not fail any check; it just makes that
+   model unbearably slow to install.
+3. **Weights are uploaded as GitHub release assets**, not committed. Files over
+   100 MiB cannot be pushed to a git tree at all. Release assets allow 2 GiB
+   each.
+4. **Publishing a new checkpoint is a two-repo change**: upload the asset to
+   `AIB002/PRISM_Model_Weights`, then update `relpath`/`sha256`/`size_bytes`/
+   `mirror_asset` in the manifest and commit *that* to `AIB001/PRISM`. The two
+   must be updated together or `prism weights download` fails its hash check.
+5. **Both accounts are configured over SSH**, never HTTPS. AIB002 uses a
+   dedicated key via the `github-aib002` host alias in `~/.ssh/config`, because
+   GitHub refuses to register one public key on two accounts. Release-asset
+   upload is a REST call and needs a token as well — an SSH key cannot do it.
+6. **Nothing is pushed without asking.** This applies to both repositories.

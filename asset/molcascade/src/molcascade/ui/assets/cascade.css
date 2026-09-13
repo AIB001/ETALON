@@ -1,0 +1,1791 @@
+/* MolCascade cascade builder — visual language.
+ *
+ * The palette is taken from the Monument Valley site, and the thing that makes
+ * it read as that game is not the hues: it is that colour arrives as whole
+ * planes.  A sand wall, an indigo sky, a coral slab -- each is one flat field
+ * of colour meeting another along a hard edge.  Tinting a white page by eight
+ * percent produces the same hue and none of the effect, so every surface here
+ * commits: the four columns of the workshop are four distinct planes, and a
+ * tier is a solid coloured slab rather than a white card with a stripe.
+ *
+ * Depth is drawn the way an isometric block is drawn -- an offset solid copy of
+ * the shape, never a blur -- so every edge stays crisp at any zoom and the
+ * interface keeps looking constructed rather than floated.
+ *
+ * Accent colours arrive from the catalogue: each stage group ships its own hex,
+ * and JS sets it as --accent on bricks, blocks and tiers.  Those accents span
+ * pale sage to deep violet, so anything that puts text on an accent uses
+ * --accent-deep instead, which mixes the hue toward ink until every group is
+ * legible under the same white type.  That mix is declared on the elements that
+ * receive --accent, not on :root, because a custom property is substituted
+ * where it is declared.
+ *
+ * Everything here is offline: no @import, no url(), no web fonts.  The type
+ * stack asks for the humanist faces that are already on each platform, which is
+ * the closest local match to the site's Humanst521.
+ */
+
+:root {
+  /* Surfaces.  "Paper" is warm sand rather than white -- the whole scene sits
+   * in daylight, and a true white next to these hues reads as a hole in it. */
+  --paper: #faf3e9;
+  --paper-raised: #fffaf2;
+  --paper-warm: #f1d4b9;
+  --paper-butter: #f9e3ac;
+  --paper-sky: #cfe0ee;
+
+  --ink: #241d2b;
+  --ink-soft: rgba(36, 29, 43, 0.66);
+  --ink-faint: rgba(36, 29, 43, 0.42);
+  --rule: rgba(36, 29, 43, 0.16);
+  --rule-strong: rgba(36, 29, 43, 0.3);
+
+  /* The night plane behind the header, and the one the console borrows. */
+  --night: #2b2150;
+  --night-deep: #1a1333;
+
+  --periwinkle: #6785b9;
+  --periwinkle-deep: #48418c;
+  --lilac: #ceb2d0;
+  --violet: #66407c;
+  --ochre: #f6c666;
+  --ochre-deep: #d99b2b;
+  --midnight: #0c2330;
+  --magenta: #e76399;
+  --rose: #e28ec0;
+  --coral: #e56566;
+  --crimson: #d24763;
+  --burnt: #d7684b;
+  --sage: #9bceb8;
+  --sage-deep: #2f6d57;
+
+  --accent: var(--periwinkle);
+
+  --gap: 18px;
+  --radius: 10px;
+  --radius-sm: 6px;
+
+  /* Two solid drop shadows, no blur: one for a slab resting on the page, one
+   * for a small brick.  The offset is the whole illusion. */
+  --lift-slab: 7px 7px 0 rgba(36, 29, 43, 0.1);
+  --lift-brick: 3px 3px 0 rgba(36, 29, 43, 0.14);
+
+  --font: "Optima", "Candara", "Gill Sans", "Gill Sans MT", "Trebuchet MS",
+    "Segoe UI", system-ui, -apple-system, sans-serif;
+  --mono: "Iosevka", "JetBrains Mono", "SFMono-Regular", "Consolas",
+    "Liberation Mono", monospace;
+}
+
+/* Every element that JS gives an --accent derives its own readable variants
+ * here, on the element itself, so the substitution sees the inline value. */
+.brick,
+.block,
+.tier,
+.tray-group-head,
+.node {
+  /* Mixing a pale accent toward ink desaturates it: ochre lands on dried
+   * mustard and sage on grey-green, which is the one way this palette can look
+   * cheap.  Restating the colour in oklch instead pins lightness where white
+   * type is safe while holding chroma up, so every group keeps its own hue at
+   * full strength.  The srgb mix stays first as the fallback for a browser
+   * without relative colour syntax -- it is duller, never illegible. */
+  --accent-deep: color-mix(in srgb, var(--accent) 72%, var(--ink));
+  --accent-deep: oklch(from var(--accent) 0.42 max(c, 0.14) h);
+  --accent-plane: color-mix(in srgb, var(--accent) 26%, var(--paper-raised));
+  --accent-edge: color-mix(in srgb, var(--accent) 70%, var(--paper));
+
+  /* Type laid directly on a full-strength accent.  The catalogue hands out
+   * both pale sage and deep crimson, so neither white nor ink is safe on all
+   * of them, and this palette has no room for a per-group text colour table
+   * that would drift the moment a group is added.  Reading the accent's own
+   * lightness and snapping it to black or white picks the legible one: the
+   * clamp is a step function at l = 0.62, not a gradient. */
+  --accent-ink: #fffaf2;
+  --accent-ink: oklch(from var(--accent) clamp(0, (l - 0.62) * -1000, 1) 0 0);
+  --accent-ink-soft: color-mix(in srgb, var(--accent-ink) 68%, transparent);
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  height: 100%;
+}
+
+body {
+  margin: 0;
+  display: flex;
+  flex-direction: column;
+  font-family: var(--font);
+  font-size: 15px;
+  line-height: 1.5;
+  color: var(--ink);
+  background: var(--paper);
+  -webkit-font-smoothing: antialiased;
+}
+
+h1,
+h2,
+h3,
+h4 {
+  margin: 0;
+  font-weight: 600;
+  letter-spacing: 0.01em;
+}
+
+kbd {
+  font-family: var(--mono);
+  font-size: 0.85em;
+  padding: 0 4px;
+  border: 1px solid var(--rule-strong);
+  border-bottom-width: 2px;
+  border-radius: 4px;
+  background: var(--paper-raised);
+}
+
+code {
+  font-family: var(--mono);
+  font-size: 0.9em;
+}
+
+.skip-link {
+  position: absolute;
+  left: -9999px;
+  top: 0;
+  z-index: 20;
+  padding: 10px 16px;
+  background: var(--ochre);
+  color: var(--ink);
+  border-radius: 0 0 var(--radius-sm) 0;
+}
+
+.skip-link:focus {
+  left: 0;
+}
+
+/* ------------------------------------------------------------------ topbar */
+
+/* The sky plane.  Solid, not translucent: a blurred bar would put the page's
+ * own colour back through it and lose the edge. */
+.topbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: var(--gap);
+  padding: 15px 24px 14px;
+  background: var(--night);
+  color: var(--paper-raised);
+}
+
+.brand {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-right: auto;
+
+  /* The topbar aligns to flex-end so that every field sits on one baseline with
+   * its own label stacked above it.  The wordmark has no label above and no
+   * field below, so that rule pinned it to the bottom of the bar with a label
+   * row's worth of empty night above it.  Centring this one item lifts it back
+   * into the bar without moving a single field. */
+  align-self: center;
+}
+
+/* The wordmark, carried inside the document as a data URI -- see
+ * ``molcascade.ui.assets.png_data_uri`` for why it cannot be a file reference.
+ * Only the height is set: the ``width``/``height`` attributes on the tag give
+ * the intrinsic ratio, so the browser reserves the right box before it has
+ * decoded 42 KB of base64 and nothing beside it reflows on load. */
+.brand-mark {
+  width: auto;
+  height: 40px;
+  flex: none;
+}
+
+.brand-text {
+  display: flex;
+  flex-direction: column;
+  line-height: 1.25;
+}
+
+.brand-text strong {
+  font-size: 19px;
+  letter-spacing: 0.05em;
+}
+
+.brand-text small {
+  color: rgba(255, 250, 242, 0.62);
+  font-size: 12px;
+  letter-spacing: 0.06em;
+  text-transform: lowercase;
+}
+
+.topbar-fields {
+  display: flex;
+  gap: 12px;
+  align-items: flex-end;
+}
+
+.topbar-actions {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+
+/* Controls sitting on the night plane: pale chips punched out of it. */
+.topbar .field > span:first-child {
+  color: rgba(255, 250, 242, 0.6);
+}
+
+.topbar input[type="text"],
+.topbar input[type="number"],
+.topbar input[type="search"],
+.topbar select {
+  border-color: transparent;
+  background: rgba(255, 250, 242, 0.94);
+}
+
+.topbar .button {
+  border-color: rgba(255, 250, 242, 0.28);
+  background: rgba(255, 250, 242, 0.1);
+  color: var(--paper-raised);
+  box-shadow: none;
+}
+
+.topbar .button:hover:not(:disabled) {
+  background: rgba(255, 250, 242, 0.2);
+  border-color: rgba(255, 250, 242, 0.5);
+}
+
+.topbar .button.primary {
+  border-color: var(--ochre);
+  background: var(--ochre);
+  color: var(--ink);
+}
+
+.topbar .button.primary:hover:not(:disabled) {
+  background: #ffd681;
+  border-color: #ffd681;
+}
+
+/* ------------------------------------------------------- controls & fields */
+
+.field {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  font-size: 13px;
+}
+
+.field > span:first-child {
+  font-size: 11px;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--ink-soft);
+}
+
+.field.inline {
+  min-width: 240px;
+}
+
+.field.narrow {
+  min-width: 130px;
+}
+
+.field-help {
+  font-size: 12px;
+  line-height: 1.45;
+  color: var(--ink-soft);
+}
+
+input[type="text"],
+input[type="number"],
+input[type="search"],
+select,
+textarea {
+  font: inherit;
+  font-size: 14px;
+  color: var(--ink);
+  padding: 7px 10px;
+  border: 1.5px solid var(--rule-strong);
+  border-radius: var(--radius-sm);
+  background: var(--paper-raised);
+  width: 100%;
+}
+
+input:focus-visible,
+select:focus-visible,
+textarea:focus-visible,
+button:focus-visible,
+[role="button"]:focus-visible,
+a:focus-visible {
+  outline: 2px solid var(--coral);
+  outline-offset: 2px;
+}
+
+input[type="checkbox"] {
+  width: 16px;
+  height: 16px;
+  accent-color: var(--violet);
+}
+
+.checkbox-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 9px;
+}
+
+.checkbox-row span {
+  font-size: 13px;
+}
+
+/* A button is a small block: it carries the same offset shadow as everything
+ * else on the page, and pressing it moves the face onto the shadow. */
+.button {
+  font: inherit;
+  font-size: 13px;
+  letter-spacing: 0.02em;
+  padding: 8px 14px;
+  border-radius: var(--radius-sm);
+  border: 1.5px solid var(--ink-faint);
+  background: var(--paper-raised);
+  color: var(--ink);
+  cursor: pointer;
+  box-shadow: 2px 2px 0 rgba(36, 29, 43, 0.14);
+  transition: transform 90ms ease, background 120ms ease, border-color 120ms ease,
+    box-shadow 90ms ease;
+}
+
+.button:hover:not(:disabled) {
+  background: var(--paper-butter);
+  border-color: var(--ink);
+}
+
+.button:active:not(:disabled) {
+  transform: translate(2px, 2px);
+  box-shadow: 0 0 0 rgba(36, 29, 43, 0.14);
+}
+
+.button.primary {
+  background: var(--coral);
+  border-color: #b8474a;
+  color: #fffaf2;
+}
+
+.button.primary:hover:not(:disabled) {
+  background: #f07a7a;
+  border-color: #b8474a;
+}
+
+.button.ghost {
+  background: transparent;
+  border-color: var(--rule-strong);
+  box-shadow: none;
+}
+
+.button.ghost:hover:not(:disabled) {
+  background: rgba(103, 133, 185, 0.16);
+  border-color: var(--periwinkle-deep);
+}
+
+.button.small {
+  font-size: 12px;
+  padding: 5px 10px;
+}
+
+.button:disabled {
+  opacity: 0.42;
+  cursor: not-allowed;
+  box-shadow: none;
+}
+
+.icon-button {
+  font: inherit;
+  font-size: 12px;
+  line-height: 1;
+  width: 24px;
+  height: 24px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  border-radius: 5px;
+  border: 1px solid transparent;
+  background: transparent;
+  color: var(--ink-soft);
+  cursor: pointer;
+}
+
+.icon-button:hover:not(:disabled) {
+  background: rgba(36, 29, 43, 0.1);
+  color: var(--ink);
+}
+
+.icon-button:disabled {
+  opacity: 0.28;
+  cursor: not-allowed;
+}
+
+/* -------------------------------------------------------------- status bar */
+
+.status-bar {
+  margin: 0;
+  min-height: 34px;
+  padding: 7px 24px;
+  font-size: 13px;
+  color: var(--ink-soft);
+  background: var(--paper-warm);
+  border-bottom: 1.5px solid rgba(36, 29, 43, 0.12);
+}
+
+.status-bar.ok {
+  color: #17392c;
+  background: var(--sage);
+  border-bottom-color: var(--sage-deep);
+}
+
+.status-bar.warn {
+  color: #59380a;
+  background: var(--ochre);
+  border-bottom-color: var(--ochre-deep);
+}
+
+.status-bar.error {
+  color: #fffaf2;
+  background: var(--crimson);
+  border-bottom-color: #8f2038;
+}
+
+/* ---------------------------------------------------------------- workshop */
+
+/* Four planes meeting along hard edges: sand, cream, sky. */
+.workshop {
+  flex: 1;
+  min-height: 0;
+  display: grid;
+  grid-template-columns: 280px minmax(0, 1fr) 340px;
+  gap: 0;
+}
+
+.tray-column,
+.canvas-column,
+.inspector-column {
+  min-height: 0;
+  overflow-y: auto;
+  padding: 18px 20px 44px;
+}
+
+.tray-column {
+  border-right: 1.5px solid rgba(36, 29, 43, 0.14);
+  background: var(--paper-warm);
+}
+
+.canvas-column {
+  background: var(--paper);
+}
+
+.inspector-column {
+  border-left: 1.5px solid rgba(36, 29, 43, 0.14);
+  background: var(--paper-sky);
+}
+
+.column-head {
+  margin-bottom: 14px;
+}
+
+.column-head h2 {
+  font-size: 12px;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  color: var(--ink);
+}
+
+.column-head p {
+  margin: 5px 0 0;
+  font-size: 13px;
+  line-height: 1.45;
+  color: var(--ink-soft);
+}
+
+/* --------------------------------------------------------------- the tray */
+
+.tray {
+  margin-top: 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.tray-group-head {
+  display: flex;
+  align-items: baseline;
+  gap: 7px;
+  margin-bottom: 7px;
+}
+
+.tray-group-head h3 {
+  font-size: 11px;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--accent-deep);
+}
+
+.tray-group-head span {
+  font-size: 11px;
+  color: var(--ink-faint);
+}
+
+.tray-group-head::before {
+  content: "";
+  width: 9px;
+  height: 9px;
+  flex: none;
+  transform: rotate(45deg);
+  border-radius: 2px;
+  background: var(--accent);
+}
+
+.tray-bricks {
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+}
+
+/* A tray brick is the thing that gets dragged.  It is a solid plane of the
+ * property's own colour with a hard shadow already under it, so it looks
+ * pick-up-able before the pointer arrives -- and so that mid-drag it still
+ * reads as the same object once it lands in a tier. */
+.brick {
+  font: inherit;
+  text-align: left;
+  display: block;
+  width: 100%;
+  padding: 8px 10px 8px 12px;
+  border: 1.5px solid var(--accent-edge);
+  border-left: 5px solid var(--accent);
+  border-radius: var(--radius-sm);
+  background: var(--accent-plane);
+  color: inherit;
+  cursor: grab;
+  box-shadow: var(--lift-brick);
+  transition: transform 90ms ease, box-shadow 120ms ease, border-color 120ms ease;
+}
+
+.brick:hover:not(:disabled) {
+  transform: translate(-2px, -2px);
+  box-shadow: 5px 5px 0 rgba(36, 29, 43, 0.18);
+  border-color: var(--accent-deep);
+}
+
+.brick:active:not(:disabled) {
+  cursor: grabbing;
+  transform: translate(1px, 1px);
+  box-shadow: 1px 1px 0 rgba(36, 29, 43, 0.16);
+}
+
+.brick:disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
+  box-shadow: none;
+  background: rgba(255, 250, 242, 0.5);
+  border-left-color: var(--ink-faint);
+}
+
+.brick.is-dragging {
+  opacity: 0.4;
+}
+
+.brick-name {
+  font-size: 13px;
+  line-height: 1.3;
+}
+
+.brick-meta {
+  margin-top: 2px;
+  font-size: 11px;
+  color: var(--ink-soft);
+  line-height: 1.35;
+}
+
+/* ------------------------------------------------------------ machine card */
+
+.machine {
+  margin-top: 22px;
+  padding: 12px 14px;
+  border: 1.5px solid var(--rule);
+  border-radius: var(--radius);
+  background: var(--paper-raised);
+  box-shadow: var(--lift-brick);
+}
+
+.machine h3 {
+  font-size: 11px;
+  letter-spacing: 0.13em;
+  text-transform: uppercase;
+  color: var(--ink-soft);
+  margin-bottom: 8px;
+}
+
+.machine dl {
+  margin: 0;
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 3px 10px;
+  font-size: 12px;
+}
+
+.machine dt {
+  color: var(--ink-faint);
+}
+
+.machine dd {
+  margin: 0;
+}
+
+.machine-note {
+  margin: 9px 0 0;
+  font-size: 11.5px;
+  line-height: 1.45;
+  color: var(--ink-soft);
+}
+
+.machine-note.warn {
+  color: #7a4a08;
+}
+
+/* --------------------------------------------------------------- the canvas */
+
+.funnel {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 0;
+}
+
+.funnel:focus {
+  outline: none;
+}
+
+/* Connectors.
+ *
+ * Three of them exist -- between the fixed endpoints, between two blocks inside
+ * a tier, and between two tiers -- and all three say the same thing: a
+ * population is moving downward.  They are drawn from one set of rules so they
+ * read as one continuous flow rather than three unrelated pieces of furniture,
+ * and each one only overrides the few variables that differ.
+ *
+ * The drawing is a faint rail with brighter marks travelling along it.  Each
+ * mark is a comet rather than a dash: it ramps up from nothing along its
+ * trailing edge and stops dead at its leading one, so a still frame already
+ * says which way the population is moving and the animation only confirms it.
+ * The marks ride on top of the rail rather than being cut out of it, so the
+ * rail never has a gap at either end and always meets the block it connects.
+ *
+ * There is no arrowhead, and that is the point.  A chevron drawn in CSS is a
+ * square rotated onto its corner, so its ink starts partway down its own box
+ * and the stem has to stop short by a different amount again -- two offsets
+ * that have to agree to the pixel at every zoom level the browser is asked to
+ * render at, which they did not.  Direction is carried by the comets instead:
+ * every mark points the same way the population moves, all the way along the
+ * line, so there is nothing left to align.
+ *
+ * The gradient repeats on its own period, so shifting the background by exactly
+ * one --flow-tile returns it to where it started.  That makes the loop seamless
+ * at any length, which matters because these run from 12px to 38px.
+ *
+ * Every site picks its own --flow-tile and --flow-period, but they are chosen
+ * together to hold one speed -- about 44px per second everywhere.  A tier
+ * connector and the spine of a block are the same current at the same rate, so
+ * the eye follows it from one into the next instead of reading two animations. */
+@keyframes flow-drift {
+  from {
+    background-position-y: 0;
+  }
+
+  to {
+    background-position-y: var(--flow-tile);
+  }
+}
+
+/* The same comet laid on its side, for the inlet rail that feeds the parallel
+ * arms of a tier: there the population travels across before it turns down. */
+@keyframes flow-drift-x {
+  from {
+    background-position-x: 0;
+  }
+
+  to {
+    background-position-x: var(--flow-tile);
+  }
+}
+
+/* Declared on the elements rather than on the ::before that draws the rail, so
+ * one override on the element retunes both the rail and anything else the site
+ * chooses to draw from the same variables. */
+.flow-arrow,
+.chain,
+.tier-gap {
+  --flow-tile: 13px;
+  --flow-mark-length: 9px;
+  --flow-period: 300ms;
+  /* --accent-deep is declared on the elements that receive --accent, so it does
+   * not resolve out here between them; these two are page-level by necessity.
+   * The rail is a wash of the mark's own hue rather than grey: a grey stub with
+   * a coloured cap reads as two objects, and the stem should read as the faint
+   * trace the comets are running along. */
+  --flow-rail: color-mix(in srgb, var(--periwinkle-deep) 20%, transparent);
+  --flow-mark: var(--periwinkle-deep);
+}
+
+.flow-arrow::before,
+.chain,
+.tier-gap::before {
+  background-color: var(--flow-rail);
+  background-image: repeating-linear-gradient(
+    180deg,
+    transparent 0,
+    var(--flow-mark) var(--flow-mark-length),
+    transparent calc(var(--flow-mark-length) + 0.5px),
+    transparent var(--flow-tile)
+  );
+  background-repeat: repeat-y;
+  border-radius: 2px;
+  animation: flow-drift var(--flow-period) linear infinite;
+}
+
+/* 38px, not 26: at the old length only one comet was on the rail at a time,
+ * which reads as a single dash sitting still rather than as a stream. */
+.flow-arrow {
+  align-self: center;
+  width: 3px;
+  height: 38px;
+  position: relative;
+}
+
+/* ``inset: 0``, with nothing subtracted at either end.  The rail spans the
+ * whole gap and meets the block above and the block below, which is the entire
+ * job now that there is no head to leave room for. */
+.flow-arrow::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+}
+
+/* Fixed endpoints -- library, standardization, shortlist -- are drawn as flat
+ * plaques so they read as scenery rather than as bricks the user can move.
+ * They keep the page's own colour where a tier takes a colour of its own. */
+.node {
+  border: 1.5px solid var(--rule-strong);
+  border-radius: var(--radius);
+  background: var(--paper-raised);
+  padding: 12px 14px;
+  box-shadow: var(--lift-brick);
+}
+
+.node.selected {
+  border-color: var(--violet);
+  box-shadow: 0 0 0 3px rgba(102, 64, 124, 0.24), var(--lift-brick);
+}
+
+.node-head {
+  display: flex;
+  align-items: center;
+  gap: 11px;
+  cursor: pointer;
+}
+
+.node-glyph {
+  width: 15px;
+  height: 15px;
+  flex: none;
+  transform: rotate(45deg);
+  border-radius: 2px;
+  background: var(--accent);
+}
+
+.node-title h3 {
+  font-size: 14px;
+}
+
+.node-sub {
+  font-size: 12px;
+  color: var(--ink-soft);
+  line-height: 1.4;
+}
+
+.node-head .card-actions {
+  margin-left: auto;
+}
+
+/* --------------------------------------------------------------- tier slab */
+
+/* A tier is an architectural slab, not a card: its head is a solid plane of the
+ * tier's own colour and its body a pale wash of the same hue, so a cascade
+ * reads down the page as a stack of coloured storeys.  --accent-deep rather
+ * than --accent for the head, because the catalogue accents run from pale sage
+ * to deep violet and white type has to survive all of them. */
+.tier {
+  position: relative;
+  border: 1.5px solid var(--accent-deep);
+  border-radius: var(--radius);
+  background: var(--paper-raised);
+  box-shadow: var(--lift-slab);
+  overflow: hidden;
+}
+
+/* The coloured spine continues the head down the side of the slab, the way the
+ * lit edge of a block continues past its top face. */
+.tier::before {
+  content: "";
+  position: absolute;
+  inset: 0 auto 0 0;
+  width: 6px;
+  background: var(--accent);
+  z-index: 1;
+}
+
+.tier.selected {
+  box-shadow: 0 0 0 3px var(--ochre), var(--lift-slab);
+}
+
+.tier.disabled {
+  opacity: 0.55;
+}
+
+.tier.is-over {
+  box-shadow: 0 0 0 3px var(--coral), var(--lift-slab);
+}
+
+/* The head is the tier's colour at full strength -- a lit face, not a shaded
+ * one.  Dulling it to a uniform dark would make every tier the same slab with
+ * a different tint; --accent-ink is what makes the bright version readable. */
+.tier-head {
+  display: flex;
+  align-items: center;
+  gap: 11px;
+  padding: 11px 14px 11px 20px;
+  cursor: pointer;
+  background: var(--accent);
+  color: var(--accent-ink);
+}
+
+.tier-grip {
+  flex: none;
+  width: 16px;
+  font-size: 14px;
+  line-height: 1;
+  letter-spacing: -1px;
+  color: var(--accent-ink-soft);
+  cursor: grab;
+  user-select: none;
+}
+
+/* Inverted against the head: the head's own type colour, punched out solid. */
+.tier-index {
+  flex: none;
+  width: 24px;
+  height: 24px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 12px;
+  font-weight: 600;
+  border-radius: 50%;
+  color: var(--accent);
+  background: var(--accent-ink);
+}
+
+.tier-title {
+  min-width: 0;
+}
+
+.tier-title h3 {
+  font-size: 15px;
+}
+
+.tier-sub {
+  font-size: 12px;
+  color: var(--accent-ink-soft);
+}
+
+.tier-head .icon-button {
+  color: var(--accent-ink-soft);
+}
+
+.tier-head .icon-button:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--accent-ink) 20%, transparent);
+  color: var(--accent-ink);
+}
+
+.card-actions {
+  display: flex;
+  gap: 1px;
+  margin-left: auto;
+  flex: none;
+}
+
+/* The mode chip rides on the tier's own colour, so it cannot carry a hue of
+ * its own -- an ochre chip vanishes into an ochre head.  The two modes are told
+ * apart by fill instead: parallel is a solid plaque punched out of the head,
+ * serial is an outline drawn on it.  That survives every accent in the
+ * catalogue, which a colour-coded pair does not. */
+.mode-chip {
+  flex: none;
+  font-size: 10.5px;
+  letter-spacing: 0.09em;
+  text-transform: uppercase;
+  font-weight: 600;
+  padding: 3px 10px;
+  border-radius: 999px;
+  border: 1.5px solid transparent;
+}
+
+.mode-chip.serial {
+  background: transparent;
+  border-color: var(--accent-ink-soft);
+  color: var(--accent-ink);
+}
+
+.mode-chip.parallel {
+  background: var(--accent-ink);
+  border-color: var(--accent-ink);
+  color: var(--accent);
+}
+
+/* The body is the same hue as the head, thinned until type sits on it. */
+.tier-body {
+  padding: 15px 14px 13px 20px;
+  background: color-mix(in srgb, var(--accent) 9%, var(--paper-raised));
+}
+
+/* Louder than a note because it is not commentary: the run will refuse to
+ * start until this is supplied.  It still sits inside the tier rather than in
+ * the validation strip, because it is not an error -- the cascade is correct
+ * and incomplete, and those want different type. */
+.tier-needs {
+  margin-top: 11px;
+  display: flex;
+  gap: 9px;
+  align-items: baseline;
+  font-size: 12px;
+  line-height: 1.45;
+  color: var(--ink);
+  padding: 8px 11px;
+  border-radius: var(--radius-sm);
+  background: color-mix(in srgb, var(--accent) 15%, var(--paper-raised));
+  border: 1px dashed var(--accent-edge);
+}
+
+.tier-needs-tag {
+  flex: none;
+  font-size: 10px;
+  letter-spacing: 0.09em;
+  text-transform: uppercase;
+  font-weight: 600;
+  /* Deep, not --accent-ink: this tag sits on tinted paper, and --accent-ink is
+   * the colour for type laid on a full-strength accent, which would put white
+   * on a pale panel for every dark group in the catalogue. */
+  color: var(--accent-deep);
+}
+
+.tier-note {
+  margin-top: 11px;
+  font-size: 12px;
+  line-height: 1.45;
+  color: var(--ink-soft);
+  padding-left: 10px;
+  border-left: 3px solid var(--accent-edge);
+}
+
+.tier-footer {
+  margin-top: 12px;
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+
+/* --------------------------------------------------------------- the socket */
+
+.socket {
+  display: flex;
+  border-radius: var(--radius-sm);
+  transition: background 120ms ease;
+}
+
+.socket.is-over {
+  background: rgba(229, 101, 102, 0.14);
+}
+
+/* Serial: one column, blocks chained by short connectors. */
+.socket.serial {
+  flex-direction: column;
+}
+
+/* Parallel: blocks side by side under a shared inlet rail. */
+.socket.parallel {
+  flex-direction: row;
+  flex-wrap: wrap;
+  gap: 10px;
+  align-items: stretch;
+  position: relative;
+  padding-top: 16px;
+}
+
+/* The inlet rail is the population entering the tier.  Every parallel block
+ * taps the same rail, which is the whole difference from a serial chain: no
+ * block can filter the molecules another one is about to look at.  It carries
+ * the same comets as the connectors, turned on their side, so the arrival from
+ * the tier above and the spread across the arms are visibly one movement. */
+.socket.parallel::before {
+  --flow-tile: 14px;
+  --flow-mark-length: 10px;
+  --flow-mark: var(--accent-deep);
+
+  content: "";
+  position: absolute;
+  left: 12px;
+  right: 12px;
+  top: 6px;
+  height: 2.5px;
+  border-radius: 2px;
+  /* Nearly opaque, unlike the connectors' wash of a rail.  The inlet has to
+   * stay visibly *solid* where the outlet below it is dashed -- that contrast
+   * is what says one population arrives whole and several verdicts leave
+   * uncombined -- so the comets here brighten a line that is already there
+   * rather than being the only thing drawn on it. */
+  background-color: color-mix(in srgb, var(--accent-deep) 62%, transparent);
+  background-image: repeating-linear-gradient(
+    90deg,
+    transparent 0,
+    var(--flow-mark) var(--flow-mark-length),
+    transparent calc(var(--flow-mark-length) + 0.5px),
+    transparent var(--flow-tile)
+  );
+  background-repeat: repeat-x;
+  animation: flow-drift-x 320ms linear infinite;
+}
+
+.socket.parallel > .block {
+  flex: 1 1 190px;
+  min-width: 180px;
+  position: relative;
+}
+
+/* The tap turning off the inlet rail and down into one arm. */
+.socket.parallel > .block::after {
+  --flow-tile: 9px;
+  --flow-mark-length: 6px;
+  --flow-mark: var(--accent-deep);
+
+  content: "";
+  position: absolute;
+  left: 50%;
+  top: -10px;
+  width: 2.5px;
+  height: 10px;
+  background-color: color-mix(in srgb, var(--accent-deep) 55%, transparent);
+  background-image: repeating-linear-gradient(
+    180deg,
+    transparent 0,
+    var(--flow-mark) var(--flow-mark-length),
+    transparent calc(var(--flow-mark-length) + 0.5px),
+    transparent var(--flow-tile)
+  );
+  background-repeat: repeat-y;
+  animation: flow-drift 205ms linear infinite;
+}
+
+.empty-socket {
+  flex: 1;
+  padding: 20px 14px;
+  border: 2px dashed var(--rule-strong);
+  border-radius: var(--radius-sm);
+  text-align: center;
+  font-size: 12.5px;
+  color: var(--ink-soft);
+  background: rgba(255, 250, 242, 0.55);
+}
+
+/* A drop slot is a thin gap that grows when a brick is dragged over it, so the
+ * landing position is visible before the mouse is released. */
+.slot {
+  flex: none;
+  height: 8px;
+  border-radius: 4px;
+  transition: height 110ms ease, background 110ms ease;
+}
+
+.socket.parallel > .slot {
+  height: auto;
+  width: 8px;
+  align-self: stretch;
+}
+
+.slot.is-over {
+  height: 30px;
+  background: repeating-linear-gradient(
+    45deg,
+    var(--coral),
+    var(--coral) 6px,
+    rgba(229, 101, 102, 0.3) 6px,
+    rgba(229, 101, 102, 0.3) 12px
+  );
+}
+
+.socket.parallel > .slot.is-over {
+  height: auto;
+  width: 26px;
+}
+
+/* ------------------------------------------------------- a criterion block */
+
+/* A block is a solid plane of the colour of the property it measures, with its
+ * depth carried by an offset copy of that colour rather than by a blur.  Two
+ * consequences are deliberate: a block keeps its colour wherever it is dragged,
+ * and the same shape in the tray, on the canvas, and mid-drag reads as one
+ * object being moved rather than three pictures of one. */
+.block {
+  border: 1.5px solid var(--accent-edge);
+  border-radius: var(--radius-sm);
+  background: var(--accent-plane);
+  box-shadow: 3px 3px 0 color-mix(in srgb, var(--accent-deep) 30%, transparent);
+  padding: 9px 11px 9px 14px;
+  cursor: pointer;
+  position: relative;
+  transition: box-shadow 120ms ease, border-color 120ms ease, transform 90ms ease;
+}
+
+/* The spine carries the same current through the inside of the block, which is
+ * the point: a block is a stage the population passes through, not a box it
+ * stops in.  It runs slower and at lower contrast than the connectors -- the
+ * marks are the block's own accent deepened, not the page's periwinkle -- so
+ * that a dozen of them on screen stay a texture and the connectors stay the
+ * thing the eye follows.  Only on the canvas: .brick is the tray's shape. */
+.block::before {
+  --flow-tile: 17px;
+  --flow-mark-length: 12px;
+
+  content: "";
+  position: absolute;
+  inset: 0 auto 0 0;
+  width: 5px;
+  border-radius: var(--radius-sm) 0 0 var(--radius-sm);
+  background-color: var(--accent);
+  background-image: repeating-linear-gradient(
+    180deg,
+    transparent 0,
+    color-mix(in srgb, var(--accent-deep) 62%, transparent) var(--flow-mark-length),
+    transparent calc(var(--flow-mark-length) + 0.5px),
+    transparent var(--flow-tile)
+  );
+  background-repeat: repeat-y;
+  animation: flow-drift 560ms linear infinite;
+}
+
+.block:hover {
+  transform: translate(-2px, -2px);
+  box-shadow: 6px 6px 0 color-mix(in srgb, var(--accent-deep) 34%, transparent);
+  border-color: var(--accent-deep);
+}
+
+.block.selected {
+  border-color: var(--accent-deep);
+  box-shadow: 0 0 0 3px var(--ochre),
+    3px 3px 0 color-mix(in srgb, var(--accent-deep) 30%, transparent);
+}
+
+.block.disabled {
+  opacity: 0.55;
+  background: repeating-linear-gradient(
+    45deg,
+    rgba(36, 29, 43, 0.05),
+    rgba(36, 29, 43, 0.05) 6px,
+    rgba(255, 250, 242, 0.6) 6px,
+    rgba(255, 250, 242, 0.6) 12px
+  );
+}
+
+.block.is-dragging {
+  opacity: 0.35;
+}
+
+.block-head {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+}
+
+.block-name {
+  font-size: 13px;
+  line-height: 1.3;
+  min-width: 0;
+}
+
+.block-head .card-actions {
+  opacity: 0;
+  transition: opacity 110ms ease;
+}
+
+.block:hover .card-actions,
+.block.selected .card-actions,
+.block:focus-within .card-actions {
+  opacity: 1;
+}
+
+.block-meta {
+  margin-top: 4px;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+  align-items: center;
+}
+
+.chip {
+  font-size: 10.5px;
+  letter-spacing: 0.05em;
+  padding: 1.5px 7px;
+  border-radius: 999px;
+  border: 1px solid var(--rule);
+  background: rgba(255, 250, 242, 0.92);
+  color: var(--ink-soft);
+  white-space: nowrap;
+}
+
+/* The tool actually invoked -- named at full strength, because swapping it is
+ * the single largest change a user can make to what a block means. */
+.chip.engine {
+  border-color: transparent;
+  background: var(--night);
+  color: #fffaf2;
+}
+
+/* The gate chip is not decoration: it is the ``<criterion>__gate`` stage. */
+.chip.gate {
+  border-color: transparent;
+  background: var(--lilac);
+  color: #3d2149;
+}
+
+.chip.accel {
+  border-color: transparent;
+  background: var(--sage);
+  color: #17392c;
+}
+
+.chip.alarm {
+  border-color: transparent;
+  background: var(--crimson);
+  color: #fffaf2;
+}
+
+/* ----------------------------------------------------------- the join block */
+
+.join-wrap {
+  position: relative;
+  margin-top: 18px;
+  padding-top: 14px;
+}
+
+/* The outlet rail collects what the parallel blocks decided.  It is dashed
+ * where the inlet is solid, because nothing has been combined yet: the join
+ * below it is the stage that turns several verdicts into one population. */
+.join-wrap::before {
+  content: "";
+  position: absolute;
+  left: 12px;
+  right: 12px;
+  top: 0;
+  height: 0;
+  border-top: 2.5px dashed var(--ink-faint);
+}
+
+/* The drop from the outlet rail into the join.  The rail above it stays static
+ * because nothing is moving along it yet -- the arms have finished and their
+ * verdicts are waiting -- but the drop is the combined population going on, so
+ * it flows like every other segment. */
+.join-wrap::after {
+  --flow-tile: 10px;
+  --flow-mark-length: 7px;
+  --flow-mark: var(--violet);
+
+  content: "";
+  position: absolute;
+  left: 50%;
+  top: 0;
+  width: 2.5px;
+  height: 14px;
+  background-color: color-mix(in srgb, var(--violet) 26%, transparent);
+  background-image: repeating-linear-gradient(
+    180deg,
+    transparent 0,
+    var(--flow-mark) var(--flow-mark-length),
+    transparent calc(var(--flow-mark-length) + 0.5px),
+    transparent var(--flow-tile)
+  );
+  background-repeat: repeat-y;
+  animation: flow-drift 230ms linear infinite;
+}
+
+.join-block {
+  margin: 0 auto;
+  max-width: 340px;
+  text-align: center;
+  padding: 8px 16px;
+  border: none;
+  border-radius: 999px;
+  background: var(--violet);
+  color: #fffaf2;
+  font-size: 12.5px;
+  box-shadow: var(--lift-brick);
+}
+
+.join-block strong {
+  font-weight: 600;
+}
+
+.join-block .join-id {
+  display: block;
+  font-family: var(--mono);
+  font-size: 10.5px;
+  color: rgba(255, 250, 242, 0.62);
+  margin-top: 1px;
+}
+
+.join-block.missing {
+  background: var(--crimson);
+  color: #fffaf2;
+}
+
+/* Serial chain connector between consecutive blocks.  This one sits inside a
+ * tier, so it can take the tier's own hue instead of the page default -- and it
+ * has only 12px to say it in, so the marks run at half the pitch to keep more
+ * than one of them on the rail at a time. */
+.chain {
+  --flow-tile: 8px;
+  --flow-mark-length: 5.5px;
+  /* 8px per 185ms is the same 43px/s the tier connectors run at.  Matching the
+   * speed rather than the period is what makes the current read as continuous
+   * across a boundary where the pitch has to change. */
+  --flow-period: 185ms;
+  --flow-rail: color-mix(in srgb, var(--accent-deep) 26%, transparent);
+  --flow-mark: var(--accent-deep);
+
+  align-self: center;
+  width: 2.5px;
+  height: 20px;
+  flex: none;
+}
+
+/* The gap between two tiers is both the connector that shows molecules falling
+ * from one to the next and the drop target for reordering tiers.  Drawing the
+ * connector inside the target is what makes "drop a tier here" mean the same
+ * thing as "this is where the population would flow". */
+.tier-gap {
+  position: relative;
+  height: 38px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: var(--radius-sm);
+  transition: background 110ms ease, height 110ms ease;
+}
+
+/* Edge to edge: the gap is the distance between two tiers, so a rail that runs
+ * all of it is a rail that touches both. */
+.tier-gap::before {
+  content: "";
+  position: absolute;
+  left: 50%;
+  top: 0;
+  bottom: 0;
+  width: 3px;
+  margin-left: -1.5px;
+}
+
+/* The last gap still draws its rail -- what survives the final tier is on its
+ * way to the shortlist and the line should say so -- but it has no tier below
+ * it to separate itself from, only the "add tier" button, so it reserves less
+ * height than a gap between two tiers. */
+.tier-gap.edge {
+  height: 16px;
+}
+
+/* While a tier is being dragged over it the gap turns into hatching, and a rail
+ * running through that reads as two things at once. */
+.tier-gap.is-over::before {
+  display: none;
+}
+
+.tier-gap.is-over {
+  height: 42px;
+  background: repeating-linear-gradient(
+    45deg,
+    var(--ochre),
+    var(--ochre) 7px,
+    rgba(246, 198, 102, 0.35) 7px,
+    rgba(246, 198, 102, 0.35) 14px
+  );
+}
+
+/* No padding: the button sits directly on the line between the last tier and
+ * the shortlist, which is exactly where the tier it adds would go.  Padding
+ * here would put blank page between the rail and the button and read as the
+ * flow stopping. */
+.add-tier-row {
+  display: flex;
+  justify-content: center;
+  padding: 0;
+}
+
+/* -------------------------------------------------------------- inspector */
+
+.inspector {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.inspector-section {
+  padding: 13px 14px;
+  border: 1.5px solid rgba(36, 29, 43, 0.14);
+  border-radius: var(--radius);
+  background: var(--paper-raised);
+  box-shadow: var(--lift-brick);
+  display: flex;
+  flex-direction: column;
+  gap: 11px;
+}
+
+.inspector-section > h3 {
+  font-size: 11px;
+  letter-spacing: 0.13em;
+  text-transform: uppercase;
+  color: var(--ink-soft);
+}
+
+.inspector-lead {
+  font-size: 13px;
+  line-height: 1.5;
+  margin: 0;
+}
+
+.inspector-note {
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--ink-soft);
+  margin: 0;
+}
+
+.radio-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 9px;
+  padding: 8px 10px;
+  border: 1.5px solid var(--rule);
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+}
+
+.radio-row.active {
+  border-color: var(--periwinkle-deep);
+  background: var(--paper-sky);
+}
+
+.radio-row strong {
+  display: block;
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.radio-row span {
+  font-size: 12px;
+  color: var(--ink-soft);
+  line-height: 1.4;
+}
+
+.tool-option {
+  display: flex;
+  gap: 9px;
+  align-items: flex-start;
+  padding: 8px 10px;
+  border: 1.5px solid var(--rule);
+  border-radius: var(--radius-sm);
+}
+
+.tool-option.active {
+  border-color: var(--violet);
+  background: color-mix(in srgb, var(--lilac) 45%, var(--paper-raised));
+}
+
+.tool-option.unavailable {
+  opacity: 0.66;
+}
+
+.tool-option strong {
+  font-size: 13px;
+}
+
+.tool-option small {
+  display: block;
+  font-size: 11.5px;
+  color: var(--ink-soft);
+  line-height: 1.45;
+}
+
+/* The selected tool's caveat, and the paper behind it.  The citation is set
+ * apart rather than run together with the note: it is the one string on this
+ * page meant to be copied out verbatim into a methods section, so it gets a
+ * left rule to mark where it starts and ends, and `user-select: text` in case
+ * a surrounding drag handler ever swallows the selection. */
+.tool-note {
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--ink-soft);
+  margin: 0;
+}
+
+/* A measurement, so it is set in the same face the thresholds use rather than
+   the prose face around it -- it reads as a number someone can compare against
+   the block above, which is exactly what it is for. */
+.tool-rate {
+  font-size: 11.5px;
+  line-height: 1.5;
+  color: var(--ink-soft);
+  margin: 0;
+  font-variant-numeric: tabular-nums;
+}
+
+.tool-citation {
+  font-size: 11.5px;
+  line-height: 1.5;
+  color: var(--ink-faint);
+  margin: 0;
+  padding-left: 9px;
+  border-left: 2px solid var(--rule-strong);
+  user-select: text;
+}
+
+.issue {
+  font-size: 12.5px;
+  line-height: 1.45;
+  padding: 8px 10px;
+  border-radius: var(--radius-sm);
+  border-left: 4px solid var(--rule-strong);
+  background: rgba(36, 29, 43, 0.05);
+}
+
+.issue.error {
+  border-left-color: var(--crimson);
+  background: rgba(210, 71, 99, 0.16);
+}
+
+.issue.warn {
+  border-left-color: var(--ochre-deep);
+  background: rgba(246, 198, 102, 0.32);
+}
+
+/* ---------------------------------------------------------------- dialogs */
+
+.dialog {
+  border: 2px solid var(--ink);
+  border-radius: var(--radius);
+  padding: 0;
+  width: min(560px, 92vw);
+  background: var(--paper-raised);
+  color: var(--ink);
+  box-shadow: 10px 10px 0 rgba(36, 29, 43, 0.22);
+}
+
+.dialog.wide {
+  width: min(860px, 94vw);
+}
+
+.dialog::backdrop {
+  background: rgba(26, 19, 51, 0.5);
+}
+
+.dialog-inner {
+  display: flex;
+  flex-direction: column;
+  gap: 13px;
+  padding: 18px 20px 20px;
+  max-height: 84vh;
+}
+
+.dialog-head {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.dialog-head h2 {
+  font-size: 16px;
+  margin-right: auto;
+}
+
+.dialog-note {
+  margin: 0;
+  font-size: 12.5px;
+  line-height: 1.55;
+  color: var(--ink-soft);
+}
+
+.dialog-note code {
+  display: block;
+  margin-top: 5px;
+  padding: 7px 9px;
+  border-radius: var(--radius-sm);
+  background: var(--night);
+  color: #e6dcff;
+  overflow-x: auto;
+}
+
+.picker-list {
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.picker-group h3 {
+  font-size: 11px;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--ink-soft);
+  margin-bottom: 6px;
+}
+
+.picker-item {
+  font: inherit;
+  display: block;
+  width: 100%;
+  text-align: left;
+  padding: 9px 11px;
+  border: 1.5px solid var(--rule);
+  border-radius: var(--radius-sm);
+  background: var(--paper-raised);
+  color: inherit;
+  cursor: pointer;
+  margin-bottom: 6px;
+}
+
+.picker-item:hover:not(:disabled) {
+  border-color: var(--ink);
+  background: var(--paper-butter);
+}
+
+.picker-item:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.picker-name {
+  font-size: 13.5px;
+}
+
+.picker-question,
+.picker-tools {
+  font-size: 11.5px;
+  color: var(--ink-soft);
+  line-height: 1.45;
+}
+
+.plan-list {
+  margin: 0;
+  padding-left: 0;
+  list-style: none;
+  counter-reset: plan;
+  overflow-y: auto;
+  max-height: 34vh;
+  border: 1.5px solid var(--rule);
+  border-radius: var(--radius-sm);
+}
+
+.plan-list li {
+  counter-increment: plan;
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  padding: 5px 11px;
+  font-size: 12.5px;
+  border-bottom: 1px solid var(--rule);
+}
+
+.plan-list li:last-child {
+  border-bottom: none;
+}
+
+.plan-list li::before {
+  content: counter(plan);
+  flex: none;
+  width: 22px;
+  text-align: right;
+  font-family: var(--mono);
+  font-size: 11px;
+  color: var(--ink-faint);
+}
+
+.plan-stage {
+  font-family: var(--mono);
+  font-size: 11.5px;
+}
+
+.plan-role {
+  margin-left: auto;
+  font-size: 10.5px;
+  letter-spacing: 0.09em;
+  text-transform: uppercase;
+  color: var(--ink-faint);
+}
+
+.review-body {
+  margin: 0;
+  overflow: auto;
+  max-height: 38vh;
+  padding: 12px 14px;
+  border-radius: var(--radius-sm);
+  background: var(--night-deep);
+  color: #e6dcff;
+  font-family: var(--mono);
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+/* ------------------------------------------------------------- responsive */
+
+@media (max-width: 1180px) {
+  .workshop {
+    grid-template-columns: 240px minmax(0, 1fr);
+  }
+
+  .inspector-column {
+    grid-column: 1 / -1;
+    border-left: none;
+    border-top: 1.5px solid rgba(36, 29, 43, 0.14);
+  }
+}
+
+@media (max-width: 820px) {
+  .workshop {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .tray-column {
+    border-right: none;
+    border-bottom: 1.5px solid rgba(36, 29, 43, 0.14);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  * {
+    transition: none !important;
+    /* The travelling marks are the only animation on the page -- connectors,
+     * inlet rails, taps and block spines, all of them one drift keyframe -- and
+     * stopping them costs nothing.  Each comet is drawn asymmetrically, soft at
+     * the tail and cut off at the head, so frozen at position zero it still
+     * points the way it was going. */
+    animation: none !important;
+  }
+}

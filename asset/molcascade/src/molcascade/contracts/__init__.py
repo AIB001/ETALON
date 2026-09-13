@@ -1,0 +1,67 @@
+"""Public Arrow data-contract API."""
+
+from molcascade.contracts.base import DataContract
+from molcascade.contracts.registry import (
+    CONTRACTS,
+    DEFAULT_CONTRACT_REGISTRY,
+    ContractRegistry,
+    get_contract,
+)
+from molcascade.contracts.schemas import (
+    APPLICABILITY_V1,
+    BUILTIN_CONTRACTS,
+    CLUSTER_ASSIGNMENT_V1,
+    DECISION_V1,
+    DERIVED_METRIC_V1,
+    DOCKING_SCORE_V1,
+    DRUG_LIKENESS_V1,
+    FINGERPRINT_V1,
+    LIGAND_CONFORMER_V1,
+    PARENT_SOURCE_MAP_V1,
+    PARENT_V1,
+    PREDICTION_V1,
+    PROPERTY_V1,
+    RAW_MOLECULE_V1,
+    RAW_MOLECULE_V2,
+    SCAFFOLD_ASSIGNMENT_V1,
+    SELECTION_DECISION_V1,
+    MD_SYSTEM_INPUT_V1,
+    SHORTLIST_EXPORT_V1,
+    SYNTHESIS_SCORE_V1,
+)
+from molcascade.contracts.validation import (
+    ContractValidationReport,
+    validate_schema,
+    validate_table,
+)
+
+__all__ = [
+    "APPLICABILITY_V1",
+    "BUILTIN_CONTRACTS",
+    "CLUSTER_ASSIGNMENT_V1",
+    "CONTRACTS",
+    "DECISION_V1",
+    "DEFAULT_CONTRACT_REGISTRY",
+    "DERIVED_METRIC_V1",
+    "DOCKING_SCORE_V1",
+    "DRUG_LIKENESS_V1",
+    "FINGERPRINT_V1",
+    "LIGAND_CONFORMER_V1",
+    "PARENT_SOURCE_MAP_V1",
+    "PARENT_V1",
+    "PREDICTION_V1",
+    "PROPERTY_V1",
+    "RAW_MOLECULE_V1",
+    "RAW_MOLECULE_V2",
+    "SCAFFOLD_ASSIGNMENT_V1",
+    "SELECTION_DECISION_V1",
+    "MD_SYSTEM_INPUT_V1",
+    "SHORTLIST_EXPORT_V1",
+    "SYNTHESIS_SCORE_V1",
+    "ContractRegistry",
+    "ContractValidationReport",
+    "DataContract",
+    "get_contract",
+    "validate_schema",
+    "validate_table",
+]

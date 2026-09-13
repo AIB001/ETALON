@@ -1,0 +1,40 @@
+{
+  "assets": {
+    "molcascade": {
+      "copied_bytes": 4151772,
+      "copied_files": 167,
+      "excluded_files": 102,
+      "excluded_prefixes": [
+        "tests/"
+      ],
+      "source_commit": "c01a6e0b5152a1959b6820de2d723551b37c0c6b",
+      "source_committed_at": "2026-09-12T11:12:28+08:00",
+      "source_path": "/mnt/e/My_Project/MolCascade",
+      "source_subject": "Let a campaign with no receptor hand off its conformers",
+      "tracked_files": 269,
+      "tree_sha256": "558b669939d5f555ee24111493e78e92a1fec7003dfb85d7aba5bc0cf3da30f6"
+    },
+    "prism": {
+      "copied_bytes": 25856652,
+      "copied_files": 504,
+      "excluded_files": 194,
+      "excluded_prefixes": [
+        "tests/"
+      ],
+      "source_commit": "f0492d964795ad2281d10f9c1b345f4f0a3bf675",
+      "source_committed_at": "2026-09-12T10:08:57+08:00",
+      "source_path": "/mnt/e/My_Project/PRISM/PRISM_Alpha/PRISM-main",
+      "source_subject": "[mcp] analyze_rmsd indexed a 1-D array as 2-D and failed on every call",
+      "tracked_files": 698,
+      "tree_sha256": "abe6bf2cbe1131a7c4ea3a63a2d005520b95e5aa261ac6603027e6e1aeb52ebf"
+    }
+  },
+  "reference": {
+    "approved_drugs.py": {
+      "lifted_from": "molcascade:tests/fixtures/approved_drugs.py",
+      "sha256": "5e42e75b54460dbdcc1fb0dc04cf69f52e1731944556258268ff6782fe859070",
+      "why": "A panel of 77 approved oral drugs with an in-window/out-of-window split. Every threshold in MolCascade's shipped defaults was calibrated against it, so it is the reference ETALON measures its own gates on. It lives in the excluded test tree upstream, which is where a test fixture belongs and not where reference data is findable."
+    }
+  },
+  "schema_version": 1
+}

@@ -1,0 +1,59 @@
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+.venv/
+dist/
+build/
+*.log
+
+# Run outputs.  A workspace holds artifacts, revisions, the event log and the
+# content-addressed cache for one or more runs; it is reproducible from the
+# configuration that produced it and nothing in it is source.
+workspace/
+workspace*/
+
+# Generated build products.  The builder is emitted by
+# ``molcascade generate config``, so a copy in version control is a snapshot
+# that silently goes stale against the catalogue it was generated from.
+molcascade-builder*.html
+molcascade-builder*.png
+
+# Vendored model weights.  The line is drawn at size, not at provenance: every
+# vendored file is pinned by SHA-256 and verified on resolve regardless of
+# whether it arrived by clone or by ``molcascade assets fetch``, so a committed
+# copy is exactly as trustworthy as a downloaded one.  The small members --
+# MANIFEST.md, each asset's CITATION.md and LICENSE, the rule tables and the
+# reference implementations -- are therefore tracked, and a fresh clone can run
+# those backends without reaching the network at all.  The 21 MB of weights are
+# not worth putting in every clone's history, so they stay fetched.
+vendor/*/models/
+
+# The requirements document this project was written against.  Untracked
+# because publishing someone's internal planning document is their decision to
+# make, not a side effect of pushing the code.  Delete this line to include it.
+plan/
+
+# Working documentation: iteration notes, decision records, and the generated
+# bibliography.  Kept local rather than published.  The README is the published
+# documentation, and it points at commands -- ``molcascade doctor``, ``cite``,
+# ``assets status``, ``model-bundle`` -- rather than at files here, because a
+# command reports the state of the machine it runs on and a checked-in document
+# reports the state of whoever last regenerated it.
+docs/
+
+# Scratch verification artefacts.  Screenshots taken to check a rendering, CSVs
+# extracted from a test library, one-off probe scripts.  Every one of them is a
+# by-product of checking something, never an input to it.
+shot*.png
+screenshot*.png
+scratch/
+*.scratch.*
+
+# Local verification stamps.  A cache of (size, mtime) per verified file, so a
+# repeat check does not re-hash gigabytes.  Machine-local by construction.
+.molcascade-verified.json

@@ -1,0 +1,18 @@
+__pycache__/
+*.py[cod]
+.venv/
+*.egg-info/
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+# Scratch the falsification probes build. The recorded results under findings/ are the
+# durable part; the trees the probes create are not.
+/tmp-*
+
+# Not published yet. The measurement records and the architectural decisions are held back
+# from this remote for now -- they are the research layer, and the code stands without them.
+# Both are read at runtime by the MCP server (etalon://findings, etalon://decisions), which
+# reports their absence rather than failing, and by nothing else. Removing these two lines
+# and committing the directories is all it takes to publish them.
+/findings/
+/docs/adr/

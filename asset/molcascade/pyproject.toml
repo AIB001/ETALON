@@ -1,0 +1,175 @@
+[build-system]
+requires = ["setuptools>=69", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "molcascade"
+version = "0.1.0a0"
+description = "Auditable, modular hierarchical screening for molecular libraries"
+readme = "README.md"
+requires-python = ">=3.11"
+authors = [{ name = "MolCascade contributors" }]
+dependencies = [
+  # numpy arrives with rdkit and pyarrow anyway, but molcascade.chemistry
+  # imports it directly, so it is declared rather than borrowed.
+  "numpy>=1.26",
+  "openpyxl>=3.1,<4",
+  "pydantic>=2.10,<3",
+  "pyarrow>=17,<26",
+  "PyYAML>=6,<7",
+  "rdkit>=2024.9",
+]
+
+[project.optional-dependencies]
+analytics = ["duckdb>=1.1,<2"]
+# Optional backends the user chooses in the builder.  Nothing here is
+# installed, downloaded, or imported unless a cascade actually selects it, and
+# every adapter fails closed with an install hint when its package is absent.
+#
+# One extra per criterion the builder offers, named after the criterion rather
+# than the package, because the user picks a *filter* in the HTML and then has
+# to work out what to install.  Every entry below backs an adapter that is
+# actually registered; an extra that installs something no adapter imports is
+# worse than no extra, since it reads as support that does not exist.
+custom-model = ["onnxruntime>=1.17"]
+# 'mordredcommunity', emphatically not 'mordred': the latter is the abandoned
+# 2018 original and does not run against a current RDKit.
+descriptors = ["mordredcommunity>=2.0"]
+alerts = ["medchem>=2.0"]
+standardize = ["chembl_structure_pipeline>=1.2"]
+# The indexed nearest-reference backend. scikit-fingerprints was listed here
+# previously and no adapter imports it -- its only appearance is a reviewed
+# backend entry with no plugin behind it.
+similarity = ["FPSim2>=0.7"]
+# ADMET-AI brings chemprop, lightning and torch with it. Without this extra the
+# whole ADMET endpoint criterion had no documented way to be installed.
+admet = ["admet-ai>=2.0"]
+# The docking tier's engines are compiled CUDA binaries or interpreters of their
+# own and cannot be pip-installed into this environment -- that is what makes
+# them isolated backends. What *can* be, and must be, is the converter that
+# turns a conformer into the PDBQT Uni-Dock reads, and the pose validator every
+# engine in the tier runs by default -- PoseBusters is in this extra rather than
+# an optional one of its own precisely because it is on by default, so an
+# environment that can dock is an environment that can check what it docked.
+# gemmi is meeko's dependency, not ours: meeko 0.7.1 imports it at package
+# import time and does not declare it, so `pip install meeko` alone yields a
+# package that raises ModuleNotFoundError the first time anything touches it.
+# It has to be named here because `molcascade doctor` cannot catch it -- the
+# probe asks importlib whether meeko *would be found*, not whether it would
+# import, so an undeclared transitive dependency is invisible to it and the
+# failure lands in the docking stage instead of the preflight.  Pinned to the
+# major meeko is tested against; drop the line when meeko declares it upstream.
+docking = ["gemmi>=0.6,<1", "meeko>=0.7,<0.8", "pdbfixer>=1.9,<2", "posebusters>=0.6,<1"]
+# Everything above, for the deployment machine that will run whatever a user
+# assembles in the builder rather than one known cascade.
+all-backends = [
+  "FPSim2>=0.7",
+  "admet-ai>=2.0",
+  "chembl_structure_pipeline>=1.2",
+  "gemmi>=0.6,<1",  # meeko's undeclared import; see the docking extra above
+  "medchem>=2.0",
+  "meeko>=0.7,<0.8",
+  "mordredcommunity>=2.0",
+  "onnxruntime>=1.17",
+  "pdbfixer>=1.9,<2",
+  "posebusters>=0.6,<1",
+]
+# The agent interface, and the one extra here that is not a screening backend.
+# Kept optional because a screening run needs none of it: somebody driving
+# MolCascade from a terminal or a script should not be made to install a server
+# framework, and the adapter reports how to get it rather than failing on import.
+mcp = ["mcp[cli]>=1.2"]
+dev = [
+  "hypothesis>=6.100,<7",
+  "mypy>=1.13,<2",
+  "pytest>=8,<10",
+  "pytest-cov>=6,<8",
+  "ruff>=0.9,<1",
+  "types-PyYAML>=6,<7",
+]
+
+[project.scripts]
+molcascade = "molcascade.cli:app"
+
+[project.entry-points."molcascade.plugins"]
+
+[tool.setuptools.packages.find]
+where = ["src"]
+# Every package here has an __init__.py.  Leaving namespace discovery on meant a
+# directory whose sources had been deleted -- and which held nothing but stale
+# bytecode -- was still discovered and shipped in the wheel as an empty package.
+namespaces = false
+
+[tool.setuptools.package-data]
+# ``*.png`` is the wordmark the three generated pages inline as a data URI.
+# Left out, every page a wheel-installed MolCascade renders raises
+# FileNotFoundError from ``png_data_uri`` -- and only from a wheel, never
+# from the editable checkout the tests run in.
+"molcascade.ui.assets" = ["*.css", "*.js", "*.png"]
+# PEP 561.  Without this marker mypy refuses to check the package at all --
+# including the ``python -m mypy`` in the README -- and an installed wheel
+# silently gives its callers no types despite every public surface being
+# annotated.
+"molcascade" = ["py.typed"]
+
+[tool.pytest.ini_options]
+addopts = "-ra --strict-config --strict-markers"
+testpaths = ["tests"]
+# So that shared panels under tests/fixtures import the same way from every
+# test directory.  Without it each test file only sees its own directory, and
+# calibration data ends up copied per file and drifting between copies.
+pythonpath = ["tests"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "SIM", "RUF"]
+# RUF001-003 exist to catch a Cyrillic 'а' smuggled into an identifier, which is
+# worth catching.  These three are the opposite case: deliberate typography in
+# prose the user reads -- "8x A6000" reads worse than "8×A6000", and an
+# alpha-substituted test molecule is named with an alpha.  Allowing them by
+# name keeps the rule armed for every character that is not on this list.
+allowed-confusables = ["×", "α", "·"]
+
+[tool.ruff.lint.per-file-ignores]
+# A one-line-per-backend table.  Each row is a single record of nine positional
+# fields, and reflowing 50 of them to four lines each would quadruple the file
+# and destroy the column alignment that makes a catalogue readable at a glance.
+"src/molcascade/backends/catalog.py" = ["E501"]
+# The report shell is emitted as pre-composed HTML fragments. Wrapping them
+# would insert whitespace into the markup, which changes the bytes that the
+# CSP hash is computed over.
+"src/molcascade/ui/report.py" = ["E501"]
+
+[tool.mypy]
+python_version = "3.11"
+strict = true
+packages = ["molcascade"]
+
+# Scientific Python ships almost no type information: RDKit, PyArrow, Chemprop,
+# medchem, Meeko, Mordred, FPSim2, Open Babel, OpenMM, PDBFixer and the ChEMBL
+# pipeline all lack stubs, and PyYAML's are partial.  Without these overrides
+# mypy reports 67 errors about other people's packages, which is enough noise to
+# hide the errors about ours.  This silences the missing stubs only -- calls into these libraries are
+# still checked against whatever the runtime objects turn out to be, so an
+# adapter that misuses one is not excused here.
+[[tool.mypy.overrides]]
+module = [
+    "FPSim2.*",
+    "chembl_structure_pipeline.*",
+    "chemprop.*",
+    "medchem.*",
+    "meeko.*",
+    "mordred.*",
+    "onnxruntime.*",
+    "openbabel.*",
+    "openmm.*",
+    "openpyxl.*",
+    "pdbfixer.*",
+    "pyarrow.*",
+    "rdkit.*",
+    "yaml.*",
+]
+ignore_missing_imports = true
