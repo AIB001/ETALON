@@ -70,6 +70,23 @@ FROM_A_DRAWING = {
 }
 
 
+#: The same row as a producer that kept its geometry would emit it. Used by the authorization
+#: tests, which need a record that survives the check as well as one that does not.
+CLEAN = {
+    "parent_id": "p:clean",
+    "molblock": "(a docked pose)",
+    "coordinate_source": "DOCKED_POSE",
+    "hydrogens": "EXPLICIT_ALL",
+    "hydrogen_count": 14,
+    "heavy_atom_count": 19,
+    "formal_charge": 0,
+    "stereo_smiles": "CC(C)NCC(O)COc1cccc2ccccc12",
+    "parent_smiles": "CC(C)NCC(O)COc1cccc2ccccc12",
+    "protonation_state_id": "propka:ph7.4",
+    "receptor_id": "sha256:abc123",
+    "status": "OK",
+}
+
 # -- the error shape ------------------------------------------------------
 
 
@@ -456,3 +473,189 @@ def test_the_skill_is_one_file_serving_both_consumers() -> None:
     # without its measurement looks like fussiness.
     for number in ("41 of 41", "12 kcal/mol", "110 of 120", "0.767", "37.5%"):
         assert number in text, number
+
+
+# --------------------------------------------------------------------------------------
+# The tools added after ADR 0006's class of bug was traced past its instance: a gate whose
+# output the next step requires, and a council that must qualify before it counts.
+# --------------------------------------------------------------------------------------
+
+
+def test_authorize_issues_a_token_only_for_a_record_that_survives_the_check() -> None:
+    result = json.loads(
+        _tools()["etalon_authorize_spend"](
+            records_json=json.dumps([FROM_A_DRAWING, CLEAN])
+        )
+    )
+    assert result["ok"]
+    assert result["authorized_count"] == 1
+    assert FROM_A_DRAWING["parent_id"] in result["refused"]
+    token = result["authorized"][CLEAN["parent_id"]]
+    assert len(token["record_sha256"]) == 64
+    assert len(token["signature"]) == 64
+
+
+def test_a_token_names_what_could_not_be_checked_rather_than_implying_it_passed() -> None:
+    result = json.loads(
+        _tools()["etalon_authorize_spend"](records_json=json.dumps([CLEAN]))
+    )
+    token = result["authorized"][CLEAN["parent_id"]]
+    assert token["unchecked"], "a token over unevaluable checks must say which"
+    assert "does not assert the check passed" in result["next_step"]
+
+
+def test_the_council_is_refused_when_a_seat_is_at_chance() -> None:
+    votes = {
+        "careful": ["refuse"] * 9 + ["clear"] + ["clear"] * 9 + ["refuse"],
+        "refuses-everything": ["refuse"] * 20,
+    }
+    result = json.loads(
+        _tools()["etalon_council_reliability"](
+            votes_json=json.dumps(votes),
+            truth_json=json.dumps([True] * 10 + [False] * 10),
+            labels="20 hand-labelled handoff rows",
+        )
+    )
+    assert result["ok"]
+    assert result["reliability"]["qualified"] is False
+    assert any("refuses-everything" in r for r in result["reliability"]["refusals"])
+    assert "may not sit" in result["next_step"]
+
+
+def test_the_council_reports_how_many_opinions_it_actually_carries() -> None:
+    twin = ["refuse"] * 11 + ["clear"] + ["clear"] * 11 + ["refuse"]
+    result = json.loads(
+        _tools()["etalon_council_reliability"](
+            votes_json=json.dumps({"one": twin, "two": list(twin)}),
+            truth_json=json.dumps([True] * 12 + [False] * 12),
+            labels="24 rows",
+        )
+    )
+    assert result["reliability"]["effective_votes"] < 2.0
+    assert result["reliability"]["seats_seated"] == 2
+
+
+def test_a_vote_that_is_not_a_vote_is_refused_rather_than_guessed() -> None:
+    result = json.loads(
+        _tools()["etalon_council_reliability"](
+            votes_json=json.dumps({"a": ["probably"], "b": ["clear"]}),
+            truth_json=json.dumps([True]),
+            labels="1 row",
+        )
+    )
+    assert result["ok"] is False
+    assert "abstain" in result["error"]["message"]
+
+
+def test_agreement_that_nothing_is_wrong_never_makes_a_check_evaluable() -> None:
+    """The one result that would let a campaign buy a clean record from a model."""
+
+    result = json.loads(
+        _tools()["etalon_council_adjudicate"](
+            code="F_RECEPTOR_NOT_THE_ONE_SCORED",
+            ballots_json=json.dumps(
+                [
+                    {"seat": "a", "vote": "clear", "reason": "looks right"},
+                    {"seat": "b", "vote": "clear", "reason": "no concern"},
+                ]
+            ),
+            reliability_qualified=True,
+        )
+    )
+    assert result["finding"]["outcome"] == "cleared_but_still_unchecked"
+    assert result["observation"]["evaluable"] is False
+    assert result["observation"]["fired"] is False
+
+
+def test_a_unanimous_refusal_is_the_one_direction_a_council_may_move_a_check() -> None:
+    result = json.loads(
+        _tools()["etalon_council_adjudicate"](
+            code="F_RECEPTOR_NOT_THE_ONE_SCORED",
+            ballots_json=json.dumps(
+                [
+                    {"seat": "a", "vote": "refuse", "reason": "receptor id is absent"},
+                    {"seat": "b", "vote": "abstain", "reason": "not my evidence"},
+                ]
+            ),
+            reliability_qualified=True,
+        )
+    )
+    assert result["finding"]["outcome"] == "refused"
+    assert result["observation"]["evaluable"] is True
+    assert result["observation"]["fired"] is True
+
+
+def test_a_split_waits_for_a_person_and_is_not_recorded_as_a_refusal() -> None:
+    result = json.loads(
+        _tools()["etalon_council_adjudicate"](
+            code="F_RECEPTOR_NOT_THE_ONE_SCORED",
+            ballots_json=json.dumps(
+                [
+                    {"seat": "a", "vote": "refuse", "reason": "the digest is absent"},
+                    {"seat": "b", "vote": "clear", "reason": "the run named one"},
+                ]
+            ),
+            reliability_qualified=True,
+            parent_id="M1",
+        )
+    )
+    assert result["finding"]["outcome"] == "split"
+    assert result["observation"]["fired"] is False
+    assert [b["reason"] for b in result["finding"]["dissent"]]
+    assert "person must rule" in result["next_step"]
+
+
+def test_an_unqualified_council_aggregates_nothing() -> None:
+    result = json.loads(
+        _tools()["etalon_council_adjudicate"](
+            code="F_RECEPTOR_NOT_THE_ONE_SCORED",
+            ballots_json=json.dumps(
+                [
+                    {"seat": "a", "vote": "refuse", "reason": "x"},
+                    {"seat": "b", "vote": "refuse", "reason": "y"},
+                ]
+            ),
+        )
+    )
+    assert result["finding"]["outcome"] == "council_not_qualified"
+    assert result["observation"]["evaluable"] is False
+
+
+def test_one_ballot_is_not_a_council() -> None:
+    result = json.loads(
+        _tools()["etalon_council_adjudicate"](
+            code="F_RECEPTOR_NOT_THE_ONE_SCORED",
+            ballots_json=json.dumps([{"seat": "a", "vote": "refuse"}]),
+            reliability_qualified=True,
+        )
+    )
+    assert result["ok"] is False
+    assert "quorum's weight behind one opinion" in result["error"]["message"]
+
+
+def test_two_ballots_from_one_seat_are_refused() -> None:
+    result = json.loads(
+        _tools()["etalon_council_adjudicate"](
+            code="F_RECEPTOR_NOT_THE_ONE_SCORED",
+            ballots_json=json.dumps(
+                [{"seat": "a", "vote": "refuse"}, {"seat": "a", "vote": "clear"}]
+            ),
+            reliability_qualified=True,
+        )
+    )
+    assert result["ok"] is False
+    assert "one seat voting twice" in result["error"]["message"]
+
+
+def test_a_code_outside_the_taxonomy_is_refused_by_the_council_tool() -> None:
+    result = json.loads(
+        _tools()["etalon_council_adjudicate"](
+            code="F_INVENTED",
+            ballots_json=json.dumps(
+                [{"seat": "a", "vote": "refuse"}, {"seat": "b", "vote": "refuse"}]
+            ),
+            reliability_qualified=True,
+        )
+    )
+    assert result["ok"] is False
+    assert "not in the fault taxonomy" in result["error"]["message"]

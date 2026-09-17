@@ -91,8 +91,14 @@ src/etalon/
     model.py        a small network, measured throughput, and a refusal below one sample per feature
   generate/     the one stage a CADD pipeline normally has no feedback on
     audit.py        per-model yield, and the stage at which models stop being distinguishable
+  council/      several advisors, and the measurement that decides whether they are an instrument
+    seat.py         a seat declares what evidence it sees; identical scopes are refused
+    reliability.py  Youden's J per seat, kappa per pair, Kish effective votes, and the refusal
+    convene.py      the sitting, bounded so a council can only ever add a refusal
+  authority/    the check's output is the expensive stage's argument
+    grant.py        a token per surviving record, bound to a digest of that exact record
   campaign/     the agent
-    loop.py         screen → hand off → refuse → measure → admit → decide → record
+    loop.py         screen → authorise → measure → admit → decide → record
     expensive.py    the PRISM stage
     propose.py      acquisition, and scoring an edit against the panel
     pipeline.py     the whole campaign, rendered before anything is spent
@@ -105,19 +111,23 @@ src/etalon/
 python -m etalon.mcp            # MCP server over stdio
 ```
 
-Nine tools, and **each declares what it spends in its own description** so the classification is
+Twelve tools, and **each declares what it spends in its own description** so the classification is
 visible before a model chooses rather than after:
 
 | cost | tools |
 |---|---|
-| **free** | `plan_campaign` `tune_screen` `stages` `infrastructure` `check_handoff` `check_stability` `rule_admissible` |
+| **free** | `plan_campaign` `tune_screen` `stages` `infrastructure` `check_handoff` `check_stability` `rule_admissible` `authorize_spend` `council_reliability` `council_adjudicate` |
 | **cheap** | `design_fep_network` |
 | **never by a model** | `recommend_waiver` |
 
 A campaign has 750,000 actions, so the governance cannot be per-action confirmation the way a
-small-scale workflow's is. It is that **the expensive steps are guarded by cheap checks the model is
-expected to call, and the guards refuse rather than warn.** The plan is confirmed once with the
-operator; after that the refusals are automatic and the model reads them.
+small-scale workflow's is. It is that **the expensive steps are guarded by cheap checks, and the
+guards refuse rather than warn.** The plan is confirmed once with the operator; after that the
+refusals are automatic.
+
+That used to say "cheap checks the model is expected to call," and the italics were carrying a
+weight they could not hold — see [the gate is an argument](#the-gate-is-an-argument-not-a-suggestion)
+below.
 
 The complete workflow — generation through relative free energy, with the order, the decision points,
 and the measurement behind every refusal — is
@@ -153,6 +163,143 @@ unable to be held to it.
 Answers are parsed strictly. A fence or a prefatory sentence is tolerated; an answer of the wrong
 shape is refused rather than mined, because reaching into a malformed reply for the part that
 looks like the number is the same operation that turns a hallucination into a record.
+
+## The gate is an argument, not a suggestion
+
+Count this server's tools by what they spend: ten free, one cheap, one no model may complete. Until
+recently **none of them spent anything.** A model ran `etalon_check_handoff`, read a refusal, and
+then called PRISM's own server to build the system, because that is where building lives. Nothing
+connected the two. Every refusal was advice offered beside an action it had no relationship with,
+and the sentence above about guards rested on a model choosing to be guarded in round nine of a
+campaign whose workflow it read in round one.
+
+[`docs/adr/0006`](docs/adr/0006-a-guard-on-the-path-nobody-takes-is-not-a-guard.md) named this
+class of bug and fixed one instance of it. The class was larger than the instance.
+
+`authority/` closes it by type rather than by documentation. `authorize()` runs the preflight
+itself — it does not accept a verdict as an argument, because a function that took one would be the
+same hole with extra steps — and mints a token per surviving record. `PrismStage` and anything else
+implementing the expensive-stage protocol take those tokens and call `require()` before they build.
+**The path that spends without checking does not exist**: the function that spends cannot be called
+without the object that checking produces. Called with `None`, it raises rather than defaulting to
+permission, because a gate whose default is "allowed" protects whoever remembers it.
+
+A token is bound to a SHA-256 of the exact row, so three different mistakes get three different
+refusals: no token, an expired or tampered one, and one minted for a different version of the record
+— which is the taxonomy's `WRONG_SUBJECT` applied to the permission itself. Checking one row and
+building another produces numbers about a molecule nobody ruled on, and an id matching is not
+evidence the row is the one that was checked.
+
+What this is not: a defence against a hostile caller in the same process, who can import the minter.
+It is a defence against every way a correct intention becomes a wrong spend — the check skipped, the
+check run on a different set, a waiver from an earlier round still releasing a fault weeks later, the
+receptor changed in between. The signed token makes those non-constructible by accident rather than
+cryptographically impossible, and the docstring says so where a README would be tempted to imply
+otherwise. The nearest published relative is AWS's `ccapi-mcp-server`, which mints a token when a
+check runs; that one attests that a check *happened*, and binding the token to the checked content
+is the part that makes it attest to *what*.
+
+## Several advisors, and the measurement that decides whether they are an instrument
+
+`tuning/knob.py` has carried this sentence since before there was a second advisor:
+
+> Each member performs relatively well on its own AND the members are appropriately diverse. … A
+> member whose AUC is near chance contributes noise; two members correlating above about 0.9 with
+> each other contribute one opinion at two prices.
+
+It is the published precondition for consensus *scoring* — kinases, where it held: Top-1% enrichment
+6.4 → 23.5; GPCR-Bench, where it did not: MM/GBSA combinations improving 32% and 19%. `tuning/advise.py`
+refuses to recommend the knob until an operator establishes it.
+
+Nothing in that condition is about docking. It is the condition under which pooling judgements beats
+taking one, and Ueda and Nakano's decomposition of ensemble error is its formal statement: averaging
+scales the variance term by 1/M and the covariance term by **(1 − 1/M)**, so as members are added the
+variance term vanishes and the covariance term does not. Wang and Wang measured the same law in this
+field in 2001 — consensus error cancels at roughly √N *because the members' errors were modelled as
+independent*.
+
+Applying that to scoring functions and not to the advisors scoring them is where the analogy stopped
+being carried. Every multi-agent system surveyed for
+[`docs/adr/0007`](docs/adr/0007-a-council-is-an-instrument-and-must-be-calibrated.md) — PharmAgents,
+DrugAgent, Mozi, Robin, BioDiscoveryAgent, TxAgent, STELLA, PharmaSwarm, DeepMind's AI co-scientist —
+**reports no agreement statistic for its own panel.** No kappa, no correlated-error analysis, no
+measured single-agent comparison. Meanwhile the general literature has been reporting a **mean effect
+of −3.5% for multi-agent against single-agent** across 260 configurations, errors amplified up to
+17.2× by decentralised topologies, and nine LLM judges carrying **2.18 effective independent votes**.
+
+So a council here is a tier, and every argument `economics/` makes about a tier applies to it:
+
+| | measured as | refuses? |
+|---|---|---|
+| is each seat better than chance | Youden's J, conservative interval | **yes** — one seat at or below zero disqualifies the council |
+| are the seats redundant | Cohen's kappa per pair | reported; the 0.9 is borrowed across a change of statistic |
+| how many opinions is this really | Kish effective votes | reported, with the decomposition that says why |
+
+Youden's J rather than accuracy, because J is zero for a seat at chance **and** for one that refuses
+everything **and** for one that clears everything. The characteristic failure of a gate is an
+unconditional verdict, not a wrong one — that is `docs/adr/0002`, a rule that refused every molecule
+in the population — and accuracy flatters an unconditional refuser on a set where most records are bad.
+
+**Diversity is declared as evidence, not written as a prompt.** A seat says which slice of the record
+it is shown and `charter()` refuses two seats with identical scopes at construction. Two readers of
+one row through different personas are one opinion at two prices however different the instructions
+sound: a persona cannot change what is in front of it, and both are wrong together on precisely the
+record that is itself misleading — the case a council is convened for. The scope is enforced by
+handing each seat a dictionary, not by asking it not to look.
+
+### The one thing a council may do
+
+**It may move a check from unevaluable to fired. It may never move one to cleared.**
+
+Its jurisdiction is only what `preflight.unchecked` reports — the checks that could not be evaluated.
+A deterministic check that ran is a measurement and no vote overturns a hash comparison. Within that
+jurisdiction the authority is one-way, and the asymmetry is `learn/admissible.py`'s: withholding a
+good measurement costs one molecule's information, admitting a bad one costs a shift in the policy
+applied to all of them. Seats agreeing they see no problem returns `CLEARED_BUT_STILL_UNCHECKED`, the
+observation stays `evaluable=False`, and `unchecked()` still reports the cause — because an advisor
+saying "this looks fine" is not the check having run.
+
+So the worst a miscalibrated, compromised or simply wrong council can do is **refuse molecules that
+were fine**, which costs compute, collapses the admission rate, and is visible in the ledger. It
+cannot manufacture a clean record. Given a literature whose headline is that panels often
+underperform, a mechanism whose failure mode is bounded in the safe direction is the only kind worth
+adding.
+
+Majority vote, debate between seats, and a supervisor agent resolving disagreement were all
+considered and rejected; ADR 0007 says why each. The short version: majority vote contradicts the
+asymmetry, debate raises the one quantity the design keeps low, and a supervisor replaces a measured
+quantity with an unmeasured one. **A split goes to a person** — ordered by how close it was, which is
+`learn/acquire.py`'s argument with operator attention in place of GPU-hours — and is deliberately not
+encoded as a refusal, because "a person must look" and "the molecule is bad" are different claims.
+
+### And then the council was measured
+
+Two seats of `claude-sonnet` with disjoint evidence, 24 labelled handoff rows — 12 with coordinates
+rebuilt from SMILES, 12 from real poses — with `coordinate_source` withheld from both, which is the
+case the deterministic check cannot rule on
+([`findings/0012`](findings/0012-a-council-of-two-carries-less-than-two-opinions.json)):
+
+> Both seats qualified. The pair's Cohen's kappa was **+0.442** and the two seats carried **1.39
+> effective votes** of a nominal 2.
+
+Two things in that are worth more than the pass. Disjoint evidence bought real but partial
+independence — 1.46 of a nominal 2 — so **declaring different evidence is necessary and not
+sufficient**, which is what `composition()`'s note already said and now has a number.
+
+And it caught a hole in this module. On the first run `provenance-reader` scored J = 1.000 having
+abstained on **ten of the twelve records that carried the fault**, answering two and getting both
+right. The figure was true of what it judged and useless as a summary of the seat. Its overall
+abstention rate was 46%, under any threshold worth setting. Abstention is now counted **per class**,
+because the quantity that matters is not how often a seat declines but which class it declines on.
+
+The second result is the larger one and it is a gap rather than a feature. **The council's own
+measurement is not reproducible**: two runs of the same script at the same seed moved J from 1.000
+to 0.917, the kappa from 0.371 to 0.442, and the effective votes from 1.46 to 1.39. The seed fixes
+record generation, not the model. `docs/adr/0001` met this shape before — a build that was not a
+pure function of its inputs — and fixed it with a shim that supplied the missing seed. There is no
+equivalent here, so a council that qualified once has not been shown to qualify, and repeated
+qualification with an interval is what `reliability.py` needs next. Both runs agreed on every sign;
+it is the precision that is unestablished.
 
 ## The model that learns
 
@@ -496,6 +643,11 @@ argument.
   the only path a model uses: **a model could release `F_COORDINATES_ARE_A_DEPICTION` — the cause
   the same tool calls unfixable by a waiver — by typing its name.** `refuse_if_not_an_advisors_decision`
   had zero production callers, and `Act.SPEND` had no implementation at all.
+- [`docs/adr/0007`](docs/adr/0007-a-council-is-an-instrument-and-must-be-calibrated.md) — a council of
+  advisors is an instrument, and one that has not been calibrated does not get used. The precondition
+  was already in this repository, applied to scoring functions; none of the published multi-agent
+  drug-discovery systems applies it to its own agents. Measured here, two seats with disjoint evidence
+  carried **1.39 effective votes of 2**.
 - [`findings/0002`](findings/0002-driver-exit-code.json) — PRISM's `localrun.sh` exit code
   cannot distinguish a finished run from a failed one. A fresh broken build exits 1; the same
   directory re-driven exits **0 with `em`, `nvt` and `npt` all failed** and 23 error lines in
@@ -542,6 +694,11 @@ Edit the live repo, run *its* test suite, **commit there**, then re-vendor:
 python tools/vendor_assets.py --write
 ```
 
+`tools/measure_council.py` is the other falsification probe, beside `tools/falsify_determinism.py`:
+it runs a real two-seat council against labelled records and exits 1 when the council does not
+qualify. Both exist because a threshold only ever exercised on fixtures is a threshold nobody knows
+the height of.
+
 `tools/vendor_assets.py` refuses a dirty source tree, so the other order fails by design —
 the manifest records a commit beside a tree digest and a reader may assume the first
 describes the second. A bare run compares what is vendored against the manifest and changes
@@ -550,7 +707,7 @@ nothing.
 ## Tests
 
 ```bash
-python -m pytest -q          # 297 pass, 2 skip: no GPU, no AmberTools, no network, no API key
+python -m pytest -q          # 344 pass, 2 skip: no GPU, no AmberTools, no network, no API key
 python -m ruff check src tests tools
 python tools/verify_assets.py --deep
 ```

@@ -38,18 +38,13 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
+from etalon.authority.grant import SpendAuthorization, authorize
 from etalon.boundary import toolchain as toolchain_module
 from etalon.boundary.infra import Infra, describe
 from etalon.boundary.screen import Screen, ScreenResult
 from etalon.campaign.ledger import Ledger
 from etalon.faults.attribution import Observation
-from etalon.faults.preflight import (
-    blocking,
-    check_population,
-    check_record,
-    unchecked,
-    waived_blocking,
-)
+from etalon.faults.preflight import check_population, check_record, unchecked
 from etalon.judgment.waiver import WaiverSet
 from etalon.learn.admissible import AdmissionReport, Measurement, admissible
 from etalon.learn.calibrate import Decision
@@ -64,8 +59,23 @@ from etalon.learn.calibrate import Decision
 #: could not fill in ``Measurement.cheap_value``, every measurement came back with
 #: ``NO_CHEAP_VALUE``, and the calibration had nothing to calibrate. The screen's numbers
 #: have to be carried across the seam explicitly.
+#: The third argument is the one added after ADR 0006's class of bug was traced past its instance.
+#: ``authority.authorize`` runs the preflight itself and mints a token per surviving row; a stage
+#: receives those tokens and calls ``authority.require`` before it spends. The check is therefore an
+#: argument rather than a recommendation, and the path that builds a system nobody ruled on does not
+#: exist -- it is not guarded, it is unreachable, because the function that spends cannot be called
+#: without the object that checking produces.
+#:
+#: Passing it positionally rather than as a keyword is deliberate: a stage that ignored the tokens
+#: would still typecheck, and nothing can prevent that, but a stage that never received them cannot
+#: pretend it did. That is the difference between a hole and a decision somebody made in the open.
 ExpensiveStage = Callable[
-    [Sequence[dict[str, Any]], Mapping[str, float]], Sequence[Measurement]
+    [
+        Sequence[dict[str, Any]],
+        Mapping[str, float],
+        Mapping[str, "SpendAuthorization"],
+    ],
+    Sequence[Measurement],
 ]
 
 #: Given the admitted measurements, propose a parameter change and score it. Returning
@@ -100,6 +110,10 @@ class RoundOutcome:
     admission: AdmissionReport | None
     change: dict[str, Any]
     decision: Decision | None
+    #: One line per authorised and refused molecule, so a reader of the ledger can see what the
+    #: gate permitted without re-deriving it from the handoff rows -- which, being a
+    #: content digest, is the one thing that cannot be reconstructed later.
+    authorization: dict[str, Any] | None = None
     #: What the acquisition chose to measure next, as the proposal's own record. ``None`` when no
     #: acquirer was supplied, which is different from an acquirer that chose nothing.
     next_batch: dict[str, Any] | None = None
@@ -116,6 +130,7 @@ class RoundOutcome:
             "admission": None if self.admission is None else self.admission.as_dict(),
             "change": dict(self.change),
             "decision": None if self.decision is None else self.decision.as_dict(),
+            "authorization": self.authorization,
             "next_batch": self.next_batch,
             "notes": list(self.notes),
         }
@@ -184,24 +199,33 @@ class Campaign:
         rows = self.screen.handoff(result)
 
         # -- refuse before spending ---------------------------------------
-        refused: list[str] = []
-        allowed: list[dict[str, Any]] = []
-        observations: dict[str, tuple[Observation, ...]] = {}
-        spent_under_waiver: dict[str, list[str]] = {}
-        released = self.waivers.codes()
-        for row in rows:
-            seen = check_record(
+        # The ruling and the permission are now one act. `authorize` runs exactly the check this
+        # block used to run inline and returns a token per surviving row; the expensive stage takes
+        # those tokens and cannot spend without them. Before, this loop computed `allowed` and
+        # handed it over, and any stage that ignored the list -- or any caller who assembled one
+        # itself -- spent unchecked. ADR 0006 is about a guard on a path nobody takes; this is the
+        # same guard moved onto the only path there is.
+        observations: dict[str, tuple[Observation, ...]] = {
+            str(row["parent_id"]): check_record(
                 row, receptor_path=receptor_path, toolchain_active=toolchain_active
             )
-            identifier = str(row["parent_id"])
-            observations[identifier] = seen
-            if blocking(seen, waived=released):
-                refused.append(identifier)
-                continue
-            accepted = [entry.code for entry in waived_blocking(seen, released)]
-            if accepted:
-                spent_under_waiver[identifier] = accepted
-            allowed.append(row)
+            for row in rows
+        }
+        granted = authorize(
+            rows,
+            receptor_path=receptor_path,
+            toolchain_active=toolchain_active,
+            waivers=self.waivers,
+        )
+        refused: list[str] = sorted(granted.refused)
+        allowed: list[dict[str, Any]] = [
+            row for row in rows if str(row.get("parent_id", "")) in granted.grants
+        ]
+        spent_under_waiver: dict[str, list[str]] = {
+            identifier: list(token.proceeded_under_waiver)
+            for identifier, token in granted.grants.items()
+            if token.proceeded_under_waiver
+        }
 
         if expected_ids is not None:
             population = check_population(
@@ -258,7 +282,7 @@ class Campaign:
                 "and the screen learns nothing from them -- which is the honest outcome of "
                 "a round with no docking or affinity tier."
             )
-        measurements = list(measure(allowed, cheap))
+        measurements = list(measure(allowed, cheap, granted.grants))
         # The checks the campaign already performed are attached here, so the
         # admissibility ruling sees them even when the expensive stage did not bother to.
         enriched = [
@@ -279,6 +303,7 @@ class Campaign:
         ]
         report = admissible(enriched, self.waivers)
         notes.extend(report.notes)
+        notes.extend(granted.notes)
 
         # -- decide --------------------------------------------------------
         change: dict[str, Any] = {}
@@ -337,6 +362,7 @@ class Campaign:
             admission=report,
             change=change,
             decision=decision,
+            authorization=granted.as_dict(),
             next_batch=next_batch,
             notes=tuple(notes),
         )

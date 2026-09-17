@@ -382,6 +382,290 @@ def register(mcp: Any) -> None:
         )
 
     @mcp.tool()
+    @tool(Cost.FREE)
+    def etalon_authorize_spend(
+        records_json: str,
+        receptor_path: str = "",
+        toolchain_seeded: bool = False,
+        waived: str = "",
+        lifetime_hours: float = 24.0,
+    ) -> str:
+        """FREE. Rule on handoff records and issue the tokens the expensive stage requires.
+
+        This is etalon_check_handoff with the one thing that check was missing: a result the next
+        step cannot proceed without. ADR 0006 says a guard on the path nobody takes is not a guard,
+        and it was written about one tool. The larger case is this server: seven free tools, one
+        cheap one, one no model may complete, and **nothing that spends** -- so every refusal
+        check_handoff produces is advice offered beside an action it has no relationship with, and
+        the governance rests on you choosing to be governed nine rounds into a campaign.
+
+        A token is minted only for a record that survives the preflight, and it is bound to a
+        SHA-256 of that exact row. ``PrismStage`` and anything else implementing the campaign's
+        expensive-stage protocol call ``authority.require`` before they build, which refuses three
+        ways: no token, an expired or tampered token, and a token whose digest does not match the
+        row in hand. The third is the taxonomy's WRONG_SUBJECT applied to the permission itself --
+        checking one row and building another.
+
+        Prefer this over etalon_check_handoff when anything downstream will actually spend. The
+        older tool still exists because a report is sometimes all that is wanted, and because it
+        says more about *why* a record was refused.
+
+        Args:
+            records_json: A JSON array of ``md_system_input/v1`` rows.
+            receptor_path: Absolute path to the receptor the build will use. Supplying it turns the
+                receptor-identity check from unevaluable into a digest comparison and binds that
+                digest into every token.
+            toolchain_seeded: Whether ETALON's gmx shim will be on the path.
+            waived: JSON array of waivers a person granted, each
+                ``{code, reason, granted_by, expires}``. Not a list of codes.
+            lifetime_hours: How long the tokens are good for. A build starts within minutes of its
+                check in any campaign that is working; a token still valid a week later outlived
+                the state it describes.
+
+        Note:
+            Tokens are signed under a per-process key unless ``ETALON_AUTHORITY_KEY`` is set in the
+            environment, so by default they do not survive a restart of this server. That is
+            deliberate -- a token outliving its preflight describes a state nobody has checked
+            recently -- and re-running this tool costs nothing.
+        """
+
+        from etalon.authority.grant import authorize
+
+        rows = json.loads(records_json)
+        if not isinstance(rows, list):
+            raise ValueError("records_json must be a JSON array of md_system_input/v1 rows")
+        waivers = _waivers(waived)
+        receptor = absolute_path(receptor_path, label="receptor_path") if receptor_path else None
+        granted = authorize(
+            rows,
+            receptor_path=receptor,
+            toolchain_active=toolchain_seeded,
+            waivers=waivers,
+            lifetime_hours=lifetime_hours,
+        )
+        return ok(
+            **granted.as_dict(),
+            waivers_in_force=[waiver.as_dict() for waiver in waivers.active()],
+            waivers_expired=[waiver.as_dict() for waiver in waivers.expired()],
+            next_step=(
+                f"{len(granted.refused)} record(s) were refused and have no token, so the spend on "
+                "them is unreachable rather than discouraged. Read `refused`: a record built from "
+                "a drawing or with no explicit hydrogens is not fixable by a waiver -- fix the "
+                "producer."
+                if granted.refused
+                else "Every record is authorised. Read each token's `unchecked` before treating "
+                "that as clean: a token over an unevaluable check authorises a spend, it does not "
+                "assert the check passed."
+            ),
+        )
+
+    @mcp.tool()
+    @tool(Cost.FREE)
+    def etalon_council_reliability(votes_json: str, truth_json: str, labels: str) -> str:
+        """FREE. Decide whether a panel of advisors is a measuring instrument, before trusting one.
+
+        ``tuning/knob.py`` carries the published precondition for consensus *scoring*: each member
+        good on its own AND the members diverse. Where it held -- kinases -- Top-1% enrichment went
+        from 6.4 to 23.5. Where it did not -- GPCR-Bench -- MM/GBSA-containing combinations
+        improved 32% and 19% of combinations. ``tuning/advise.py`` refuses to recommend that knob
+        until an operator establishes the condition.
+
+        Nothing in that condition is about docking scores. It is the condition under which pooling
+        judgements beats taking one, and it applies to a panel of advisors exactly as it applies to
+        a panel of scoring functions. This tool is that check.
+
+        Three numbers come back. **Youden's J per seat** against your labels -- zero for a seat at
+        chance, and also zero for one that refuses everything or clears everything, which is why it
+        is the statistic here rather than accuracy. **Cohen's kappa per pair.** And **effective
+        votes**, Kish's design effect: how many independent opinions your panel actually carries.
+        Four seats at 1.8 effective votes are paying four times for less than two opinions, and the
+        published measurement that motivates reporting it put nine LLM judges at 2.18 effective
+        votes with the single best judge matching the panel.
+
+        Refused, and then the council may not sit at all: fewer than 10 labelled adjudications, a
+        one-class label set, or any seat whose conservative lower bound on J is at or below zero.
+
+        Args:
+            votes_json: ``{"seat name": ["refuse", "clear", "abstain", ...], ...}``. One list per
+                seat, all the same length, aligned with truth_json.
+            truth_json: ``[true, false, ...]`` -- whether the fault really was present. Include
+                records where it was absent. A set drawn only from bad records cannot tell a
+                skilled seat from one that refuses everything, and this tool refuses such a set.
+            labels: Where the labels came from, in a sentence. Mandatory and free text, for the
+                reason economics/measure.py makes `truth` mandatory: a council measured against one
+                person's opinion has been measured against one person's opinion.
+        """
+
+        from etalon.council.ballot import Vote
+        from etalon.council.reliability import rule
+
+        raw = json.loads(votes_json)
+        if not isinstance(raw, dict) or not raw:
+            raise ValueError(
+                'votes_json must be a JSON object of {"seat name": [votes]}, and carry at least '
+                "one seat."
+            )
+        truth = [bool(value) for value in json.loads(truth_json)]
+        votes = {}
+        for seat, cast in raw.items():
+            try:
+                votes[str(seat)] = [Vote(str(value).strip().lower()) for value in cast]
+            except ValueError as error:
+                raise ValueError(
+                    f"seat {seat!r} cast a vote that is not one of "
+                    f"{[v.value for v in Vote]}: {error}. An abstention is 'abstain' and is a "
+                    "first-class answer, not a missing one."
+                ) from error
+        ruling = rule(votes, truth, labels_described=labels.strip() or "(unstated)")
+        return ok(
+            reliability=ruling.as_dict(),
+            rendered=ruling.render(),
+            next_step=(
+                "This council may not sit. Read `refusals`: a seat at chance is noise admitted to "
+                "a vote, and the published condition is that each member performs well "
+                "individually. Until it qualifies, the checks it would have ruled on stay "
+                "unevaluable -- which is the state you were already in, at no cost."
+                if not ruling.qualified
+                else "This council may sit. Collect its votes, then pass them to "
+                "etalon_council_adjudicate, which applies the one rule that must not drift: a "
+                "council may move a check from unevaluable to fired and may never move one to "
+                "cleared."
+            ),
+        )
+
+    @mcp.tool()
+    @tool(Cost.FREE)
+    def etalon_council_adjudicate(
+        code: str,
+        ballots_json: str,
+        reliability_qualified: bool = False,
+        parent_id: str = "",
+    ) -> str:
+        """FREE. Aggregate a council's votes under the one rule that must not drift.
+
+        You collect the votes -- you have model access and this server does not need it -- and this
+        applies the aggregation. The factoring is deliberate: the transport is your business, and
+        the **bound on what agreement is allowed to do** is the part that has to be identical
+        everywhere, so it lives in one function with one test suite.
+
+        The bound, which is ``learn/admissible.py``'s asymmetry applied to advisors: withholding a
+        good measurement costs one molecule's information, admitting a bad one costs a shift in the
+        policy applied to all of them. So a council may move a check from **unevaluable to fired**
+        and may **never** move one to cleared. Seats agreeing they see no problem returns
+        `cleared_but_still_unchecked`, and ``unchecked()`` still reports the cause -- because an
+        advisor saying "this looks fine" is not the check having run, and the one thing that must
+        not happen is a campaign buying a clean record from a model.
+
+        That bound is what makes the layer safe. The worst a wrong council does is refuse molecules
+        that were fine, which costs compute and shows up in the admission rate. It cannot
+        manufacture a clean result.
+
+        A **split** is the product, not a failure. It has found the record a person should read and
+        spent no GPU time doing it -- ``learn/acquire.py``'s argument with operator attention in
+        place of compute. A split is not encoded as a refusal, because "a person must look" and
+        "the molecule is bad" are different claims and merging them spends the operator's authority
+        on the council's behalf.
+
+        Args:
+            code: The fault code being adjudicated. Must be in the taxonomy.
+            ballots_json: ``[{"seat": ..., "vote": "refuse|clear|abstain", "reason": ...}, ...]``.
+            reliability_qualified: Whether etalon_council_reliability qualified this council. When
+                false, nothing is aggregated and the check stays as unevaluable as it was.
+            parent_id: The molecule, for the record.
+        """
+
+        from etalon.council.ballot import Ballot, Finding, Outcome, Vote
+        from etalon.council.convene import as_observations, report
+        from etalon.faults.taxonomy import BY_CODE
+
+        if code not in BY_CODE:
+            raise KeyError(
+                f"{code} is not in the fault taxonomy, so a council ruling on it would produce a "
+                f"verdict no other layer of ETALON can read back. The codes are {sorted(BY_CODE)}."
+            )
+        entries = json.loads(ballots_json)
+        if not isinstance(entries, list) or len(entries) < 2:
+            raise ValueError(
+                "ballots_json must be a JSON array of at least two ballots. A single adjudicator "
+                "is an advisor, and reporting one as a council would put a quorum's weight behind "
+                "one opinion."
+            )
+        ballots = tuple(
+            Ballot(
+                seat=str(entry["seat"]),
+                code=code,
+                vote=Vote(str(entry["vote"]).strip().lower()),
+                reason=str(entry.get("reason", ""))[:400],
+            )
+            for entry in entries
+        )
+        if len({ballot.seat for ballot in ballots}) != len(ballots):
+            raise ValueError(
+                "two ballots carry the same seat name. Votes are keyed by it, so this would record "
+                "two independent seats as one seat voting twice."
+            )
+
+        refusing = [b for b in ballots if b.vote is Vote.REFUSE]
+        clearing = [b for b in ballots if b.vote is Vote.CLEAR]
+        if not reliability_qualified:
+            outcome, note = Outcome.COUNCIL_NOT_QUALIFIED, (
+                "The council has not been shown to be an instrument, so its votes are not "
+                "aggregated. Measure it with etalon_council_reliability first. The check stays "
+                "exactly as unevaluable as it was, which is the state the campaign was already in."
+            )
+        elif refusing and clearing:
+            outcome, note = Outcome.SPLIT, (
+                f"{len(refusing)} refuse and {len(clearing)} clear. Routed to a person: a quorum "
+                "that outvotes a dissent records one number where there were two readings."
+            )
+        elif refusing:
+            outcome, note = Outcome.REFUSED, (
+                f"{len(refusing)} refuse and none clears. The check moves from unevaluable to "
+                "fired, which is the only direction a council may move one."
+            )
+        elif clearing:
+            outcome, note = Outcome.CLEARED_BUT_STILL_UNCHECKED, (
+                "No seat refuses, and the check stays unevaluable. Nothing was cleared."
+            )
+        else:
+            outcome, note = Outcome.UNDECIDED, (
+                "Every seat abstained. That is a fact about the record rather than about the "
+                "council, and it is the correct answer often enough that a council which never "
+                "returns it should be suspected of answering an easier question."
+            )
+
+        finding = Finding(
+            code=code,
+            parent_id=parent_id or "(unnamed)",
+            outcome=outcome,
+            ballots=ballots,
+            note=note,
+            qualification={"qualified": bool(reliability_qualified)},
+        )
+        observation = as_observations([finding])[0]
+        return ok(
+            finding=finding.as_dict(),
+            observation={
+                "code": observation.code,
+                "fired": observation.fired,
+                "evaluable": observation.evaluable,
+                "detail": observation.detail,
+            },
+            authority=report([finding], ())["authority"],
+            next_step=(
+                "A person must rule on this before the molecule is spent on. Show them the "
+                "`dissent` ballots first -- the minority's sentence is the thing worth reading, "
+                "and a three-to-one count does not carry it."
+                if outcome is Outcome.SPLIT
+                else "This cause now blocks. Pass the observation to etalon_rule_admissible along "
+                "with the deterministic ones."
+                if outcome is Outcome.REFUSED
+                else "Nothing changed, and nothing was spent finding that out. The cause is still "
+                "reported by could_not_be_checked, which is the honest state."
+            ),
+        )
+
+    @mcp.tool()
     @tool(Cost.NEVER)
     def etalon_recommend_waiver(code: str, reason: str, expires: str, recommended_by: str) -> str:
         """NEVER COMPLETED BY A MODEL. Record a waiver recommendation for a person to grant.

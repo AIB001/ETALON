@@ -35,9 +35,11 @@ the name back in their result so the operator can see whose it is.
 | screen | MolCascade `screen` | 3e-7 to 6e-3 | liabilities, properties, docking |
 | hand off | MolCascade handoff tier | ~0 | what a force field would receive |
 | **refuse** | `etalon_check_handoff` | **0** | would the number be about this molecule |
+| **authorise** | `etalon_authorize_spend` | **0** | and may it therefore be built |
 | build + equilibrate | PRISM `build_system` + driver | ~24 | does the pose hold |
 | **judge** | `etalon_check_stability` | **0** | what 1000 ns established |
 | end-point ΔG | PRISM MM-PBSA, ×5 replicas | **10** | ranking |
+| **adjudicate** | `etalon_council_adjudicate` | **0** | what the unevaluable checks came to |
 | **admit** | `etalon_rule_admissible` | **0** | may this teach the screen |
 | relative ΔΔG | PRISM FEP per edge | ~12 | local optimisation |
 | **design first** | `etalon_design_fep_network` | **~0** | can these even be related |
@@ -175,6 +177,35 @@ such input produced a topology with no hydrogens at all.
 - `qualifies_the_claim_only` → spend, and do not claim reproducibility. Without the seed shim, ion
   placement draws from the clock.
 
+## Step 5b — authorise, which is the same ruling with a result the next step needs
+
+```
+etalon_authorize_spend  records_json=...  receptor_path=...  toolchain_seeded=true
+```
+
+Free, and prefer it over `etalon_check_handoff` whenever anything downstream will actually spend.
+
+The difference is not the check — it is the same preflight — it is that this one returns a **token
+per surviving record**, and `PrismStage` and every other expensive stage call `authority.require`
+before they build. A record that blocks gets no token, so the spend on it is *unreachable* rather
+than discouraged.
+
+This exists because of an honest reading of what the rest of this document could not do. Nothing
+here spends. You read a refusal from a free tool and then call PRISM's own server to build, because
+that is where building lives, and nothing connected the two — so every refusal was advice offered
+beside an action it had no relationship with, and the governance rested on you choosing to be
+governed in round nine of a campaign whose workflow you read in round one. ADR 0006 named that class
+of bug. This closes it.
+
+Three refusals, and they are different mistakes with different fixes: no token (the check refused
+the record, or was never run on it), an expired or tampered token (it outlived the preflight it came
+from — re-run this, it costs nothing), and a token minted for a **different version of the record**
+(something edited the row between the ruling and the build, so what was checked is not what would be
+built). The last is the taxonomy's `WRONG_SUBJECT` applied to the permission itself.
+
+Read each token's `unchecked` before treating an authorisation as clean. A token over an unevaluable
+check authorises a spend; it does not assert the check passed.
+
 ## Step 6 — build and equilibrate, then judge the trajectory by three questions
 
 Build with PRISM's canonical defaults and **do not override box, salt or temperature** — those belong
@@ -215,6 +246,56 @@ Also prefer **MM-GBSA over MM-PBSA when the task is ranking.** MM-GBSA predicts 
 and ranks better, and ranking is what a funnel does. Over 8 ns it reaches Spearman 0.767, which is
 0.087 below FEP on the same comparison — about the same size as what a 231-molecule panel can resolve
 at all.
+
+## Step 7b — the checks nothing could evaluate, if you have a council
+
+`could_not_be_checked` is not clean, and until now there was nothing to do about it. A council of
+advisors can rule on those — under one condition and one bound, and both matter more than the
+mechanism.
+
+**The condition.** Measure the council before you use it.
+
+```
+etalon_council_reliability  votes_json=...  truth_json=...  labels="where these came from"
+```
+
+`tuning/knob.py` carries the published precondition for consensus scoring: each member good on its
+own AND the members diverse. Kinases, where it held: Top-1% enrichment 6.4 → 23.5. GPCR-Bench, where
+it did not: 32% and 19% of combinations improved. Nothing in that condition is about docking — it is
+the condition under which pooling judgements beats taking one, and it applies to advisors exactly as
+it applies to scoring functions. Every published multi-agent drug-discovery system surveyed for ADR
+0007 adds agents without measuring it. The general literature reports a mean effect of **−3.5%** for
+multi-agent against single-agent across 260 configurations.
+
+Read **effective votes** first. Measured here on two seats given deliberately disjoint evidence:
+**1.39 of a nominal 2**. Giving advisors different slices of a record does not make them independent
+— it helps, partially, and the number is the only place that shows. Nine LLM judges have been
+measured at 2.18 effective votes.
+
+A seat whose Youden's J is at or below zero disqualifies the whole council, and J is zero for a seat
+at chance, one that refuses everything, and one that clears everything. Also read the per-class
+abstentions: a seat can score J = 1.000 having declined most of the class that matters, which is
+exactly what happened the first time this was measured.
+
+**The bound.**
+
+```
+etalon_council_adjudicate  code=...  ballots_json=...  reliability_qualified=true
+```
+
+A council may move a check from **unevaluable to fired**, and may **never** move one to cleared.
+Seats agreeing they see no problem returns `cleared_but_still_unchecked`, and `could_not_be_checked`
+still reports the cause. An advisor saying "this looks fine" is not the check having run, and a
+campaign must never buy a clean record from a model — including from you.
+
+That bound is what makes the layer safe: the worst a wrong council does is refuse molecules that
+were fine, which costs compute and shows in the admission rate. It cannot manufacture a clean result.
+
+**A split is the product, not a failure.** It has found the record a person should read and spent no
+GPU time doing it. Show them the `dissent` ballots first — the minority's sentence is the thing worth
+reading, and a three-to-one count does not carry it. Do not resolve a split yourself by weighing the
+arguments; that is the supervisor pattern ADR 0007 rejects, and it replaces a measured quantity with
+your opinion.
 
 ## Step 8 — decide what may teach the screen
 
@@ -313,6 +394,8 @@ Quote these when you explain a refusal. Without them the refusals look like fuss
 | pairs in a diverse top-16 that are not alchemical edges | **110 of 120** |
 | engineer-hours equal to a GPU-year, via rescoring ✻✻ | **8** |
 | docking's rank correlation on this project's own panel, against the 0.35 the catalogue ships | **0.108**, interval includes zero |
+| effective independent votes from two advisors given disjoint evidence | **1.39** of 2 |
+| published mean effect of multi-agent against single-agent, 260 configurations | **-3.5%** |
 
 ✻ Measured in the vendored PRISM, not by ETALON — `asset/prism/prism/generation/handoff.py` at the
 pinned commit. It is the one number in this table with no `findings/` entry, for that reason.
@@ -331,6 +414,10 @@ estimates and not measurements. Say so when you quote it.
    refusal; that is the one failure mode this whole system is built to prevent.
 
 ## What ETALON does not do
+
+It does not make the campaign autonomous. A council adds refusals and splits, and a split is a stop;
+its contribution is to find the records a person should spend attention on, which is a smaller claim
+than the field's and the one the measurements support.
 
 It does not make the campaign autonomous. Two decisions stop and wait for a person, and your job on
 those is to draft rather than to settle. A campaign with you attached runs further between human

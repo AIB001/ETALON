@@ -67,8 +67,36 @@ class PrismStage:
         self,
         rows: Sequence[Mapping[str, Any]],
         cheap: Mapping[str, float] | None = None,
+        grants: Mapping[str, Any] | None = None,
     ) -> list[Measurement]:
+        """Simulate each row, after checking that each row may be simulated.
+
+        ``grants`` comes from :func:`etalon.authority.authorize`, which runs the preflight and
+        issues nothing for a record that blocks. It is required, and ``None`` raises rather than
+        defaulting to permission: a gate whose default is "allowed" protects whoever remembers it,
+        which is the population that did not need it.
+
+        The check is per row and happens before anything is written, because the failure it catches
+        is a row edited between the ruling and the build -- the same thing
+        :func:`materialize_ligands` catches one layer down when a written file disagrees with the
+        record it came from, and for the same reason.
+        """
+
+        from etalon.authority.grant import NotAuthorized, require
+
         cheap = cheap or {}
+        if grants is None:
+            raise NotAuthorized(
+                "PrismStage was called with no spend authorizations. Build them with "
+                "etalon.authority.authorize(rows, receptor_path=..., waivers=...), which runs the "
+                "preflight and mints a token only for records that survive it, then pass the "
+                "result. Campaign.round does this for you. There is deliberately no default: a "
+                "stage that spent when nobody said it could would be ADR 0006's bug with a "
+                "different name."
+            )
+        for row in rows:
+            require(row, grants)
+
         ligand_dir = self.simulate.workspace / "ligands"
         written = materialize_ligands(rows, ligand_dir)
 

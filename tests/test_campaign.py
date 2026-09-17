@@ -516,7 +516,7 @@ def test_a_round_refuses_before_spending_and_records_what_it_refused(tmp_path: P
 
     handed_to_the_expensive_stage: list[str] = []
 
-    def measure(allowed, cheap):
+    def measure(allowed, cheap, grants):
         handed_to_the_expensive_stage.extend(str(row["parent_id"]) for row in allowed)
         return [
             Measurement(
@@ -555,7 +555,7 @@ def test_a_round_without_a_comparator_measures_and_learns_nothing(tmp_path: Path
         "r1",
         "cascade.yaml",
         "library.csv",
-        measure=lambda allowed, cheap: [
+        measure=lambda allowed, cheap, grants: [
             Measurement(parent_id="p:good", cheap_value=None, expensive_value=-31.2)
         ],
     )
@@ -587,7 +587,7 @@ def test_a_proposal_the_panel_cannot_resolve_is_recorded_and_not_applied(tmp_pat
         "r1",
         "cascade.yaml",
         "library.csv",
-        measure=lambda allowed, cheap: [
+        measure=lambda allowed, cheap, grants: [
             Measurement(parent_id="p:good", cheap_value=-8.4, expensive_value=-31.2)
         ],
         propose=lambda teach: ({"exhaustiveness": 32}, within_noise),
@@ -634,7 +634,7 @@ def test_the_acquisition_hook_carries_the_one_act_an_advisor_may_settle(tmp_path
         "r1",
         "cascade.yaml",
         "library.csv",
-        measure=lambda allowed, cheap: [
+        measure=lambda allowed, cheap, grants: [
             Measurement(parent_id="p:good", cheap_value=-8.4, expensive_value=-31.2)
         ],
         acquire=acquire,
@@ -681,3 +681,83 @@ def test_an_act_that_needs_a_person_cannot_reach_the_loop(tmp_path: Path) -> Non
 
     # And an empty candidate set is a round with no next batch rather than an error.
     assert acquirer({}) is None
+
+
+# --------------------------------------------------------------------------------------
+# The gate is an argument now, not a recommendation. ADR 0006 said a guard on the path
+# nobody takes is not a guard; these hold the path open.
+# --------------------------------------------------------------------------------------
+
+
+def test_the_round_hands_the_expensive_stage_a_token_per_surviving_molecule(
+    tmp_path: Path,
+) -> None:
+    seen: dict[str, object] = {}
+
+    def measure(allowed, cheap, grants):
+        seen["grants"] = dict(grants)
+        return []
+
+    rows = [
+        _handoff_row("clean-1", "CCO", clean=True),
+        _handoff_row("clean-2", "CCC", clean=True),
+        _handoff_row("drawing", "CCN", clean=False),
+    ]
+    campaign = _campaign(tmp_path, _FakeScreen(rows, {"clean-1": -8.1, "clean-2": -7.4}))
+    outcome = campaign.round("r1", "cascade.yaml", "library.csv", measure=measure)
+
+    granted = seen["grants"]
+    # The molecule built from a drawing never reaches the stage, and it does not reach it as an
+    # empty entry either -- there is simply no token, so require() has nothing to hand back.
+    assert set(granted) == {"clean-1", "clean-2"}
+    assert "drawing" in outcome.refused_before_spending
+    for identifier, token in granted.items():
+        assert token.parent_id == identifier
+        assert token.valid()
+
+
+def test_a_stage_called_without_tokens_refuses_rather_than_defaulting_to_permission() -> None:
+    from etalon.authority.grant import NotAuthorized
+    from etalon.campaign.expensive import PrismStage
+
+    stage = PrismStage.__new__(PrismStage)
+    with pytest.raises(NotAuthorized) as refused:
+        stage([{"parent_id": "M1"}], {}, None)
+    assert "no spend authorizations" in str(refused.value)
+
+
+def test_a_token_does_not_carry_to_a_row_that_was_edited_after_the_ruling() -> None:
+    from etalon.authority import NotAuthorized, authorize, require
+
+    row = {
+        "parent_id": "M1",
+        "coordinate_origin": "DOCKED_POSE",
+        "hydrogens": "EXPLICIT_ALL",
+        "formal_charge": 0,
+        "stereochemistry": "FROM_INPUT",
+        "protonation": "ASSIGNED_AT_PH",
+        "status": "OK",
+        "molblock": "x",
+    }
+    granted = authorize([row])
+    assert require(row, granted.grants).parent_id == "M1"
+
+    # Same molecule, same id, one field different. This is the taxonomy's WRONG_SUBJECT
+    # applied to the authorization: what was ruled on is not what would be built.
+    with pytest.raises(NotAuthorized) as refused:
+        require({**row, "formal_charge": 1}, granted.grants)
+    assert "different version of this record" in str(refused.value)
+
+
+def test_the_round_records_what_the_gate_permitted(tmp_path: Path) -> None:
+    rows = [_handoff_row("clean-1", "CCO", clean=True), _handoff_row("drawing", "CCN", clean=False)]
+    campaign = _campaign(tmp_path, _FakeScreen(rows, {"clean-1": -8.1}))
+    outcome = campaign.round(
+        "r1", "cascade.yaml", "library.csv", measure=lambda a, c, g: []
+    )
+    recorded = outcome.as_dict()["authorization"]
+    # The digest is the part that cannot be reconstructed from the ledger later, which is why
+    # the token rather than a count goes in the record.
+    assert recorded["refused_count"] == len(outcome.refused_before_spending)
+    for token in recorded["authorized"].values():
+        assert len(token["record_sha256"]) == 64
