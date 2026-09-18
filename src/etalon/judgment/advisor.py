@@ -32,6 +32,7 @@ import json
 import re
 import shutil
 import subprocess
+import time
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -47,6 +48,10 @@ _FENCE = re.compile(r"```(?:json)?\s*(.*?)```", re.DOTALL)
 
 class AdvisorError(RuntimeError):
     """Raised when an advisor could not be reached, or answered something else."""
+
+    def __init__(self, message: str, *, retryable: bool = False) -> None:
+        super().__init__(message)
+        self.retryable = retryable
 
 
 class Transport(Protocol):
@@ -146,9 +151,18 @@ def _parse(text: str, required: Sequence[str]) -> dict[str, Any]:
         start, end = candidate.find("{"), candidate.rfind("}")
         if start >= 0 and end > start:
             candidate = candidate[start : end + 1]
+    def unique_object(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
+        result: dict[str, Any] = {}
+        for key, value in pairs:
+            if key in result:
+                raise ValueError(f"duplicate JSON key: {key}")
+            result[key] = value
+        return result
+
     try:
-        parsed = json.loads(candidate)
-    except json.JSONDecodeError as error:
+        parsed = json.loads(candidate, object_pairs_hook=unique_object)
+        json.dumps(parsed, allow_nan=False)  # Reject NaN/Infinity, including exponent overflow.
+    except ValueError as error:
         raise AdvisorError(
             f"the answer is not the object the question asked for ({error}). Refused rather "
             "than searched for a number: reaching into a malformed answer for the part that "
@@ -163,6 +177,8 @@ def _parse(text: str, required: Sequence[str]) -> dict[str, Any]:
             f"the answer is missing {missing}, so it does not answer the question that was "
             f"asked. It carries {sorted(parsed)}."
         )
+    if "reason" in parsed and not isinstance(parsed["reason"], str):
+        raise AdvisorError("reason must be a string; it is not coerced into an explanation")
     return parsed
 
 
@@ -177,6 +193,10 @@ class Advisory:
     #: record, because a question that took three attempts is a different kind of evidence
     #: from one that took one.
     attempts: int = 2
+
+    def __post_init__(self) -> None:
+        if type(self.attempts) is not int or not 1 <= self.attempts <= 5:
+            raise ValueError("advisor attempts must be an integer between 1 and 5")
 
     def ask(
         self,
@@ -201,13 +221,21 @@ class Advisory:
         )
         problems: list[str] = []
         for attempt in range(1, self.attempts + 1):
-            raw = self.transport.ask(prompt)
+            try:
+                raw = self.transport.ask(prompt)
+            except AdvisorError as error:
+                if not error.retryable:
+                    raise
+                problems.append(f"attempt {attempt}: {error}")
+                if attempt < self.attempts:
+                    time.sleep(min(2 ** (attempt - 1), 8))
+                continue
             try:
                 parsed = _parse(raw, required)
             except AdvisorError as error:
                 problems.append(f"attempt {attempt}: {error}")
                 continue
-            rationale = str(parsed.pop("reason", "")).strip()
+            rationale = parsed.pop("reason", "").strip()
             return Proposal(
                 act=act,
                 advisor=Advisor(

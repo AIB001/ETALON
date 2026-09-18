@@ -42,9 +42,11 @@ and separating them is deliberate: a model that could score itself would be aske
 
 from __future__ import annotations
 
+import json
 import math
 from collections.abc import Sequence
 from dataclasses import dataclass, field
+from numbers import Real
 from typing import Any
 
 #: RDKit descriptors, named rather than taken wholesale. The full list is ~210 columns and at
@@ -71,8 +73,9 @@ MORGAN_BITS = 1024
 def pic50(nanomolar: float) -> float:
     """Convert a nanomolar affinity to pIC50, which is the scale free energy is linear in."""
 
-    if not nanomolar > 0:
-        raise ValueError(f"an affinity must be positive; got {nanomolar}")
+    if (isinstance(nanomolar, bool) or not isinstance(nanomolar, Real)
+            or not math.isfinite(nanomolar) or nanomolar <= 0):
+        raise ValueError(f"an affinity must be positive and finite; got {nanomolar}")
     return 9.0 - math.log10(nanomolar)
 
 
@@ -92,6 +95,10 @@ class Features:
     #: turns "this could not be featurised" into a confident number. Dropping instead leaves
     #: the molecule without evidence, which every threshold gate already refuses.
     unparsed: tuple[int, ...] = ()
+    #: Canonical MolCascade RepresentationSpec that actually produced this matrix.
+    #: None means unknown, not the default representation. Old/manual matrices may still
+    #: be fitted locally but cannot be certified as a deployable MolCascade bundle.
+    representation_json: str | None = None
 
     def __len__(self) -> int:
         return int(self.matrix.shape[0])
@@ -142,10 +149,9 @@ def representation() -> Any:
 def featurize(smiles: Sequence[str], spec: Any = None) -> Features:
     """Build the feature matrix with MolCascade's featuriser.
 
-    A molecule RDKit cannot parse keeps a row of zeros and its index is recorded in
-    :attr:`Features.unparsed`, rather than being dropped: a caller that asked for 231
-    predictions and received 229 has to be told which two are missing, and a silently shorter
-    matrix pairs every later molecule with the wrong target.
+    Molecules RDKit cannot parse are dropped and their input indices are recorded in
+    :attr:`Features.unparsed`. Always align identifiers and labels with ``Features.align``;
+    a silently shorter matrix would pair every later molecule with the wrong target.
     """
 
     import numpy as np
@@ -155,7 +161,9 @@ def featurize(smiles: Sequence[str], spec: Any = None) -> Features:
     matrix, failed = Featurizer(chosen).transform(list(smiles), dtype="float64")
     names = tuple(f"f{index:05d}" for index in range(chosen.width))
     return Features(
-        matrix=np.asarray(matrix, dtype=float), names=names, unparsed=tuple(failed)
+        matrix=np.asarray(matrix, dtype=float), names=names, unparsed=tuple(failed),
+        representation_json=json.dumps(chosen.model_dump(mode="json"), sort_keys=True,
+                                       separators=(",", ":"), allow_nan=False),
     )
 
 
@@ -177,6 +185,7 @@ class Surrogate:
     #: Set by :meth:`fit`.
     model: Any = field(default=None, repr=False)
     names: tuple[str, ...] = ()
+    representation_json: str | None = None
 
     def fit(self, features: Features, target: Sequence[float]) -> Surrogate:
         from sklearn.ensemble import RandomForestRegressor
@@ -193,6 +202,7 @@ class Surrogate:
             n_jobs=-1,
         ).fit(features.matrix, list(target))
         self.names = features.names
+        self.representation_json = features.representation_json
         return self
 
     def predict(self, features: Features) -> tuple[Any, Any]:
@@ -213,6 +223,8 @@ class Surrogate:
                 "rather than reordered: a model applied to permuted columns predicts "
                 "confidently and wrongly, and nothing about the output looks unusual."
             )
+        if features.representation_json != self.representation_json:
+            raise ValueError("the feature representation differs from the one used for training")
         per_tree = np.stack(
             [tree.predict(features.matrix) for tree in self.model.estimators_], axis=0
         )

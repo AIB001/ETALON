@@ -2,6 +2,91 @@
 
 A CADD campaign agent that knows how much to trust its own numbers.
 
+The [2026-09-18 review](docs/review-2026-09-18.md) evaluates the architecture,
+real execution coverage, LLM compatibility, active learning and related agent systems.
+The [runtime guide](docs/runtime-guide.md) covers the new `doctor` command, persistent
+background screening (`screen plan / submit / status`), and interchangeable OpenAI,
+Anthropic and DeepSeek HTTP advisors. Screening jobs survive client disconnects and
+duplicate submissions retain one job. They do not share the active campaign budget or
+automatically launch downstream affinity calculations. See the
+[validation record](docs/validation-2026-09-18.md) for what was actually exercised.
+
+## Executable active learning and composable cascades
+
+The current implementation adds a persistent **select → reserve → execute → admit → retrain**
+controller in `etalon.active`. MolCascade is a component library, **not a mandatory sequence of
+default screening tiers**: use an individual component, author a new cascade, or compile a flat
+pipeline. Register redesigned protocols under new endpoint ids while retaining historical labels
+and a fixed scientific objective.
+
+Start with the [implementation and research guide](docs/active-learning.md), the
+[prior-art and innovation assessment](docs/research-innovation-2026-09-17.md), the
+[initial validation record](docs/validation-2026-09-17.md), the
+[decision-controller validation](docs/validation-decision-2026-09-17.md), and the runnable
+[real-component example](examples/component_learning.py). The guide separates verified engineering
+behavior from unproven scientific efficacy, and documents crash recovery, budgets and limitations.
+The next stage adds [bounded protocol evolution](docs/protocol-learning.md): persist an exact edit
+space, propose a variant, compile its contracts, authorize a capped trial, then explicitly promote
+or retire it against predeclared operational criteria. Recipes and evidence graphs survive restart;
+retirement stops new queries without deleting acquired labels. See the
+[protocol validation record](docs/validation-protocol-2026-09-17.md).
+The [learned protocol-search baseline](docs/protocol-search.md) now ranks preauthorized edit
+combinations from frozen, fixed-panel feedback. It includes shared-linear, random and fixed
+selection, explicit missing-readout penalties, durable decisions and a separate synthetic ablation.
+It does not autonomously authorize or promote protocols, nor establish CADD efficacy.
+An opt-in [economic stopping policy](docs/protocol-stopping.md) compares the expected improvement
+of a complete audit with an explicitly authorized score/cost exchange rate. It preserves legacy
+searches, never truncates an ongoing panel, and includes a separate stopping/no-stopping ablation.
+Use a dedicated virtual environment for the optional dependencies below. Run these commands from
+the complete checkout root and retain `asset/MANIFEST.json` and both vendored trees. Live MolCascade /
+PRISM workflows currently rely on this checkout plus editable installation: the ordinary wheel
+packages `src/etalon`, not the asset trees, and is not a standalone live-infrastructure deployment.
+
+The current [architecture map](docs/architecture-current.md) distinguishes the inner molecule–endpoint
+loop, bounded protocol-search loop, and explicit human control boundaries. The
+[90-minute integrity review](docs/review-2026-09-17.md) records the latest fixes, regression results,
+compatibility changes and remaining limitations; engineering tests are not CADD efficacy evidence.
+The [next experimental plan](docs/experiment-plan-2026-09-17.md) separates testable claims about
+protocol learning, evidence admission and budget protection; it is a proposed design, not a completed study.
+
+```bash
+pip install -e '.[active]'                # numeric controller and offline oracle replay
+python -m etalon active demo --workspace runs/demo --rounds 5
+python -m etalon active plan --database runs/demo/campaign.sqlite
+python -m etalon active benchmark --workspace runs/benchmark --output runs/benchmark/report.json
+python -m etalon active demo --workspace runs/decision --policy decision_aware --rounds 100
+python -m etalon active recommend --database runs/decision/campaign.sqlite
+python -m etalon active decision-benchmark --workspace runs/decision-ablation \
+  --output runs/decision-ablation/report.json
+
+pip install -e '.[cascade]'               # actual CPU MolCascade components and molecular features
+python examples/component_learning.py --workspace runs/components
+python -m etalon active components        # criteria AND individual plugin contracts
+python examples/protocol_learning.py --workspace runs/protocols --output runs/protocols/report.json
+python -m etalon active protocols --database runs/protocols/campaign.sqlite  # read-only
+python examples/protocol_search.py --workspace runs/protocol-search --output runs/protocol-search/report.json
+python -m etalon active searches --database runs/protocol-search/campaign.sqlite  # read-only
+python -m etalon active protocol-benchmark --output runs/protocol-benchmark/report.json
+python examples/protocol_search.py --workspace runs/protocol-stopping --policy audit_ei \
+  --opportunity-cost 0.025 --campaign-rounds 2 --output runs/protocol-stopping/report.json
+python -m etalon active protocol-stopping-benchmark --output runs/protocol-stopping-benchmark/report.json
+
+pip install -e '.[cascade,bundles,dev]'   # optional RF → ONNX → real MolCascade CPU prediction + pytest
+python -m pytest -q tests/test_bundle_roundtrip.py
+```
+
+The bundled benchmark is synthetic. It does **not** establish improved binding affinity, superiority
+over published agents, or a new active-learning algorithm. The quality-weighted heuristic does not
+consistently beat simpler baselines in the initial smoke runs. Live PRISM workflows still need
+explicit protocols, completed affinity readouts and independent-replica execution; they are not
+silently replaced by replay or by equilibration results.
+
+The opt-in `decision_aware` policy adds global decision-value acquisition, molecule-conditioned
+admission estimates, bounded protocol scouting and an objective-confirmation quote reserve.
+It reports unrestricted predictions separately from attainable and evidence-backed recommendations.
+`mf_kg` is an established-method baseline, not a claimed invention. These policies use one real
+observation per round; the new ablation harness matches this feedback frequency across all groups.
+
 In metrology an *etalon* is the primary standard every other instrument is calibrated
 against. In optics a Fabry–Pérot etalon extracts information from the interference between
 two beams — that is, from their disagreement. Both meanings are the point.
@@ -60,7 +145,7 @@ src/etalon/
     infra.py        which MolCascade, which PRISM — refuses a shadowed import
     toolchain.py    a gmx shim that seeds the one command PRISM calls unseeded
     screen.py       MolCascade: plan → run → read back verified
-    simulate.py     PRISM: build → drive → judge by products, not exit codes
+    simulate.py     PRISM: build → drive → verify products and controlled process completion
   faults/       would a number from this be about the molecule it is filed under?
     taxonomy.py     15 causes, each with a magnitude band and a consequence
     preflight.py    10 of them, from one handoff row, before a GPU-second
@@ -71,7 +156,7 @@ src/etalon/
     calibrate.py    AUC with its standard error, and a refusal below it
   learn/        ... and what it predicts, and where to spend next
     surrogate.py    a forest over MolCascade's own feature blocks, on pIC50
-    conformal.py    calibrated intervals; coverage reported marginally AND per series
+    conformal.py    cross-conformal intervals; calibration-residual diagnostics, not test coverage
     acquire.py      the next batch, with an explicit share spent on the unfamiliar
     bundle.py       ship the model through MolCascade's prediction.custom_model slot
   judgment/     who may decide what
@@ -103,6 +188,26 @@ src/etalon/
     propose.py      acquisition, and scoring an edit against the panel
     pipeline.py     the whole campaign, rendered before anything is spent
     ledger.py       append-only; a rewind abandons without deleting
+    design.py       compose individual components or arbitrary tiers; no fixed default funnel
+  active/       the persistent feedback controller
+    schema.py       molecule states, observable/protocol identities, costs and observations
+    store.py        SQLite journal, reservations, actual costs and explicit crash recovery
+    model.py        paired multi-endpoint GP; updates from admitted observations each round
+    policy.py       molecule × endpoint × replicate selection, cost and reliability ablation
+    knowledge.py    exact finite-pool, single-observation Gaussian knowledge gradient
+    decision.py     evidence-attainable decisions, bounded scouting and confirmation-budget guard
+    reliability.py  molecule-conditioned admission estimates, separate from hard QC
+    recommendation.py  separate predictions, attainable decisions and acquired objective evidence
+    runner.py       the batch that is selected is the batch actually executed
+    cascade.py      real single-component/custom-cascade executor with versioned protocols
+    graph.py        compile-only evidence DAG and exact input-bound execution-plan checks
+    mutations.py    finite, reviewed edits; no implicit resource or authority expansion
+    protocols.py    persistent proposals, capped trials and explicit promotion/retirement
+    proposer.py     frozen audit panels, bounded variant selection and durable feedback
+    protocol_score.py  leave-one-out panel response and shared linear protocol ranker
+    protocol_benchmark.py  sealed synthetic search tables and equal-budget policy ablations
+    replay.py       sealed offline oracle and reproducible synthetic fixtures
+    benchmark.py    equal-budget baselines; no hidden-label access from the policy
 ```
 
 ## Driving it from a language model
@@ -111,13 +216,14 @@ src/etalon/
 python -m etalon.mcp            # MCP server over stdio
 ```
 
-Twelve tools, and **each declares what it spends in its own description** so the classification is
+Nineteen tools, and **each declares what it spends in its own description** so the classification is
 visible before a model chooses rather than after:
 
 | cost | tools |
 |---|---|
-| **free** | `plan_campaign` `tune_screen` `stages` `infrastructure` `check_handoff` `check_stability` `rule_admissible` `authorize_spend` `council_reliability` `council_adjudicate` |
-| **cheap** | `design_fep_network` |
+| **free** | `plan_campaign` `tune_screen` `stages` `infrastructure` `check_handoff` `check_stability` `rule_admissible` `authorize_spend` `council_reliability` `council_adjudicate` `active_status` `screen_status` |
+| **cheap** | `design_fep_network` `active_plan` `active_replay` `doctor` `screen_plan` |
+| **spends** | `screen_submit` (plan-bound bulk execution; cost not metered or reserved in the active journal) |
 | **never by a model** | `recommend_waiver` |
 
 A campaign has 750,000 actions, so the governance cannot be per-action confirmation the way a
@@ -138,9 +244,11 @@ measurements and the ADRs, because a refusal quoted without its measurement look
 
 ## The language model inside the campaign
 
-Claude reaches ETALON through the `claude` CLI already on the operator's machine — no API key,
-so a campaign with an advisor attached needs no new secret, and a secret that does not exist
-cannot reach a ledger line.
+An advisor can use the `claude` CLI with the operator's existing login, or the optional
+`HttpAdvisor` transport for OpenAI, Anthropic or DeepSeek. HTTP credentials are read from
+environment variables at request time; model names are explicit. These transports provide
+proposals to the existing campaign and do not supply an autonomous tool-calling host.
+See [configuration and verification limits](docs/runtime-guide.md).
 
 **An advisor proposes and never grants**, and the gradation is by what being wrong costs rather
 than by how confident the model sounds:
@@ -707,7 +815,7 @@ nothing.
 ## Tests
 
 ```bash
-python -m pytest -q          # 344 pass, 2 skip: no GPU, no AmberTools, no network, no API key
+python -m pytest -q          # install .[test] first; no MD/FEP, network, or API key required
 python -m ruff check src tests tools
 python tools/verify_assets.py --deep
 ```

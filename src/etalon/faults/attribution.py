@@ -71,6 +71,14 @@ class Observation:
     #: its cause standing rather than clearing it.
     evaluable: bool = True
 
+    def __post_init__(self) -> None:
+        if not isinstance(self.code, str) or not self.code.strip():
+            raise ValueError("observation code must be a nonempty string")
+        if not isinstance(self.detail, str):
+            raise ValueError("observation detail must be a string")
+        if type(self.fired) is not bool or type(self.evaluable) is not bool:
+            raise ValueError("observation fired and evaluable must be explicit booleans")
+
 
 @dataclass(frozen=True, slots=True)
 class Attribution:

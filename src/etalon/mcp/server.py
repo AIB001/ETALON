@@ -52,13 +52,15 @@ def _skill_path() -> Path:
 def build() -> Any:
     """Construct the server with every tool and resource registered."""
 
-    from etalon.mcp import governance, planning
+    from etalon.mcp import active, execution, governance, planning
 
     server_class = require_mcp()
     mcp = server_class("etalon")
 
     planning.register(mcp)
     governance.register(mcp)
+    active.register(mcp)
+    execution.register(mcp)
 
     @mcp.resource(SKILL_RESOURCE)
     def campaign_workflow() -> str:
@@ -114,7 +116,7 @@ def costs() -> dict[str, str]:
     Derived from the decorator rather than from a list, so a tool cannot be added without one.
     """
 
-    from etalon.mcp import governance, planning
+    from etalon.mcp import active, execution, governance, planning
 
     found: dict[str, str] = {}
 
@@ -130,6 +132,8 @@ def costs() -> dict[str, str]:
     collector = Collector()
     planning.register(collector)
     governance.register(collector)
+    active.register(collector)
+    execution.register(collector)
     return found
 
 

@@ -8,6 +8,8 @@ __pycache__/
 # Scratch the falsification probes build. The recorded results under findings/ are the
 # durable part; the trees the probes create are not.
 /tmp-*
+/runs/
+/pytest-of-*/
 
 # Not published yet. The measurement records and the architectural decisions are held back
 # from this remote for now -- they are the research layer, and the code stands without them.

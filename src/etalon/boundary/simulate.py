@@ -23,7 +23,7 @@ turn is on a system path in neither. So the expensive stage cannot be an import.
 a process boundary also buys the two things the record needs: the child's output can be
 captured in full, and nothing the build does to the interpreter reaches the agent.
 
-**Failure detection by product, not by exit code.** ``localrun.sh`` has no ``set -e``, so
+**Failure detection by products AND controlled termination.** ``localrun.sh`` has no ``set -e``, so
 a failed ``grompp`` writes no tpr, ``mdrun`` fails on the missing file, and the next stage
 runs ``grompp -c ./em/em.gro`` against a file that was never written -- every stage fails
 in turn. What the caller sees was measured on this machine rather than assumed, and it is
@@ -35,12 +35,14 @@ three different things:
   nvt and npt all failed and 23 error lines in the log. The final block takes its
   ``if [ -f ./prod/md.gro ]`` skip branch, ``echo`` succeeds, and that is the script's exit
   status. This is not a contrived case: it is what re-driving any directory looks like.
-- A run killed by a wall-clock limit has **no exit code at all**, which is the common case,
+- A run killed by a wall-clock limit has **no normal successful exit**, which is the common case,
   because PRISM's default production length is 500 ns and a campaign that wanted
   equilibration will always hit the limit.
 
 One bit about the last command cannot distinguish those, and none of them says *which*
-stages finished. The products do, and the fix needs no change to PRISM because the script
+stages finished. The products do; clean termination is additionally required before the
+whole execution is successful. Timed-out partial products remain evidence, not admitted
+affinity labels. No PRISM edits are required because the script
 already states the predicate: every stage is written as ``if [ -f ./em/em.gro ]`` skip,
 ``elif [ -f ./em/em.tpr ]`` resume, else build. "Did this stage finish" is therefore
 *already* defined as "does its product exist", so checking the same files afterwards cannot
@@ -59,14 +61,20 @@ from __future__ import annotations
 
 import hashlib
 import json
+import math
 import os
 import re
 import shutil
+import signal
+import stat
 import subprocess
 import sys
+import tempfile
+import time
 from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
+from functools import wraps
 from pathlib import Path
 
 from etalon.boundary.infra import Infra, load
@@ -118,6 +126,196 @@ def _digest(path: Path) -> str:
         for chunk in iter(lambda: handle.read(1 << 20), b""):
             digest.update(chunk)
     return digest.hexdigest()
+
+
+def _run_directory(workspace: Path, run_id: str) -> Path:
+    """A run owns one real child directory, never a caller-selected deletion target."""
+
+    if (
+        not isinstance(run_id, str)
+        or not run_id.strip()
+        or run_id in {".", ".."}
+        or run_id == ".etalon_execution_locks"
+        or any(character in run_id for character in ("/", "\\", "\0"))
+        or Path(run_id).is_absolute()
+    ):
+        raise SimulationError("run_id must be a nonempty single path component")
+    root = workspace.resolve()
+    target = root / run_id
+    if target.is_symlink() or target.resolve().parent != root:
+        raise SimulationError("run directory must not be a symlink or leave the workspace")
+    return target
+
+
+def _write_manifest(path: Path, body: Mapping[str, object]) -> None:
+    """Replace the whole manifest atomically; a crash must not truncate old evidence."""
+
+    data = json.dumps(body, indent=2, sort_keys=True) + "\n"
+    temporary: Path | None = None
+    try:
+        with tempfile.NamedTemporaryFile(mode="w", encoding="utf-8", dir=path.parent,
+                                         prefix=".etalon-manifest-", delete=False) as handle:
+            temporary = Path(handle.name)
+            handle.write(data)
+            handle.flush()
+            os.fsync(handle.fileno())
+        temporary.replace(path)
+    finally:
+        if temporary is not None:
+            temporary.unlink(missing_ok=True)
+
+
+_PROCESS_GROUPS_SUPPORTED = os.name == "posix"
+
+
+def _exclusive_run(operation):
+    """Cooperating controllers serialize one run, including overwrite and recovery.
+
+    Lock files are never unlinked on release: replacing their inode would allow a second
+    controller to acquire a different lock while the first still owns the original one.
+    flock is released by the OS if this controller dies; the pending manifest still
+    demands explicit recovery. This does not sandbox external writers or remote jobs.
+    """
+
+    @wraps(operation)
+    def guarded(self, *args, **kwargs):
+        if not _PROCESS_GROUPS_SUPPORTED:
+            raise SimulationError("controlled PRISM execution requires POSIX process groups and file locks")
+        if not hasattr(os, "O_NOFOLLOW"):
+            raise SimulationError("safe execution locks require O_NOFOLLOW; refusing unsupported lock semantics")
+        if not self.environment.ready:
+            raise SimulationError("refusing to start: " + ", ".join(self.environment.missing or ("no gmx found",)))
+        record = args[0] if args else kwargs.get("record")
+        run_id = kwargs.get("run_id") if operation.__name__ == "build" else getattr(record, "run_id", None)
+        output = _run_directory(self.workspace, run_id)
+        lock_directory = output.parent / ".etalon_execution_locks"
+        if lock_directory.is_symlink():
+            raise SimulationError("execution lock directory must not be a symlink")
+        lock_directory.mkdir(exist_ok=True)
+        lock_path = lock_directory / (hashlib.sha256(run_id.encode()).hexdigest() + ".lock")
+        import fcntl
+
+        flags = os.O_CREAT | os.O_RDWR | os.O_NOFOLLOW | os.O_NONBLOCK
+        try:
+            descriptor = os.open(lock_path, flags, 0o600)
+        except OSError as error:
+            raise SimulationError("cannot safely open the run execution lock") from error
+        try:
+            if not stat.S_ISREG(os.fstat(descriptor).st_mode):
+                raise SimulationError("run execution lock must be a regular file")
+            try:
+                fcntl.flock(descriptor, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            except BlockingIOError as error:
+                raise SimulationError("another controller owns this run execution lock") from error
+            return operation(self, *args, **kwargs)
+        finally:
+            os.close(descriptor)
+
+    return guarded
+
+
+def _text(stream: object) -> str:
+    if stream is None:
+        return ""
+    if isinstance(stream, bytes):
+        return stream.decode("utf-8", "replace")
+    return str(stream)
+
+
+@dataclass(frozen=True, slots=True)
+class _CapturedRun:
+    returncode: int | None
+    stdout: str
+    stderr: str
+    status: str = "completed"
+    elapsed_seconds: float = 0.0
+    process_group: int | None = None
+    cleanup: Mapping[str, object] = field(default_factory=dict)
+
+    def as_dict(self) -> dict[str, object]:
+        return {
+            "status": self.status, "exit_code": self.returncode,
+            "elapsed_seconds": self.elapsed_seconds, "process_group": self.process_group,
+            "cleanup": dict(self.cleanup), "cost": None,
+            "cost_status": "not_started" if self.status == "launch_failed" else "unknown",
+            "recovery_required": self.status != "completed",
+            "scope": "owned POSIX process group only; detached sessions and remote jobs are not controlled",
+        }
+
+
+def _run_owned(
+    command: Sequence[str], *, timeout: float, env: Mapping[str, str], cwd: str | None = None,
+) -> _CapturedRun:
+    """Bound one owned POSIX session, retaining partial output on timeout or interruption.
+
+    The group id is always the PID returned by our own start_new_session Popen. No
+    process-name discovery, caller-supplied pid, or signal to the caller's group is used.
+    Deliberately detached sessions/remote schedulers require a different execution adapter.
+    """
+
+    if not _PROCESS_GROUPS_SUPPORTED:
+        raise SimulationError("controlled PRISM execution requires POSIX process groups; this platform is unsupported")
+    started = time.monotonic()
+    try:
+        process = subprocess.Popen(
+            list(command), stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+            text=True, encoding="utf-8", errors="replace", start_new_session=True,
+            env=dict(env), cwd=cwd,
+        )
+    except OSError as error:
+        return _CapturedRun(None, "", str(error), "launch_failed", time.monotonic() - started)
+    status = "completed"
+    cleanup: dict[str, object] = {}
+    stdout = stderr = ""
+    try:
+        stdout, stderr = process.communicate(timeout=timeout)
+        if process.returncode != 0:
+            status = "failed"
+    except subprocess.TimeoutExpired as error:
+        status = "timed_out"
+        stdout, stderr = _text(error.stdout), _text(error.stderr)
+    except KeyboardInterrupt:
+        # Return an interrupted capture so the caller can persist it, then re-raise.
+        status = "interrupted"
+    except Exception as error:
+        status = "failed"
+        stderr = f"capture failed: {type(error).__name__}: {error}"
+    finally:
+        # Even a successful shell must not leave an untracked background child running.
+        # This is exactly the process group created above, never our inherited group.
+        try:
+            if process.pid <= 1 or process.pid == os.getpgrp():
+                raise RuntimeError("refusing to signal an unowned process group")
+            os.killpg(process.pid, signal.SIGKILL)
+            cleanup["group_kill_sent"] = True
+            if status == "completed":
+                status = "orphaned_children"
+        except ProcessLookupError:
+            cleanup["group_kill_sent"] = False
+        except (OSError, RuntimeError) as error:
+            cleanup["error"] = f"{type(error).__name__}: {error}"
+            if status == "completed":
+                status = "cleanup_failed"
+        if status != "completed":
+            try:
+                # communicate returns the full stream, including the bytes reported in
+                # TimeoutExpired; do not append them twice.
+                stdout, stderr = process.communicate(timeout=2.0)
+                cleanup["output_drained"] = True
+            except subprocess.TimeoutExpired as error:
+                stdout, stderr = _text(error.stdout), _text(error.stderr)
+                cleanup["output_drained"] = False
+                cleanup["error"] = "pipes remained open after owned-group kill; operator review required"
+                for stream in (process.stdout, process.stderr):
+                    if stream is not None:
+                        stream.close()
+                try:
+                    process.wait(timeout=1.0)
+                except subprocess.TimeoutExpired:
+                    cleanup["leader_reaped"] = False
+            cleanup.setdefault("leader_reaped", process.returncode is not None)
+    return _CapturedRun(process.returncode, _text(stdout), _text(stderr), status,
+                        time.monotonic() - started, process.pid, cleanup)
 
 
 @dataclass(frozen=True, slots=True)
@@ -296,17 +494,18 @@ def materialize_ligands(
             )
             continue
 
-        # A digest-shaped parent_id is not a filename. Truncated to its hex tail with the
-        # index kept, so two molecules cannot collide and the name is still traceable.
-        stem = f"{index:05d}_{identifier.rsplit(':', 1)[-1][:16]}"
+        # IDs are opaque: even a caller-supplied path must never become an output path.
+        stem = f"{index:05d}_{hashlib.sha256(identifier.encode('utf-8')).hexdigest()}"
         path = target / f"{stem}.sdf"
         text = str(molblock)
-        path.write_text(
-            text if text.endswith("\n") else text + "\n",
-            encoding="utf-8",
-        )
-        with path.open("a", encoding="utf-8") as handle:
-            handle.write("$$$$\n")
+        text = (text if text.endswith("\n") else text + "\n") + "$$$$\n"
+        try:
+            with path.open("x", encoding="utf-8") as handle:
+                handle.write(text)
+        except FileExistsError:
+            if path.is_symlink() or not path.is_file() or path.read_text(encoding="utf-8") != text:
+                out.append(Materialized(identifier, None, "existing ligand file has different identity"))
+                continue
 
         molecule = Chem.MolFromMolFile(str(path), removeHs=False, sanitize=False)
         if molecule is None:
@@ -399,7 +598,11 @@ def read_warnings(text: str, *, keep: int = 5) -> Warnings:
 
 #: gmx_MMPBSA's result lines: ``DELTA TOTAL = -35.2 +/- 2.1``. Taken verbatim from PRISM's
 #: own parser at prism/mcp/analysis.py:397 so the two readings of one file cannot disagree.
-_ENERGY_LINE = re.compile(r"^\s*([\w\s/]+?)\s*=\s*([-\d.]+)\s*\+/-\s*([-\d.]+)", re.MULTILINE)
+_ENERGY_NUMBER = r"[+-]?(?:\d+(?:\.\d*)?|\.\d+)(?:[eE][+-]?\d+)?"
+_ENERGY_LINE = re.compile(
+    rf"^[ \t]*([\w /]+?)[ \t]*=[ \t]*({_ENERGY_NUMBER})[ \t]*\+/-[ \t]*"
+    rf"({_ENERGY_NUMBER})[ \t]*$", re.MULTILINE,
+)
 
 
 @dataclass(frozen=True, slots=True)
@@ -448,15 +651,20 @@ def read_binding_energy(mmpbsa_dir: str | Path) -> BindingEnergy | None:
     if not path.is_file():
         return None
     text = path.read_text(encoding="utf-8", errors="replace")
-    components = {
-        match.group(1).strip(): float(match.group(2)) for match in _ENERGY_LINE.finditer(text)
-    }
-    total = next(
-        (match for match in _ENERGY_LINE.finditer(text) if match.group(1).strip() == "DELTA TOTAL"),
-        None,
-    )
-    if total is None:
+    if len(re.findall(r"^[ \t]*DELTA TOTAL[ \t]*=", text, re.MULTILINE)) != 1:
         return None
+    matches = list(_ENERGY_LINE.finditer(text))
+    names = [match.group(1).strip() for match in matches]
+    # A file can contain separate GB/PB sections. There is no method selector in this
+    # API, so choosing its first total (and last components) would mix estimands.
+    if len(set(names)) != len(names) or names.count("DELTA TOTAL") != 1:
+        return None
+    if any(not math.isfinite(float(match.group(index))) for match in matches for index in (2, 3)):
+        return None
+    if any(float(match.group(3)) < 0 for match in matches):
+        return None
+    components = {match.group(1).strip(): float(match.group(2)) for match in matches}
+    total = matches[names.index("DELTA TOTAL")]
     return BindingEnergy(
         total_kcal_mol=float(total.group(2)),
         spread_kcal_mol=float(total.group(3)),
@@ -480,6 +688,8 @@ class BuildRecord:
     built: bool
     detail: str = ""
     stdout_path: Path | None = None
+    products_sha256: dict[str, str] = field(default_factory=dict)
+    execution: dict[str, object] = field(default_factory=dict)
 
     def as_dict(self) -> dict[str, object]:
         return {
@@ -497,16 +707,18 @@ class BuildRecord:
             "built": self.built,
             "detail": self.detail,
             "captured_output": None if self.stdout_path is None else str(self.stdout_path),
+            "products_sha256": dict(self.products_sha256),
+            "execution": dict(self.execution),
         }
 
 
 @dataclass(frozen=True, slots=True)
 class DriveRecord:
-    """What running the driver produced, judged by products rather than exit code."""
+    """Driver outcome: clean termination plus products, with partial facts retained."""
 
     run_id: str
-    #: The driver's own exit status, or ``None`` when the wall-clock limit killed it.
-    #: Recorded, and used to decide nothing -- see :attr:`succeeded`.
+    #: The driver's exit status (negative for a signal), or None when no status is known.
+    #: A zero exit is necessary, not sufficient: requested products must also exist.
     exit_code: int | None
     stages: tuple[StageStatus, ...]
     warnings: Warnings
@@ -515,6 +727,7 @@ class DriveRecord:
     #: Set when the wall-clock limit killed the driver. Not a failure of the stages that
     #: had already finished, and the products say which those were.
     timed_out: bool = False
+    execution: dict[str, object] = field(default_factory=dict)
 
     @property
     def finished(self) -> tuple[str, ...]:
@@ -526,15 +739,18 @@ class DriveRecord:
 
     @property
     def succeeded(self) -> bool:
-        """Whether every requested stage left its product behind.
+        """Clean termination AND every requested product; partial products remain facts.
 
-        Deliberately not ``exit_code == 0``. Measured: a re-driven directory whose
-        production had already completed exits 0 with em, nvt and npt all failed, because
-        the final block's skip branch is the last command to run. And a timed-out run has
-        no exit code at all. See this module's docstring for all three cases.
+        Compatibility: a timed-out equilibration is no longer an overall success merely
+        because its requested products exist. ``finished`` retains those product facts.
         """
 
-        return not self.failed
+        return (not self.timed_out and self.exit_code == 0
+                and self.execution.get("status", "completed") == "completed"
+                and bool(self.requested) and all(
+            any(stage.stage == name and stage.state == "FINISHED" for stage in self.stages)
+            for name in self.requested
+        ))
 
     def as_dict(self) -> dict[str, object]:
         return {
@@ -548,12 +764,13 @@ class DriveRecord:
             "stages": [s.as_dict() for s in self.stages],
             "warnings": self.warnings.as_dict(),
             "captured_output": str(self.stdout_path),
+            "execution": dict(self.execution),
             "note": (
-                "Success is every requested stage's product existing. Measured on this "
+                "Success requires clean termination and every requested stage's product. Measured on this "
                 "machine: a fresh build with a broken topology exits 1; the same "
                 "directory re-driven after production had completed exits 0 with em, nvt "
                 "and npt all failed and 23 error lines in the log; a run killed by the "
-                "wall clock has no exit code at all. One bit about the last command "
+                "wall clock has no normal successful exit. One bit about the last command "
                 "cannot tell those apart, and none of them says which stages finished."
             ),
         }
@@ -578,6 +795,7 @@ class Simulate:
 
     # -- build --------------------------------------------------------------
 
+    @_exclusive_run
     def build(
         self,
         protein: str | Path,
@@ -589,9 +807,12 @@ class Simulate:
         protonation: str = "propka",
         gaussian_method: str | None = None,
         do_optimization: bool = False,
+        production_ns: float | None = None,
         reuse: bool = False,
         overwrite: bool = False,
         timeout: int = 14_400,
+        confirm_recovery: bool = False,
+        recovery_reason: str | None = None,
     ) -> BuildRecord:
         """Build one protein-ligand system, and write the manifest PRISM does not.
 
@@ -600,6 +821,10 @@ class Simulate:
         is added is identity.
 
         Args:
+            production_ns: Explicit production duration in nanoseconds. ``None`` keeps
+                PRISM's default (500 ns in the pinned asset). This is recorded in the
+                protocol identity; ``drive(stages=...)`` only selects products to check
+                and does not shorten the script or replace this setting.
             gaussian_method: ``None`` uses AM1-BCC charges, which need no external QM and
                 take seconds. ``"hf"`` (HF/6-31G*) or ``"dft"`` (B3LYP/6-31G*) compute RESP
                 charges through Gaussian and are the better charges; on a 70-heavy-atom
@@ -610,8 +835,8 @@ class Simulate:
             do_optimization: Geometry-optimise before the ESP calculation. Only meaningful
                 with a ``gaussian_method``, and multiplies its cost.
             reuse: Return an existing successful build instead of rebuilding, but only when
-                its manifest records the same protein and ligand digests. A directory named
-                for a molecule is not evidence that it holds that molecule.
+                its manifest records the same inputs, scientific arguments, environment
+                and infrastructure. A directory name is not evidence of protocol identity.
         """
 
         if not self.environment.ready:
@@ -626,31 +851,24 @@ class Simulate:
                 + ". Naming the absent tool now is worth more than PRISM failing an hour "
                 "into a parameterisation."
             )
+        self._check_recovery(None, confirm_recovery, recovery_reason)
+        if not _PROCESS_GROUPS_SUPPORTED:
+            raise SimulationError("controlled PRISM execution requires POSIX process groups")
         protein_path = Path(protein).expanduser().resolve()
         ligand_path = Path(ligand).expanduser().resolve()
         for label, path in (("protein", protein_path), ("ligand", ligand_path)):
             if not path.is_file():
                 raise SimulationError(f"no {label} file at {path}")
 
-        output_dir = self.workspace / run_id
+        output_dir = _run_directory(self.workspace, run_id)
+        if isinstance(timeout, bool) or not isinstance(timeout, (int, float)) or not math.isfinite(timeout) or timeout <= 0:
+            raise SimulationError("timeout must be finite and positive")
+        if production_ns is not None and (
+            isinstance(production_ns, bool) or not isinstance(production_ns, (int, float))
+            or not math.isfinite(production_ns) or production_ns <= 0
+        ):
+            raise SimulationError("production_ns must be finite and positive, or None for PRISM defaults")
         protein_digest, ligand_digest = _digest(protein_path), _digest(ligand_path)
-        if output_dir.exists() and reuse and not overwrite:
-            # A campaign resuming after a crash wants the build it already paid for. But
-            # reuse is only honest if the inputs are the same inputs: a directory named for
-            # a molecule is not evidence that it holds that molecule, and the manifest is
-            # the only thing that says which bytes went in.
-            existing = self._reusable(output_dir, protein_digest, ligand_digest)
-            if existing is not None:
-                return existing
-        if output_dir.exists() and not overwrite:
-            raise SimulationError(
-                f"{output_dir} already exists and could not be reused. PRISM's build steps "
-                "skip when their product is present, so building into it would measure the "
-                "skip rather than the build; pass overwrite=True to mean it."
-            )
-        if output_dir.exists():
-            shutil.rmtree(output_dir)
-        output_dir.mkdir(parents=True)
 
         # Two places, not one, and the split is PRISM's rather than a choice made here.
         # PRISMBuilder takes the force fields and the charge method as constructor
@@ -665,17 +883,45 @@ class Simulate:
         if gaussian_method is not None:
             kwargs["gaussian_method"] = gaussian_method
             kwargs["do_optimization"] = do_optimization
-        # Only the protonation method. PRISM's own MCP layer writes temperature, salt
+        # Only explicitly selected protocol parameters. PRISM's MCP layer writes temperature, salt
         # concentration, box distance, box shape, pressure, timestep and both
         # equilibration lengths into the config on every call; those belong to the
         # protocol and an orchestration layer that rewrites them is choosing the
         # simulation on the operator's behalf. Everything unnamed here keeps PRISM's
         # own default.
         config: list[tuple[str, str, object]] = [("protonation", "method", protonation)]
+        if production_ns is not None:
+            config.append(("simulation", "production_time_ns", float(production_ns)))
         arguments: dict[str, object] = {
             **kwargs,
             "config_overrides": {f"{section}.{key}": value for section, key, value in config},
         }
+        if output_dir.exists() and reuse and not overwrite:
+            existing = self._reusable(output_dir, protein_digest, ligand_digest, arguments=arguments)
+            if existing is not None:
+                return existing
+        if output_dir.exists() and not overwrite:
+            raise SimulationError(
+                f"{output_dir} already exists and could not be reused. PRISM's build steps "
+                "skip when their product is present, so building into it would measure the "
+                "skip rather than the build; pass overwrite=True to mean it."
+            )
+        if output_dir.exists():
+            try:
+                previous_manifest = self.manifest_of(output_dir)
+            except SimulationError:
+                previous_manifest = {}
+            self._check_recovery(previous_manifest.get("build"), confirm_recovery, recovery_reason)
+            self._check_recovery(previous_manifest.get("drive"), confirm_recovery, recovery_reason)
+            if any(path.is_relative_to(output_dir) for path in (protein_path, ligand_path)):
+                raise SimulationError("refusing to overwrite a run directory containing its input files")
+            if not output_dir.is_dir():
+                raise SimulationError("run output exists but is not a directory")
+            shutil.rmtree(output_dir)
+        try:
+            output_dir.mkdir(parents=True)
+        except FileExistsError as error:
+            raise SimulationError("run directory was claimed by another build") from error
         program = (
             "import json, sys\n"
             "from prism.builder.core import PRISMBuilder\n"
@@ -688,7 +934,16 @@ class Simulate:
         )
         spec = json.dumps({"kwargs": kwargs, "config": config})
         captured = output_dir / "etalon_build.log"
-        completed = subprocess.run(
+        pending = BuildRecord(
+            run_id=run_id, output_dir=output_dir, md_dir=output_dir / "GMX_PROLIG_MD",
+            protein_sha256=protein_digest, ligand_sha256=ligand_digest, arguments=arguments,
+            environment=self.environment, infra=self.infra.provenance(), built=False,
+            detail="execution outcome pending; operator review required before recovery",
+            stdout_path=captured, execution={"status": "running", "cost": None,
+                                            "cost_status": "unknown", "recovery_required": True},
+        )
+        _write_manifest(output_dir / self.MANIFEST, {"build": pending.as_dict()})
+        completed = _run_owned(
             [
                 str(self.environment.interpreter),
                 "-c",
@@ -698,9 +953,6 @@ class Simulate:
                 str(output_dir),
                 spec,
             ],
-            capture_output=True,
-            text=True,
-            check=False,
             timeout=timeout,
             env=self.environment.exported(asset_root=self.infra.import_root),
         )
@@ -711,9 +963,21 @@ class Simulate:
         )
 
         md_dir = output_dir / "GMX_PROLIG_MD"
-        # Judged by its products, for the same reason the driver is: the build's own
-        # return is not evidence that a topology exists.
-        built = (md_dir / "topol.top").is_file() and (md_dir / "solv_ions.gro").is_file()
+        # Products are necessary, as is a clean execution below: a successful return
+        # alone is not evidence that a topology exists.
+        product_names = ("topol.top", "solv_ions.gro", "localrun.sh")
+        products = {
+            name: _digest(md_dir / name) for name in product_names
+            if (md_dir / name).is_file() and (md_dir / name).resolve().is_relative_to(output_dir)
+        }
+        built = len(products) == len(product_names)
+        try:
+            inputs_unchanged = (_digest(protein_path), _digest(ligand_path)) == (
+                protein_digest, ligand_digest,
+            )
+        except OSError:
+            inputs_unchanged = False
+        built = built and inputs_unchanged and completed.status == "completed" and completed.returncode == 0
         record = BuildRecord(
             run_id=run_id,
             output_dir=output_dir,
@@ -727,25 +991,48 @@ class Simulate:
             detail=(
                 ""
                 if built
-                else "no topol.top and solv_ions.gro in GMX_PROLIG_MD; see the captured "
+                else f"execution {completed.status}; compute cost is unknown; see {captured.name}"
+                if completed.status != "completed"
+                else "input files changed during the build; products cannot attest the requested inputs"
+                if not inputs_unchanged
+                else "missing topology, coordinates or driver in GMX_PROLIG_MD; see the captured "
                 f"output at {captured.name} (exit {completed.returncode})"
             ),
             stdout_path=captured,
+            products_sha256=products,
+            execution={**completed.as_dict(), "recovery_reason": recovery_reason if confirm_recovery else None},
         )
-        (output_dir / self.MANIFEST).write_text(
-            json.dumps({"build": record.as_dict()}, indent=2, sort_keys=True) + "\n",
-            encoding="utf-8",
-        )
+        _write_manifest(output_dir / self.MANIFEST, {"build": record.as_dict()})
+        if completed.status == "interrupted":
+            raise KeyboardInterrupt("PRISM build interrupted; outcome recorded, explicit recovery required")
         return record
 
+    @staticmethod
+    def _check_recovery(previous: object, confirmed: bool, reason: str | None) -> None:
+        if not isinstance(confirmed, bool):
+            raise SimulationError("confirm_recovery must be an explicit boolean")
+        if confirmed and (not isinstance(reason, str) or len(reason.strip()) < 12):
+            raise SimulationError("confirmed recovery requires a meaningful operator recovery_reason")
+        if reason is not None and not confirmed:
+            raise SimulationError("recovery_reason requires confirm_recovery=True")
+        execution = previous.get("execution") if isinstance(previous, Mapping) else None
+        pending = isinstance(execution, Mapping) and (
+            execution.get("recovery_required") is True or execution.get("status") == "running"
+        )
+        if pending and not confirmed:
+            raise SimulationError(
+                "previous execution requires operator review; verify that prior compute is stopped, "
+                "then pass confirm_recovery=True and recovery_reason"
+            )
+
     def _reusable(
-        self, output_dir: Path, protein_digest: str, ligand_digest: str
+        self, output_dir: Path, protein_digest: str, ligand_digest: str,
+        *, arguments: Mapping[str, object] | None = None,
     ) -> BuildRecord | None:
         """An existing build worth keeping, or ``None`` with nothing said.
 
-        Silent on failure by design: every reason to refuse reuse ends in the same action,
-        which is to build. Raising here would turn "I could not confirm the old build" into
-        an error the caller has to handle in order to do the obvious thing.
+        Silent on failure by design: the public caller refuses reuse and never
+        implicitly rebuilds. Overwrite and interrupted-run recovery must be explicit.
         """
 
         try:
@@ -753,7 +1040,7 @@ class Simulate:
         except SimulationError:
             return None
         build = manifest.get("build")
-        if not isinstance(build, Mapping) or not build.get("built"):
+        if not isinstance(build, Mapping) or build.get("built") is not True:
             return None
         inputs = build.get("inputs")
         if not isinstance(inputs, Mapping):
@@ -763,9 +1050,36 @@ class Simulate:
             or inputs.get("ligand_sha256") != ligand_digest
         ):
             return None
+        # The public build path always supplies arguments. The digest-only private
+        # inspection mode remains useful for reading old manifests, not dispatching them.
+        if arguments is not None and (
+            build.get("arguments") != dict(arguments)
+            or build.get("environment") != self.environment.as_dict()
+            or build.get("infra") != self.infra.provenance()
+            or build.get("run_id") != output_dir.name
+        ):
+            return None
+        execution = build.get("execution")
+        if isinstance(execution, Mapping) and execution.get("status") not in {None, "completed"}:
+            return None
         md_dir = output_dir / "GMX_PROLIG_MD"
         if not ((md_dir / "topol.top").is_file() and (md_dir / "localrun.sh").is_file()):
             return None
+        if arguments is not None and not (md_dir / "solv_ions.gro").is_file():
+            return None
+        if arguments is not None:
+            if md_dir.is_symlink() or any(
+                not (md_dir / name).resolve().is_relative_to(output_dir)
+                for name in ("topol.top", "solv_ions.gro", "localrun.sh")
+            ):
+                return None
+            try:
+                products = {name: _digest(md_dir / name)
+                            for name in ("topol.top", "solv_ions.gro", "localrun.sh")}
+            except OSError:
+                return None
+            if build.get("products_sha256") != products:
+                return None
         return BuildRecord(
             run_id=str(build.get("run_id") or output_dir.name),
             output_dir=output_dir,
@@ -776,20 +1090,25 @@ class Simulate:
             environment=self.environment,
             infra=dict(build.get("infra") or {}),
             built=True,
-            detail="reused: the manifest records the same protein and ligand digests",
+            detail="reused: the manifest matches the requested input and protocol identity",
             stdout_path=output_dir / "etalon_build.log",
+            products_sha256=dict(build.get("products_sha256") or {}),
+            execution=dict(build.get("execution") or {}),
         )
 
     # -- drive --------------------------------------------------------------
 
+    @_exclusive_run
     def drive(
         self,
         record: BuildRecord,
         *,
         stages: Sequence[str] = ("em", "nvt", "npt"),
         timeout: int = 86_400,
+        confirm_recovery: bool = False,
+        recovery_reason: str | None = None,
     ) -> DriveRecord:
-        """Run the driver script, then judge each stage by whether its product exists.
+        """Require clean execution and each requested product; preserve partial outcomes.
 
         ``stages`` names what the caller requires, and defaults to equilibration only.
         The script always attempts production as well -- it is one file and ETALON does
@@ -798,12 +1117,25 @@ class Simulate:
         when building.
         """
 
+        if not stages or len(set(stages)) != len(stages):
+            raise SimulationError("required stages must be nonempty and unique")
+        if not _PROCESS_GROUPS_SUPPORTED:
+            raise SimulationError("controlled PRISM execution requires POSIX process groups")
+        if isinstance(timeout, bool) or not isinstance(timeout, (int, float)) or not math.isfinite(timeout) or timeout <= 0:
+            raise SimulationError("timeout must be finite and positive")
         unknown = set(stages) - {name for name, _, _ in STAGE_PRODUCTS}
         if unknown:
             raise SimulationError(
                 f"unknown stage(s) {sorted(unknown)}; the driver has "
                 f"{[name for name, _, _ in STAGE_PRODUCTS]}"
             )
+        output_dir = _run_directory(self.workspace, record.run_id)
+        if record.output_dir != output_dir or record.md_dir != output_dir / "GMX_PROLIG_MD":
+            raise SimulationError("build record paths do not match its run identity")
+        verified = self._reusable(output_dir, record.protein_sha256, record.ligand_sha256,
+                                  arguments=record.arguments)
+        if verified is None or not record.built:
+            raise SimulationError("build manifest no longer matches the requested protocol or products")
         script = record.md_dir / "localrun.sh"
         if not script.is_file():
             raise SimulationError(
@@ -812,38 +1144,30 @@ class Simulate:
                 "about the wrong thing."
             )
 
-        captured = record.output_dir / "etalon_drive.log"
-        # Caught, not raised. The script always attempts production and PRISM's default
-        # production length is 500 ns, so a campaign that wanted equilibration hits the
-        # limit as a matter of course -- with em, nvt and npt already on disk. Letting the
-        # exception escape would discard the record of work that really happened.
-        timed_out = False
-        try:
-            completed = subprocess.run(
-                ["bash", str(script)],
-                cwd=str(record.md_dir),
-                capture_output=True,
-                text=True,
-                check=False,
-                timeout=timeout,
-                env=self.environment.exported(asset_root=self.infra.import_root),
-            )
-            exit_code: int | None = completed.returncode
-            text = completed.stdout + "\n" + completed.stderr
-        except subprocess.TimeoutExpired as expired:
-            timed_out, exit_code = True, None
-
-            def _text(stream: object) -> str:
-                if stream is None:
-                    return ""
-                if isinstance(stream, bytes):
-                    return stream.decode("utf-8", "replace")
-                return str(stream)
-
-            text = (
-                f"{_text(expired.stdout)}\n{_text(expired.stderr)}\n"
-                f"--- killed by ETALON after {timeout}s ---\n"
-            )
+        manifest_path = record.output_dir / self.MANIFEST
+        manifest = dict(self.manifest_of(record.output_dir))
+        previous = manifest.get("drive")
+        self._check_recovery(previous, confirm_recovery, recovery_reason)
+        attempts = list(manifest.get("drive_attempts") or ([previous] if previous else []))
+        if any(not isinstance(attempt, Mapping) for attempt in attempts):
+            raise SimulationError("drive attempt history is malformed")
+        attempt_number = len(attempts) + 1
+        captured = record.output_dir / ("etalon_drive.log" if attempt_number == 1
+                                       else f"etalon_drive.{attempt_number:04d}.log")
+        pending = DriveRecord(
+            record.run_id, None, (), Warnings(0), captured, tuple(stages),
+            execution={"status": "running", "cost": None, "cost_status": "unknown",
+                       "recovery_required": True, "recovery_reason": recovery_reason},
+        ).as_dict()
+        attempts.append(pending)
+        manifest["drive"], manifest["drive_attempts"] = pending, attempts
+        _write_manifest(manifest_path, manifest)
+        completed = _run_owned(
+            ["bash", str(script)], cwd=str(record.md_dir), timeout=timeout,
+            env=self.environment.exported(asset_root=self.infra.import_root),
+        )
+        text = (f"{completed.stdout}\n{completed.stderr}\n"
+                f"--- execution {completed.status}; requested limit {timeout}s ---\n")
         captured.write_text(text, encoding="utf-8")
 
         statuses = tuple(
@@ -856,19 +1180,19 @@ class Simulate:
         )
         drive = DriveRecord(
             run_id=record.run_id,
-            exit_code=exit_code,
+            exit_code=completed.returncode,
             stages=statuses,
             warnings=read_warnings(text),
             stdout_path=captured,
             requested=tuple(stages),
-            timed_out=timed_out,
+            timed_out=completed.status == "timed_out",
+            execution={**completed.as_dict(), "recovery_reason": recovery_reason if confirm_recovery else None},
         )
-        manifest_path = record.output_dir / self.MANIFEST
-        manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
         manifest["drive"] = drive.as_dict()
-        manifest_path.write_text(
-            json.dumps(manifest, indent=2, sort_keys=True) + "\n", encoding="utf-8"
-        )
+        attempts[-1] = manifest["drive"]
+        _write_manifest(manifest_path, manifest)
+        if completed.status == "interrupted":
+            raise KeyboardInterrupt("PRISM drive interrupted; outcome recorded, explicit recovery required")
         return drive
 
     # -- read back ----------------------------------------------------------
@@ -883,7 +1207,13 @@ class Simulate:
                 f"no {Simulate.MANIFEST} in {output_dir}: this directory was not produced "
                 "through ETALON, so nothing records what it was built from."
             )
-        return json.loads(path.read_text(encoding="utf-8"))
+        try:
+            manifest = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, ValueError) as error:
+            raise SimulationError(f"cannot read valid run manifest at {path}") from error
+        if not isinstance(manifest, Mapping):
+            raise SimulationError(f"run manifest at {path} is not an object")
+        return manifest
 
 
 __all__ = [

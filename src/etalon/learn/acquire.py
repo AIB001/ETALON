@@ -15,11 +15,10 @@ the mean and the uncertainty together would have been reassured.
 
 So three things are true of the selection here, and each of them costs predicted potency.
 
-**A tie is not ranked.** Two molecules whose calibrated intervals overlap are not
-distinguishable at the level the calibration guarantees, so ordering them is the same mistake as
-accepting an AUC gain smaller than its own standard error -- one level down, with a warranty
-attached. Overlapping candidates are resolved by diversity instead, and the batch records how
-many of its picks were ties.
+**Interval overlap is reported.** The batch records overlaps with the top predicted candidate.
+This is a descriptive diagnostic, not a calibrated pairwise test or a guarantee of a tie. The
+implemented heuristic still combines predicted potency, interval width and scaffold diversity;
+it does not eliminate the mean ranking whenever two intervals overlap.
 
 **Scaffold novelty is an explicit term, not an emergent one.** The natural argument is that an
 uncertainty-aware score already prefers the unfamiliar. The measurement says otherwise: the
@@ -63,6 +62,7 @@ from __future__ import annotations
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
 
+from etalon.learn.calibrate import _real, _rounded
 from etalon.learn.conformal import Interval
 
 #: How much an interval's half-width counts toward a candidate's score. 1.0 is an upper
@@ -113,9 +113,9 @@ class Pick:
         return {
             "parent_id": self.parent_id,
             "rank": self.rank,
-            "score": round(self.score, 4),
-            "predicted": round(self.predicted, 4),
-            "half_width": round(self.half_width, 4),
+            "score": _rounded(self.score, "acquisition score"),
+            "predicted": _rounded(self.predicted, "prediction"),
+            "half_width": _rounded(self.half_width, "interval half width"),
             "reason": self.reason,
             "scaffold": self.scaffold,
         }
@@ -180,8 +180,17 @@ def acquire(
             large enough to replace it.
     """
 
-    if budget < 1:
+    if type(budget) is not int or budget < 1:
         raise ValueError(f"a budget of {budget} selects nothing")
+    for name, value in (("kappa", kappa), ("novelty_bonus", novelty_bonus), ("explore_fraction", explore_fraction)):
+        _real(value, name)
+    if kappa < 0:
+        raise ValueError("kappa must be nonnegative")
+    if not 0.0 <= explore_fraction <= 1.0:
+        raise ValueError(f"explore_fraction must be in [0, 1]; got {explore_fraction}")
+    if (any(not isinstance(item, Interval) for item in candidates)
+            or len({item.parent_id for item in candidates}) != len(candidates)):
+        raise ValueError("acquisition requires one validated interval per distinct molecule")
     if not candidates:
         return Batch(picks=(), notes=("No candidates, so there is nothing to spend on.",))
 
@@ -201,13 +210,11 @@ def acquire(
     if tied:
         notes.append(
             f"{tied} candidate(s) have intervals overlapping the top prediction's, so they are "
-            "not distinguishable from it at this calibration's coverage. They are ordered by "
-            "diversity rather than by predicted potency, because ranking a tie asserts a "
-            "difference the interval says is not there."
+            "not distinguishable by interval separation alone. This is a descriptive overlap "
+            "flag, not a calibrated pairwise hypothesis test; the heuristic still combines "
+            "predicted potency, interval width and scaffold diversity."
         )
 
-    if not 0.0 <= explore_fraction <= 1.0:
-        raise ValueError(f"explore_fraction must be in [0, 1]; got {explore_fraction}")
     # Floored rather than rounded. round() is banker's, so round(0.5) is 0 and round(1.5) is 2 --
     # a budget of 2 at a quarter reserved nothing while a budget of 6 reserved two, and neither
     # said so. Flooring is the honest reading of "a quarter of two places", and the case where it
@@ -251,6 +258,7 @@ def acquire(
         for item in sorted(unseen_available, key=lambda x: (-x.half_width, x.parent_id)):
             unseen_by_scaffold.setdefault(scaffold_of[item.parent_id], item)
         for item in list(unseen_by_scaffold.values())[:reserved]:
+            _real(item.mean + kappa * item.half_width, "acquisition score")
             chosen.append(
                 Pick(
                     parent_id=item.parent_id,
@@ -290,6 +298,7 @@ def acquire(
                 score -= kappa * item.half_width + SIBLING_PENALTY
                 if reason == "potency":
                     reason = "diversity"
+            _real(score, "acquisition score")
             scored.append((score, reason, item))
 
         scored.sort(key=lambda triple: (-triple[0], triple[2].parent_id))

@@ -298,10 +298,13 @@ def register(mcp: Any) -> None:
                 expensive_value=entry.get("expensive_value"),
                 observations=tuple(
                     Observation(
-                        code=str(item["code"]),
-                        fired=bool(item.get("fired")),
-                        detail=str(item.get("detail", "")),
-                        evaluable=bool(item.get("evaluable", True)),
+                        # Preserve supplied types so Observation's external-input
+                        # contract runs before any truthiness/text coercion. In
+                        # particular evaluable=0 must not become an unchecked pass.
+                        code=item["code"],
+                        fired=item.get("fired", False),
+                        detail=item.get("detail", ""),
+                        evaluable=item.get("evaluable", True),
                     )
                     for item in entry.get("observations", ())
                 ),

@@ -265,7 +265,8 @@ def test_a_score_says_which_split_it_came_from_and_defaults_to_the_weakest() -> 
     assert "nothing held out" in accepted.note
     assert "scaffold-grouped holdout" not in accepted.note
 
-    grouped = decide(baseline, score(after, labels, split=Split.SCAFFOLD_GROUPED))
+    grouped = decide(score(before, labels, split=Split.SCAFFOLD_GROUPED),
+                     score(after, labels, split=Split.SCAFFOLD_GROUPED))
     assert grouped.accepted
     assert "scaffold-grouped holdout" in grouped.note
 
@@ -503,6 +504,87 @@ def _campaign(tmp_path: Path, screen):
     return campaign
 
 
+def test_recorded_next_batch_limits_the_next_real_spend(tmp_path):
+    screen = _FakeScreen([_handoff_row("a", "CCO", clean=True), _handoff_row("b", "CCN", clean=True)],
+                         metrics={"a": -1, "b": -2})
+    campaign = _campaign(tmp_path, screen)
+    campaign.ledger.append("round", "previous", next_batch={"payload": {"parent_ids": ["b"]}})
+    seen = []
+
+    def measure(rows, cheap, grants):
+        assert set(grants) == {"b"}
+        seen.extend(row["parent_id"] for row in rows)
+        return [Measurement("b", cheap["b"], -3)]
+
+    outcome = campaign.round("next", "config.json", "library.csv", measure=measure)
+    assert seen == ["b"] and outcome.selected_ids == ("b",)
+    assert outcome.measurements[0].expensive_value == -3
+
+
+def test_accepted_nested_changes_reach_the_config_without_editing_the_source(tmp_path):
+    source = tmp_path / "cascade.json"
+    original = {"settings": {"keep": 10, "other": True}, "tiers": [{"cutoff": 1}]}
+    source.write_text(json.dumps(original), encoding="utf-8")
+    screen = _FakeScreen([], metrics={})
+    campaign = _campaign(tmp_path, screen)
+    campaign.ledger.append("round", "r0", change={"settings": {"keep": 3}, "/tiers/0/cutoff": 2},
+                           decision={"accepted": True})
+    campaign.round("r1", source, "library.csv", measure=lambda rows, cheap, grants: [])
+    actual = json.loads(Path(screen.planned[0]).read_text(encoding="utf-8"))
+    assert actual == {"settings": {"keep": 3, "other": True}, "tiers": [{"cutoff": 2}]}
+    assert json.loads(source.read_text(encoding="utf-8")) == original
+
+
+@pytest.mark.parametrize("path", ["/tiers/-1/cutoff", "/tiers/0/missing", "/missing"])
+def test_config_changes_cannot_silently_edit_unknown_or_negative_paths(tmp_path, path):
+    from etalon.campaign.configuration import materialize
+
+    source = tmp_path / "cascade.json"
+    source.write_text(json.dumps({"tiers": [{"cutoff": 1}]}), encoding="utf-8")
+    with pytest.raises(ValueError, match="unknown config"):
+        materialize(source, {path: 3})
+
+
+def test_nested_and_pointer_edits_follow_historical_order(tmp_path):
+    from etalon.campaign.configuration import materialize
+
+    source = tmp_path / "cascade.json"
+    source.write_text(json.dumps({"settings": {"keep": 0}}), encoding="utf-8")
+    edits = [{"settings": {"keep": 1}}, {"/settings/keep": 2}, {"settings": {"keep": 3}}]
+    assert json.loads(materialize(source, edits).read_text(encoding="utf-8"))["settings"]["keep"] == 3
+
+
+def test_postflight_checks_do_not_replace_preflight_evidence(tmp_path):
+    screen = _FakeScreen([_handoff_row("a", "CCO", clean=True)], metrics={"a": -1})
+    campaign = _campaign(tmp_path, screen)
+    outcome = campaign.round("r1", "config.json", "library.csv", measure=lambda rows, cheap, grants: [
+        Measurement("a", -1, -3, (Observation("F_BUILD_INCOMPLETE", False, "finished"),))])
+    codes = {o.code for o in outcome.measurements[0].observations}
+    assert "F_BUILD_INCOMPLETE" in codes and "F_HYDROGENS_IMPLICIT" in codes
+
+
+def test_measurements_survive_a_failed_proposer_without_permitting_repeated_spend(tmp_path):
+    screen = _FakeScreen([_handoff_row("a", "CCO", clean=True)], metrics={"a": -1})
+    campaign = _campaign(tmp_path, screen)
+
+    def broken_proposer(measurements):
+        raise RuntimeError("proposal failed after the simulation finished")
+
+    with pytest.raises(RuntimeError):
+        campaign.round("r1", "config.json", "library.csv", propose=broken_proposer,
+                       measure=lambda rows, cheap, grants: [Measurement("a", -1, -3)])
+    assert campaign.ledger.entries()[0].body["measurements"][0]["expensive_value"] == -3
+    with pytest.raises(ValueError, match="already recorded"):
+        campaign.round("r1", "config.json", "library.csv", measure=lambda *args: [])
+
+
+@pytest.mark.parametrize("value", [float("inf"), float("nan")])
+def test_nonfinite_labels_are_rejected_and_can_be_serialized(value):
+    measurement = Measurement("a", -1, value)
+    assert not rule(measurement).teaches
+    json.dumps(measurement.as_dict(), allow_nan=False)
+
+
 def test_a_round_refuses_before_spending_and_records_what_it_refused(tmp_path: Path) -> None:
     """The loop's whole order in one pass: screen, refuse, measure only what survived, admit,
     record. The refused molecule must never reach the expensive stage."""
@@ -539,8 +621,9 @@ def test_a_round_refuses_before_spending_and_records_what_it_refused(tmp_path: P
 
     # And the round is on disk, replayable, with the refusal in it.
     entries = list(campaign.ledger.entries())
-    assert [entry.kind for entry in entries] == ["round"]
-    assert entries[0].body["refused_before_spending"] == ["p:drawing"]
+    assert [entry.kind for entry in entries] == ["measurements", "round"]
+    assert entries[1].body["refused_before_spending"] == ["p:drawing"]
+    assert entries[0].body["measurements"][0]["expensive_value"] == -31.2
 
 
 def test_a_round_without_a_comparator_measures_and_learns_nothing(tmp_path: Path) -> None:
@@ -646,7 +729,7 @@ def test_the_acquisition_hook_carries_the_one_act_an_advisor_may_settle(tmp_path
     assert outcome.next_batch is not None
     assert outcome.next_batch["act"] == "spend"
     assert outcome.next_batch["autonomy"] == "acted_on"
-    assert list(campaign.ledger.entries())[0].body["next_batch"]["payload"]["chosen"] == [
+    assert list(campaign.ledger.rounds())[0].body["next_batch"]["payload"]["chosen"] == [
         "p:drawing",
         "p:good",
     ]

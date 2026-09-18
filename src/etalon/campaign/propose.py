@@ -188,6 +188,9 @@ class Acquisition:
         self.last_calibration = calibration
 
         pool = featurize([candidates[identifier] for identifier in identifiers])
+        identifiers = pool.align(identifiers)
+        if not identifiers:
+            raise ValueError("no candidates could be featurized")
         mean, spread = surrogate.predict(pool)
         predicted = intervals(identifiers, mean, spread, calibration)
 

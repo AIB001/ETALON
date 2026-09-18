@@ -7,8 +7,8 @@ update is accepted, and nothing has been learned because the difference is small
 what the panel can resolve.
 
 With 231 known molecules of which roughly 40 are potent, the standard error of an AUC
-near 0.75 is about 0.045 by the Hanley-McNeil formula. A 0.03 improvement is therefore
-not an improvement; it is the same measurement twice. So every metric here carries its
+near 0.75 is about 0.045 by the Hanley-McNeil formula. A 0.03 observed improvement is
+unresolved by this working rule, not proof of no effect. Every metric here carries its
 standard error, and :func:`decide` refuses an update it cannot distinguish from noise --
 and records the refusal, because a loop that silently declines to learn looks exactly
 like one that had nothing to learn.
@@ -18,7 +18,8 @@ Two further choices, both of which make the reported numbers smaller and more ho
 **Grouped by scaffold, not split at random.** A congeneric series shares a core, so a
 random split puts near-duplicates on both sides and the score measures memorisation of
 the core rather than ranking of the decoration. Grouping by Bemis-Murcko scaffold is the
-standard correction and it always lowers the number.
+useful leakage control, but it does not necessarily lower every score or identify every
+related chemical series.
 
 **The difference's uncertainty is bounded conservatively.** Two AUCs computed on the same
 molecules are correlated, and the standard error of their difference is smaller than the
@@ -27,6 +28,10 @@ correlation is not estimated here, so the bound used is the sum, which is the la
 difference's error can be. The cost is real and worth naming: genuine small improvements
 will be refused. That is the right direction to err when the thing being updated is the
 policy applied to every molecule afterwards.
+
+This is a conservative working acceptance heuristic, not a calibrated significance test.
+It does not adjust for repeated use of the same selection panel, scaffold dependence or
+adaptive proposal selection. A frozen independent evaluation is still needed.
 """
 
 from __future__ import annotations
@@ -35,6 +40,30 @@ import math
 from collections.abc import Sequence
 from dataclasses import dataclass
 from enum import StrEnum
+from numbers import Integral, Real
+
+
+def _real(value: float, name: str) -> None:
+    if isinstance(value, bool) or not isinstance(value, Real):
+        raise ValueError(f"{name} must be a finite real number")
+    try:
+        valid = math.isfinite(value)
+    except (OverflowError, TypeError, ValueError):
+        valid = False
+    if not valid:
+        raise ValueError(f"{name} must be a finite real number")
+
+
+def _classes(positives: int, negatives: int) -> None:
+    if any(isinstance(count, bool) or not isinstance(count, Integral) or count < 1
+           for count in (positives, negatives)):
+        raise ValueError("both classes need positive integer counts")
+
+
+def _rounded(value: float, name: str) -> float:
+    """Validate before converting accepted NumPy scalars to native JSON numbers."""
+    _real(value, name)
+    return round(float(value), 4)
 
 
 class Split(StrEnum):
@@ -53,8 +82,8 @@ class Split(StrEnum):
     #: A random holdout. Flatters a congeneric series by putting near-duplicates on both sides.
     RANDOM = "random"
     #: Every molecule scored, nothing held out. Honest for a ranker that was not fitted on this
-    #: panel -- an edited docking function has nothing to leak -- and close to meaningless for one
-    #: that was.
+    #: panel. Repeatedly selecting edited scorers on it can still overfit this panel, even
+    #: if no scorer directly trains on its labels.
     WHOLE_PANEL = "whole_panel"
 
 
@@ -74,6 +103,15 @@ class Score:
     #: available.
     split: Split = Split.WHOLE_PANEL
 
+    def __post_init__(self) -> None:
+        _real(self.auc, "AUC")
+        _real(self.standard_error, "standard error")
+        if not 0 <= self.auc <= 1 or self.standard_error < 0:
+            raise ValueError("AUC must be in [0, 1] and standard error must be nonnegative")
+        _classes(self.positives, self.negatives)
+        if not isinstance(self.split, Split):
+            raise ValueError("split must be an explicit Split enum, not an unverified string")
+
     @property
     def resolvable(self) -> float:
         """The smallest difference this panel can distinguish, roughly: two SEs.
@@ -86,14 +124,16 @@ class Score:
         came to be read as the acceptance threshold.
         """
 
-        return 2.0 * self.standard_error
+        value = 2.0 * float(self.standard_error)
+        _real(value, "score resolution")
+        return value
 
     def as_dict(self) -> dict[str, object]:
         return {
-            "auc": round(self.auc, 4),
-            "standard_error": round(self.standard_error, 4),
-            "positives": self.positives,
-            "negatives": self.negatives,
+            "auc": _rounded(self.auc, "AUC"),
+            "standard_error": _rounded(self.standard_error, "standard error"),
+            "positives": int(self.positives),
+            "negatives": int(self.negatives),
             "split": self.split.value,
             "smallest_resolvable_difference": round(self.resolvable, 4),
             "what_that_resolves": (
@@ -132,8 +172,8 @@ class Decision:
         return {
             "verdict": self.verdict.value,
             "accepted": self.accepted,
-            "delta_auc": round(self.delta, 4),
-            "uncertainty_bound": round(self.bound, 4),
+            "delta_auc": _rounded(self.delta, "AUC difference"),
+            "uncertainty_bound": _rounded(self.bound, "uncertainty bound"),
             "before": self.before.as_dict(),
             "after": self.after.as_dict(),
             "note": self.note,
@@ -153,6 +193,10 @@ def auc(scores: Sequence[float], labels: Sequence[int]) -> float:
 
     if len(scores) != len(labels):
         raise ValueError("scores and labels must be the same length")
+    for value in scores:
+        _real(value, "ranking score")
+    if any(not isinstance(label, Real) or label not in (0, 1) for label in labels):
+        raise ValueError("AUC labels must be binary 0/1 values")
     positives = [s for s, y in zip(scores, labels, strict=True) if y]
     negatives = [s for s, y in zip(scores, labels, strict=True) if not y]
     if not positives or not negatives:
@@ -184,8 +228,10 @@ def hanley_mcneil_se(value: float, positives: int, negatives: int) -> float:
     confidence -- worth knowing when a decision sits exactly on the boundary.
     """
 
-    if positives < 1 or negatives < 1:
-        raise ValueError("both classes must be non-empty")
+    _real(value, "AUC")
+    if not 0 <= value <= 1:
+        raise ValueError("AUC must be in [0, 1]")
+    _classes(positives, negatives)
     q1 = value / (2.0 - value)
     q2 = 2.0 * value * value / (1.0 + value)
     variance = (
@@ -222,18 +268,19 @@ def score(
 def scaffold_groups(smiles: Sequence[str]) -> list[str]:
     """A Bemis-Murcko scaffold per molecule, for grouping a split.
 
-    A molecule whose scaffold cannot be derived is given a group of its own rather than
-    being pooled with every other failure: pooling them would put unrelated molecules in
-    one fold and quietly re-introduce the leakage grouping exists to prevent.
+    Acyclic molecules have no Murcko core. Their canonical molecule identity is used as
+    a stable fallback, so equivalent SMILES/duplicate molecules stay together and training
+    and candidate pools do not accidentally share row-number-based scaffold ids. This
+    does NOT group all related acyclic analogues into chemical series.
     """
 
-    from rdkit import Chem, RDLogger
+    from rdkit import Chem, rdBase
     from rdkit.Chem.Scaffolds import MurckoScaffold
 
-    RDLogger.DisableLog("rdApp.*")
     groups: list[str] = []
     for index, text in enumerate(smiles):
-        molecule = Chem.MolFromSmiles(text)
+        with rdBase.BlockLogs():
+            molecule = Chem.MolFromSmiles(text)
         if molecule is None:
             groups.append(f"unparsed:{index}")
             continue
@@ -242,7 +289,7 @@ def scaffold_groups(smiles: Sequence[str]) -> list[str]:
             key = Chem.MolToSmiles(core) if core is not None else ""
         except Exception:
             key = ""
-        groups.append(key or f"acyclic:{index}")
+        groups.append(key or f"acyclic:{Chem.MolToSmiles(molecule)}")
     return groups
 
 
@@ -255,8 +302,17 @@ def decide(before: Score, after: Score, *, minimum_positives: int = 10) -> Decis
     the cost is that small real improvements are refused.
     """
 
+    if type(minimum_positives) is not int or minimum_positives < 1:
+        raise ValueError("minimum_positives must be a positive integer")
+    if not isinstance(before, Score) or not isinstance(after, Score):
+        raise ValueError("comparison requires two validated Score objects")
+    if (before.positives, before.negatives, before.split) != (after.positives, after.negatives, after.split):
+        raise ValueError("before and after must describe the same class counts and evaluation split")
+    # Matching counts is necessary, not proof of matching identities or independence.
+    # The caller still has to evaluate both scorers on the same declared panel.
     delta = after.auc - before.auc
     bound = before.standard_error + after.standard_error
+    _real(bound, "combined standard error")
 
     if min(before.positives, after.positives) < minimum_positives:
         return Decision(
@@ -266,13 +322,13 @@ def decide(before: Score, after: Score, *, minimum_positives: int = 10) -> Decis
             delta=delta,
             bound=bound,
             note=(
-                f"Only {min(before.positives, after.positives)} positives in the holdout, "
+                f"Only {min(before.positives, after.positives)} positives in the evaluated panel, "
                 f"below the {minimum_positives} this comparison needs. The difference of "
                 f"{delta:+.3f} is not evidence either way. Enlarge the known set or "
                 "accept that this round cannot be judged."
             ),
         )
-    if delta <= -bound:
+    if delta < 0 and delta <= -bound:
         return Decision(
             verdict=Verdict.WORSE,
             before=before,
@@ -281,11 +337,11 @@ def decide(before: Score, after: Score, *, minimum_positives: int = 10) -> Decis
             bound=bound,
             note=(
                 f"AUC fell by {abs(delta):.3f}, more than the {bound:.3f} this panel "
-                "cannot resolve. The update made the screen worse on molecules it had "
-                "not been fitted to; refuse it and keep the previous configuration."
+                "cannot resolve. The update made the screen worse on the declared evaluation "
+                "panel; refuse it and keep the previous configuration."
             ),
         )
-    if delta < bound:
+    if delta <= 0 or delta < bound:
         return Decision(
             verdict=Verdict.WITHIN_NOISE,
             before=before,
@@ -311,10 +367,9 @@ def decide(before: Score, after: Score, *, minimum_positives: int = 10) -> Decis
             "on both sides. Re-score it grouped by scaffold before acting on it."
         ),
         Split.WHOLE_PANEL: (
-            "But on the whole panel with nothing held out. That is the right comparison for a "
-            "ranker this campaign did not fit -- an edited scoring function has no panel labels to "
-            "leak -- and it establishes nothing about a model that was trained here. Say which "
-            "this was in the record."
+            "But on the whole panel with nothing held out. Repeated selection of edited scorers "
+            "can overfit this panel even without direct model fitting. This is selection evidence, "
+            "not independent generalization or a multiple-testing-corrected significance claim."
         ),
     }[after.split]
     return Decision(

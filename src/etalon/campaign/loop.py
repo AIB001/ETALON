@@ -42,6 +42,7 @@ from etalon.authority.grant import SpendAuthorization, authorize
 from etalon.boundary import toolchain as toolchain_module
 from etalon.boundary.infra import Infra, describe
 from etalon.boundary.screen import Screen, ScreenResult
+from etalon.campaign.configuration import materialize
 from etalon.campaign.ledger import Ledger
 from etalon.faults.attribution import Observation
 from etalon.faults.preflight import check_population, check_record, unchecked
@@ -118,6 +119,8 @@ class RoundOutcome:
     #: acquirer was supplied, which is different from an acquirer that chose nothing.
     next_batch: dict[str, Any] | None = None
     notes: tuple[str, ...] = field(default_factory=tuple)
+    measurements: tuple[Measurement, ...] = ()
+    selected_ids: tuple[str, ...] = ()
 
     def as_dict(self) -> dict[str, Any]:
         return {
@@ -133,6 +136,8 @@ class RoundOutcome:
             "authorization": self.authorization,
             "next_batch": self.next_batch,
             "notes": list(self.notes),
+            "measurements": [measurement.as_dict() for measurement in self.measurements],
+            "selected_ids": list(self.selected_ids),
         }
 
 
@@ -165,6 +170,7 @@ class Campaign:
         workers: int | None = None,
         receptor_path: Path | None = None,
         calibrate_against: str | None = None,
+        selected_ids: Sequence[str] | None = None,
     ) -> RoundOutcome:
         """Run one round and append it to the ledger.
 
@@ -181,7 +187,20 @@ class Campaign:
                 is not on the same axis as a binding free energy.
         """
 
+        if any(entry.round_id == round_id and entry.kind in {"round", "measurements", "invalid_measurements"}
+               for entry in self.ledger.entries()):
+            raise ValueError(f"round {round_id!r} is already recorded; use a new round id")
         notes: list[str] = []
+        accepted = [entry.body["change"] for entry in self.ledger.effective()
+                    if (entry.body.get("decision") or {}).get("accepted") and entry.body.get("change")]
+        if accepted:
+            config_path = materialize(config_path, accepted)
+            notes.append(f"Applied accepted configuration changes: {config_path}")
+        if selected_ids is None:
+            last = self.ledger.last_round()
+            if last is not None:
+                payload = (last.body.get("next_batch") or {}).get("payload", {})
+                selected_ids = payload.get("parent_ids", payload.get("chosen"))
         toolchain_active = toolchain_module.active()
         if not toolchain_active:
             notes.append(
@@ -197,6 +216,17 @@ class Campaign:
         plan = self.screen.plan(config_path, library, target=target)
         result: ScreenResult = self.screen.run(plan, workers=workers)
         rows = self.screen.handoff(result)
+        identifiers = [str(row.get("parent_id") or "") for row in rows]
+        if not all(identifiers) or len(set(identifiers)) != len(identifiers):
+            raise ValueError("handoff parent_id values must be nonempty and unique before spending")
+        if selected_ids is not None:
+            if len(set(selected_ids)) != len(selected_ids):
+                raise ValueError("selected_ids contains duplicates")
+            available = {str(row.get("parent_id", "")) for row in rows}
+            missing = set(selected_ids) - available
+            if missing:
+                raise ValueError(f"selected molecules are absent from this handoff: {sorted(missing)}")
+        selected = set(selected_ids) if selected_ids is not None else None
 
         # -- refuse before spending ---------------------------------------
         # The ruling and the permission are now one act. `authorize` runs exactly the check this
@@ -219,7 +249,9 @@ class Campaign:
         )
         refused: list[str] = sorted(granted.refused)
         allowed: list[dict[str, Any]] = [
-            row for row in rows if str(row.get("parent_id", "")) in granted.grants
+            row for row in rows
+            if str(row.get("parent_id", "")) in granted.grants
+            and (selected is None or str(row.get("parent_id", "")) in selected)
         ]
         spent_under_waiver: dict[str, list[str]] = {
             identifier: list(token.proceeded_under_waiver)
@@ -282,7 +314,16 @@ class Campaign:
                 "and the screen learns nothing from them -- which is the honest outcome of "
                 "a round with no docking or affinity tier."
             )
-        measurements = list(measure(allowed, cheap, granted.grants))
+        expected = {str(row["parent_id"]) for row in allowed}
+        measurements = list(measure(allowed, cheap, {key: granted.grants[key] for key in expected}))
+        received = [measurement.parent_id for measurement in measurements]
+        if len(set(received)) != len(received) or set(received) - expected:
+            self.ledger.append("invalid_measurements", round_id,
+                               measurements=[m.as_dict() for m in measurements],
+                               error="duplicate or unrequested molecule labels")
+            raise ValueError("expensive stage returned duplicate or unrequested molecule labels")
+        for identifier in sorted(expected - set(received)):
+            measurements.append(Measurement(identifier, cheap.get(identifier), None))
         # The checks the campaign already performed are attached here, so the
         # admissibility ruling sees them even when the expensive stage did not bother to.
         enriched = [
@@ -290,18 +331,24 @@ class Campaign:
                 parent_id=m.parent_id,
                 cheap_value=m.cheap_value,
                 expensive_value=m.expensive_value,
-                observations=m.observations or observations.get(m.parent_id, ()),
+                observations=observations.get(m.parent_id, ()) + m.observations,
                 units=m.units,
                 provenance={
                     **m.provenance,
                     "revision_id": plan.revision_id,
                     "run_id": result.run_id,
                     "infra": describe(),
+                    "authorization": granted.grants[m.parent_id].as_dict(),
                 },
             )
             for m in measurements
         ]
         report = admissible(enriched, self.waivers)
+        self.ledger.append(
+            "measurements", round_id,
+            measurements=[measurement.as_dict() for measurement in enriched],
+            admission=report.as_dict(),
+        )
         notes.extend(report.notes)
         notes.extend(granted.notes)
 
@@ -346,9 +393,8 @@ class Campaign:
             else:
                 next_batch = proposal.as_dict()
                 notes.append(
-                    f"Next batch chosen from {len(candidates)} candidate(s) and applied without "
-                    "asking: being wrong about what to measure costs compute, and the round after "
-                    "shows it."
+                    f"Next batch chosen from {len(candidates)} candidate(s); its ids will constrain "
+                    "the expensive stage on the next round unless explicitly overridden."
                 )
 
         outcome = RoundOutcome(
@@ -365,6 +411,8 @@ class Campaign:
             authorization=granted.as_dict(),
             next_batch=next_batch,
             notes=tuple(notes),
+            measurements=tuple(enriched),
+            selected_ids=tuple(str(row["parent_id"]) for row in allowed),
         )
         self.ledger.append(
             "round",

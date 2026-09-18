@@ -52,8 +52,9 @@ find.
 
 from __future__ import annotations
 
+import math
 from collections.abc import Iterable, Sequence
-from dataclasses import dataclass, field
+from dataclasses import asdict, dataclass, field
 from datetime import date
 from enum import StrEnum
 
@@ -92,6 +93,16 @@ class Measurement:
     units: str = "kcal/mol"
     #: Infra commits, run ids, revision id. Carried so a ruling can be re-derived.
     provenance: dict[str, object] = field(default_factory=dict)
+
+    def as_dict(self) -> dict[str, object]:
+        """Keep the labels and evidence, including invalid numeric results, in the journal."""
+
+        record = asdict(self)
+        for name in ("cheap_value", "expensive_value"):
+            value = record[name]
+            if value is not None and not math.isfinite(value):
+                record[name] = str(value)
+        return record
 
 
 @dataclass(frozen=True, slots=True)
@@ -142,6 +153,7 @@ def rule(
     waivers: WaiverSet | None = None,
     *,
     when: date | None = None,
+    require_comparator: bool = True,
 ) -> Ruling:
     """Decide whether one measurement may update the screen."""
 
@@ -152,6 +164,11 @@ def rule(
     unverifiable: list[str] = []
     unchecked: list[str] = []
     notes: list[str] = []
+
+    for name in ("cheap_value", "expensive_value"):
+        value = getattr(measurement, name)
+        if value is not None and not math.isfinite(value):
+            blocking.append(f"NONFINITE_{name.upper()}")
 
     for entry in measurement.observations:
         fault = BY_CODE.get(entry.code)
@@ -182,7 +199,7 @@ def rule(
             "Recorded rather than dropped: a molecule that was sent for simulation and "
             "came back without a result is a fact about the campaign."
         )
-    if measurement.cheap_value is None:
+    if require_comparator and measurement.cheap_value is None:
         blocking.append("NO_CHEAP_VALUE")
         notes.append(
             "No screen number to calibrate against. The expensive measurement stands on "

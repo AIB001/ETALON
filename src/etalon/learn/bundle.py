@@ -33,7 +33,9 @@ from __future__ import annotations
 
 import hashlib
 import json
+import tempfile
 from dataclasses import dataclass
+from numbers import Integral
 from pathlib import Path
 from typing import Any
 
@@ -63,6 +65,7 @@ class Bundle:
     model_sha256: str
     bundle_sha256: str
     calibration: Calibration | None
+    previous_directory: Path | None = None
 
     def as_dict(self) -> dict[str, object]:
         return {
@@ -73,6 +76,7 @@ class Bundle:
             "n_features": self.n_features,
             "model_sha256": self.model_sha256,
             "calibration": None if self.calibration is None else self.calibration.as_dict(),
+            "previous_bundle_dir": None if self.previous_directory is None else str(self.previous_directory),
             "cascade_config": {
                 "backend": "prediction.custom_model@0.1.0",
                 "settings": {
@@ -94,22 +98,47 @@ def _digest_bytes(payload: bytes) -> str:
 
 
 def _bundle_digest(directory: Path) -> str:
-    """One digest over path-and-content pairs, so a rename changes it.
+    """Use the consumer's validation and digest contract, without loading an ONNX runtime."""
 
-    The same construction as the asset manifest's tree digest, and for the same reason: a file
-    moved within a bundle is a different bundle, and a digest over contents alone would not say
-    so.
-    """
+    from molcascade.plugins.builtin.custom_model import inspect_model_bundle
 
-    combined = hashlib.sha256()
-    for path in sorted(directory.rglob("*")):
-        if not path.is_file():
-            continue
-        combined.update(str(path.relative_to(directory).as_posix()).encode())
-        combined.update(b"\0")
-        combined.update(_digest_bytes(path.read_bytes()).encode())
-        combined.update(b"\n")
-    return combined.hexdigest()
+    try:
+        return str(inspect_model_bundle(directory)["bundle_sha256"])
+    except Exception as error:
+        raise BundleError(f"MolCascade refused the model bundle: {error}") from error
+
+
+def _check_representation(surrogate: Surrogate, spec: Any) -> None:
+    width = getattr(surrogate.model, "n_features_in_", None)
+    if isinstance(width, bool) or not isinstance(width, Integral) or width != spec.width:
+        raise BundleError("fitted estimator feature width does not match the exported representation")
+    if surrogate.names != tuple(f"f{index:05d}" for index in range(spec.width)):
+        raise BundleError("fitted feature names or column order differ from the exported representation")
+    recorded = getattr(surrogate, "representation_json", None)
+    try:
+        matches = isinstance(recorded, str) and json.loads(recorded) == spec.model_dump(mode="json")
+    except (TypeError, ValueError):
+        matches = False
+    if not matches:
+        raise BundleError(
+            "training representation is absent or differs from the export specification; "
+            "refit from provenance-bearing featurize() output before exporting"
+        )
+
+
+def _existing_digest(target: Path, *, overwrite: bool) -> str | None:
+    if target.is_symlink():
+        raise BundleError("bundle output must not be a symlink")
+    if not target.exists():
+        return None
+    if not overwrite:
+        raise BundleError(f"{target} already exists; pass overwrite=True to replace a recognized bundle")
+    if not target.is_dir():
+        raise BundleError("bundle output exists but is not a directory")
+    owned = {MANIFEST_FILENAME, MODEL_FILENAME, CALIBRATION_FILENAME}
+    if any(path.name not in owned or path.is_symlink() or not path.is_file() for path in target.iterdir()):
+        raise BundleError("refusing to overwrite a directory containing unrelated or unsafe files")
+    return _bundle_digest(target)
 
 
 def export(
@@ -133,6 +162,13 @@ def export(
 
     if surrogate.model is None:
         raise BundleError("the surrogate has not been fitted, so there is nothing to export")
+    spec = representation()
+    _check_representation(surrogate, spec)
+    raw_target = Path(directory).expanduser()
+    if raw_target.is_symlink():
+        raise BundleError("bundle output must not be a symlink")
+    target = raw_target.resolve()
+    previous_digest = _existing_digest(target, overwrite=overwrite)
     try:
         import skl2onnx
         from skl2onnx.common.data_types import FloatTensorType
@@ -145,24 +181,14 @@ def export(
             f"be present. ({error})"
         ) from error
 
-    spec = representation()
-    target = Path(directory).expanduser().resolve()
-    if target.exists() and not overwrite:
-        raise BundleError(
-            f"{target} already exists. A bundle is identified by a digest over its whole "
-            "directory, so writing into a populated one produces a digest describing a mixture "
-            "of two models; pass overwrite=True to mean it."
-        )
-    target.mkdir(parents=True, exist_ok=True)
-
     onnx_model = skl2onnx.to_onnx(
         surrogate.model,
         initial_types=[("input", FloatTensorType([None, spec.width]))],
         target_opset=None,
     )
-    model_path = target / MODEL_FILENAME
     model_bytes = onnx_model.SerializeToString()
-    model_path.write_bytes(model_bytes)
+    if not isinstance(model_bytes, bytes) or not model_bytes:
+        raise BundleError("ONNX conversion produced no model bytes")
 
     manifest = {
         "schema_version": 1,
@@ -182,16 +208,59 @@ def export(
         "notes": notes
         or (
             "Random forest over the same RepresentationSpec that built its training matrix. "
-            "pIC50 target, higher meaning more potent. Predictions are means only; the "
+            "Target semantics are those supplied by the caller's endpoint. Predictions are means only; the "
             "conformal interval needs the per-tree spread, which this graph does not carry."
         ),
     }
-    _write_yaml(target / MANIFEST_FILENAME, manifest)
+    # Validate before creating anything. The downstream inspector also checks the
+    # staged bytes; neither operation imports an inference runtime or executes a graph.
+    from molcascade.plugins.builtin.custom_model import ModelBundleManifest
 
-    if calibration is not None:
-        (target / CALIBRATION_FILENAME).write_text(
-            json.dumps(calibration.as_dict(), indent=2, sort_keys=True) + "\n", encoding="utf-8"
-        )
+    try:
+        ModelBundleManifest.model_validate(manifest)
+    except ValueError as error:
+        raise BundleError(f"invalid model bundle manifest: {error}") from error
+    target.parent.mkdir(parents=True, exist_ok=True)
+    lock = target.parent / f".etalon-export-{_digest_bytes(str(target).encode())}.lock"
+    try:
+        with lock.open("x", encoding="utf-8") as handle:
+            handle.write(str(target))
+    except FileExistsError as error:
+        raise BundleError("another export owns this bundle target") from error
+    previous_directory: Path | None = None
+    try:
+        with tempfile.TemporaryDirectory(prefix=".etalon-bundle-", dir=target.parent) as temporary:
+            staging = Path(temporary)
+            (staging / MODEL_FILENAME).write_bytes(model_bytes)
+            _write_yaml(staging / MANIFEST_FILENAME, manifest)
+            if calibration is not None:
+                calibration_body = {
+                    **calibration.as_dict(), "model_sha256": _digest_bytes(model_bytes),
+                    "endpoint_id": endpoint_id,
+                    "binding_scope": "caller-supplied calibration; association with this estimator is not independently verified",
+                }
+                (staging / CALIBRATION_FILENAME).write_text(
+                    json.dumps(calibration_body, indent=2, sort_keys=True, allow_nan=False) + "\n",
+                    encoding="utf-8",
+                )
+            bundle_digest = _bundle_digest(staging)
+            if _existing_digest(target, overwrite=overwrite) != previous_digest:
+                raise BundleError("bundle target changed during export; existing files were preserved")
+            if previous_digest is not None:
+                # Keep the old directory recoverable, including its calibration. Do not
+                # delete or merge it. A failed install restores it when the target is free.
+                previous_directory = Path(tempfile.mkdtemp(prefix=f".{target.name}.previous-", dir=target.parent))
+                previous_directory.rmdir()
+                target.rename(previous_directory)
+            try:
+                staging.rename(target)
+            except OSError as error:
+                if previous_directory is not None and not target.exists():
+                    previous_directory.rename(target)
+                    previous_directory = None
+                raise BundleError("could not install staged bundle; old bundle was preserved") from error
+    finally:
+        lock.unlink(missing_ok=True)
 
     return Bundle(
         directory=target,
@@ -199,8 +268,9 @@ def export(
         endpoint_id=endpoint_id,
         n_features=spec.width,
         model_sha256=manifest["model"]["sha256"],  # type: ignore[index]
-        bundle_sha256=_bundle_digest(target),
+        bundle_sha256=bundle_digest,
         calibration=calibration,
+        previous_directory=previous_directory,
     )
 
 

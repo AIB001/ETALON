@@ -160,7 +160,7 @@ class Trajectory:
         significance is fictional.
         """
 
-        return self.drift() <= NOT_SETTLED_RATIO * self.fluctuation()
+        return bool(self.drift() <= NOT_SETTLED_RATIO * self.fluctuation())
 
     def retained_fraction(self) -> float | None:
         """Share of the scored pose's contacts still present, or ``None`` if none were recorded."""
@@ -221,7 +221,9 @@ def check_stability(trajectory: Trajectory) -> tuple[Observation, ...]:
     observations = [
         Observation(
             "F_POSE_LEFT_THE_SITE",
-            fired=peak > LEFT_THE_SITE_NM,
+            # This is an internal numeric comparison, possibly a NumPy scalar;
+            # normalize its result, not untrusted external observation flags.
+            fired=bool(peak > LEFT_THE_SITE_NM),
             detail=(
                 f"peak ligand RMSD {peak:.2f} nm over {length}, against a {LEFT_THE_SITE_NM} nm "
                 "cutoff"
@@ -270,7 +272,7 @@ def check_stability(trajectory: Trajectory) -> tuple[Observation, ...]:
         observations.append(
             Observation(
                 "F_POSE_NOT_THE_SCORED_ONE",
-                fired=retained < CONTACT_PERSISTENCE,
+                fired=bool(retained < CONTACT_PERSISTENCE),
                 detail=(
                     f"{retained:.0%} of the docked pose's {len(trajectory.scored_contacts)} "
                     f"contacts persisted in at least {CONTACT_PRESENT:.0%} of frames"
@@ -286,7 +288,7 @@ def check_stability(trajectory: Trajectory) -> tuple[Observation, ...]:
     observations.append(
         Observation(
             "F_SINGLE_REPLICA_ESTIMATE",
-            fired=trajectory.replicas < 2,
+            fired=bool(trajectory.replicas < 2),
             detail=(
                 f"{trajectory.replicas} replica(s). Neighbouring trajectories diverge "
                 "exponentially, and replicas differing only in initial velocities have disagreed "

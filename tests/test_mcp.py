@@ -45,11 +45,13 @@ class Collector:
 
 
 def _tools() -> dict[str, object]:
-    from etalon.mcp import governance, planning
+    from etalon.mcp import active, execution, governance, planning
 
     collector = Collector()
     planning.register(collector)
     governance.register(collector)
+    active.register(collector)
+    execution.register(collector)
     return collector.tools
 
 
@@ -154,6 +156,26 @@ def test_the_waiver_tool_is_the_only_one_a_model_cannot_complete() -> None:
     never = [name for name, value in classification.items() if value == "never-by-a-model"]
 
     assert never == ["etalon_recommend_waiver"]
+
+
+def test_active_inspection_does_not_create_a_journal(tmp_path):
+    database = tmp_path / "absent.sqlite"
+    response = json.loads(_tools()["etalon_active_status"](str(database)))
+    assert response["ok"] is False
+    assert not database.exists()
+
+
+def test_active_mcp_replay_and_plan_share_the_persisted_feedback(tmp_path):
+    from etalon.active.replay import synthetic_manifest
+
+    manifest = tmp_path / "oracle.json"
+    manifest.write_text(json.dumps(synthetic_manifest(size=16)), encoding="utf-8")
+    database = tmp_path / "journal.sqlite"
+    result = json.loads(_tools()["etalon_active_replay"](str(manifest), str(database), rounds=2))
+    assert result["ok"] and len(result["rounds"]) == 2
+    plan = json.loads(_tools()["etalon_active_plan"](str(database)))
+    assert plan["ok"] and plan["model"]["training_size"] == result["state"]["admitted"]
+    assert all(c["evidence"]["model_hash"] == plan["model"]["training_hash"] for c in plan["choices"])
 
 
 # -- the guards refuse ----------------------------------------------------

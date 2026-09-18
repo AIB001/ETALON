@@ -329,7 +329,8 @@ def test_a_timed_out_run_still_reports_the_stages_that_finished() -> None:
 
     assert cut_short.exit_code is None
     assert cut_short.timed_out is True
-    assert cut_short.succeeded is True
+    # Products remain evidence of completed stages, not proof of clean termination.
+    assert cut_short.succeeded is False
     assert cut_short.finished == ("em", "nvt", "npt")
     assert cut_short.as_dict()["timed_out"] is True
 

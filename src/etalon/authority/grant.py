@@ -306,6 +306,7 @@ def require(
     grants: Mapping[str, SpendAuthorization],
     *,
     when: datetime | None = None,
+    receptor_path: Path | None = None,
 ) -> SpendAuthorization:
     """Return the token that authorises spending on this row, or refuse with the remedy.
 
@@ -340,6 +341,13 @@ def require(
             "between the check and the spend, so what was ruled on is not what would be built. "
             "This is the taxonomy's WRONG_SUBJECT applied to the authorization itself. Re-run "
             "authorize() on the rows you are actually going to build."
+        )
+    if receptor_path is not None and (
+        not token.receptor_sha256 or _file_digest(receptor_path) != token.receptor_sha256
+    ):
+        raise NotAuthorized(
+            "the actual receptor was not checked or changed after authorization; "
+            "re-run authorize() with the receptor file the stage will use"
         )
     return token
 

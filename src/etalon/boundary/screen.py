@@ -93,6 +93,7 @@ class ScreenPlan:
     advisories: tuple[Any, ...]
     assets: tuple[Any, ...]
     backends: tuple[Any, ...]
+    configuration_kind: str = "cascade"
     #: The objects MolCascade built. Live Python, not part of any record, and kept so
     #: the plan a caller inspected is the plan that runs -- the same reason
     #: MolCascade's own MCP layer keeps them.
@@ -106,6 +107,7 @@ class ScreenPlan:
             "advisory_count": len(self.advisories),
             "asset_count": len(self.assets),
             "backend_count": len(self.backends),
+            "configuration_kind": self.configuration_kind,
         }
 
 
@@ -169,7 +171,7 @@ class Screen:
     def plan(
         self,
         config_path: str | Path,
-        library: str | Path,
+        library: str | Path | None = None,
         *,
         target: dict[str, Any] | None = None,
     ) -> ScreenPlan:
@@ -194,22 +196,22 @@ class Screen:
         from molcascade.plugins import create_builtin_registry
 
         screening = load_screening_config(str(config_path))
-        if screening.cascade is None:
-            raise ValueError(
-                f"{config_path} is not a tier-first cascade config. ETALON drives the "
-                "cascade schema because that is the form a feedback update can edit "
-                "criterion by criterion; a flat pipeline has no tiers to tune."
-            )
-
         registry = create_builtin_registry()
         cascade = screening.cascade
-        lowered = lower_cascade(
-            cascade,
-            registry=registry,
-            library_path=str(library),
-            target=TargetConfig.model_validate(target) if target else None,
-        )
-        compiled = PipelineCompiler(registry).compile(lowered.pipeline)
+        if cascade is not None:
+            lowered = lower_cascade(
+                cascade,
+                registry=registry,
+                library_path=str(library) if library is not None else None,
+                target=TargetConfig.model_validate(target) if target else None,
+            )
+            pipeline = lowered.pipeline
+        else:
+            if library is not None or target is not None:
+                raise ValueError("flat pipelines bind their own inputs/target; omit library and target overrides")
+            assert screening.pipeline is not None
+            pipeline = screening.pipeline
+        compiled = PipelineCompiler(registry).compile(pipeline)
 
         return ScreenPlan(
             revision_id=compiled.revision.revision_id,
@@ -221,11 +223,11 @@ class Screen:
                     "mode": tier.mode.value,
                     "criteria": [criterion.id for criterion in tier.criteria],
                 }
-                for tier in cascade.tiers
+                for tier in (cascade.tiers if cascade is not None else ())
                 if tier.enabled
             ),
             advisories=tuple(
-                preflight_docking_advisories(lowered.pipeline.stages, registry=registry)
+                preflight_docking_advisories(pipeline.stages, registry=registry)
             ),
             assets=tuple(preflight_assets(compiled.stages)),
             backends=tuple(
@@ -236,7 +238,8 @@ class Screen:
                     ),
                 )
             ),
-            _internal={"registry": registry, "pipeline": lowered.pipeline, "compiled": compiled},
+            configuration_kind=screening.kind,
+            _internal={"registry": registry, "pipeline": pipeline, "compiled": compiled},
         )
 
     # -- compose ------------------------------------------------------------
@@ -508,7 +511,7 @@ class Screen:
         """
 
         docking = self.artifact_carrying(result, "docking_score/v1")
-        if docking is not None:
+        if docking is not None and metric_id is None:
             rows = self.read(docking, contract_id="docking_score/v1")
             # Rank 0 only: a lower-ranked pose is a different hypothesis about the same
             # molecule, and averaging hypotheses is not a score.

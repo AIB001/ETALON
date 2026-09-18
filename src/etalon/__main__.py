@@ -85,7 +85,7 @@ def _infra(arguments: argparse.Namespace) -> int:
     report = describe()
     if arguments.json:
         print(json.dumps(report, indent=2, ensure_ascii=False))
-        return 0
+        return 0 if all(entry.get("pinned") for entry in report.values()) else 1
     pinned = True
     for name, entry in report.items():
         if entry.get("pinned"):
@@ -165,6 +165,12 @@ def main(argv: list[str] | None = None) -> int:
         prog="etalon", description=__doc__.splitlines()[0] if __doc__ else ""
     )
     sub = parser.add_subparsers(dest="command", required=True)
+    from etalon.active.cli import register
+
+    register(sub)
+    from etalon.execution_cli import register as register_execution
+
+    register_execution(sub)
 
     plan = sub.add_parser("plan", help="render a funnel's shape, cost and refusals")
     plan.add_argument("--pool", type=int, default=750_000, help="molecules entering the funnel")

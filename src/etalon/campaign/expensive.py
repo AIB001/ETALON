@@ -21,12 +21,15 @@ acceptable. It reports; the campaign's waivers decide.
 
 from __future__ import annotations
 
+import hashlib
+import math
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
 from etalon.boundary.simulate import (
+    STAGE_PRODUCTS,
     Simulate,
     SimulationError,
     materialize_ligands,
@@ -51,9 +54,13 @@ class PrismStage:
         stages: Which driver stages are required for a result to count.
         timeout_per_molecule: Wall clock for one drive. The default is deliberately finite:
             PRISM's production default is 500 ns, so a campaign that wanted equilibration
-            must be able to stop, and a timeout with em/nvt/npt on disk is a success.
+            must be able to stop. Completed stage products are retained on timeout,
+            but an unclean termination is not an admissible affinity measurement.
         mmpbsa_subdir: Where to look for a finished gmx_MMPBSA result, relative to the
             build. Absent is the normal case and is reported, not raised.
+        production_ns: Optional explicit production duration, forwarded to the build and
+            bound into its manifest. Required-product ``stages`` do not stop the driver
+            before production; leaving this unset preserves PRISM's default duration.
     """
 
     simulate: Simulate
@@ -62,6 +69,26 @@ class PrismStage:
     timeout_per_molecule: int = 86_400
     mmpbsa_subdir: str = "GMX_PROLIG_MMPBSA"
     reuse: bool = True
+    production_ns: float | None = None
+
+    def __post_init__(self) -> None:
+        if self.production_ns is not None and (
+            isinstance(self.production_ns, bool) or not isinstance(self.production_ns, (int, float))
+            or not math.isfinite(self.production_ns) or self.production_ns <= 0
+        ):
+            raise ValueError("production_ns must be finite and positive, or None")
+        if (not self.stages or len(set(self.stages)) != len(self.stages)
+                or set(self.stages) - {name for name, _, _ in STAGE_PRODUCTS}):
+            raise ValueError("stages must be nonempty, unique known driver stages")
+        if (isinstance(self.timeout_per_molecule, bool)
+                or not isinstance(self.timeout_per_molecule, (int, float))
+                or not math.isfinite(self.timeout_per_molecule)
+                or self.timeout_per_molecule <= 0):
+            raise ValueError("timeout_per_molecule must be finite and positive")
+        subdir = Path(self.mmpbsa_subdir)
+        if (not self.mmpbsa_subdir.strip() or subdir.is_absolute()
+                or ".." in subdir.parts or "\\" in self.mmpbsa_subdir or "\0" in self.mmpbsa_subdir):
+            raise ValueError("mmpbsa_subdir must be a relative path inside the build")
 
     def __call__(
         self,
@@ -94,14 +121,20 @@ class PrismStage:
                 "stage that spent when nobody said it could would be ADR 0006's bug with a "
                 "different name."
             )
+        identifiers = [str(row.get("parent_id") or "") for row in rows]
+        if not all(identifiers) or len(set(identifiers)) != len(identifiers):
+            raise NotAuthorized("handoff parent_id values must be nonempty and unique before spending")
         for row in rows:
-            require(row, grants)
+            require(row, grants, receptor_path=self.receptor)
 
         ligand_dir = self.simulate.workspace / "ligands"
         written = materialize_ligands(rows, ligand_dir)
 
         out: list[Measurement] = []
         for row, material in zip(rows, written, strict=True):
+            # A long preceding simulation may expire the next token or the receptor
+            # may change. The batch's first check cannot authorize every later spend.
+            require(row, grants, receptor_path=self.receptor)
             identifier = str(row.get("parent_id") or "")
             if not material.usable:
                 # The seam refused it, which is a finding about the record rather than
@@ -127,10 +160,11 @@ class PrismStage:
 
     def _one(self, identifier: str, ligand: Path | None, cheap: float | None) -> Measurement:
         assert ligand is not None
-        run_id = f"{identifier.rsplit(':', 1)[-1][:16]}"
+        run_id = hashlib.sha256(identifier.encode("utf-8")).hexdigest()
         try:
+            duration = {"production_ns": self.production_ns} if self.production_ns is not None else {}
             build = self.simulate.build(
-                self.receptor, ligand, run_id=run_id, reuse=self.reuse
+                self.receptor, ligand, run_id=run_id, reuse=self.reuse, **duration
             )
         except SimulationError as error:
             # A refusal before any compute: the environment was not ready, or the directory
@@ -157,7 +191,8 @@ class PrismStage:
                 observations=postflight.check_build(
                     {"built": False, "detail": build.detail}, log
                 ),
-                provenance={"run_id": build.run_id, "output_dir": str(build.output_dir)},
+                provenance={"run_id": build.run_id, "output_dir": str(build.output_dir),
+                            "execution": dict(build.execution)},
             )
 
         drive = self.simulate.drive(
@@ -166,7 +201,13 @@ class PrismStage:
         manifest = {"build": {"built": True}, "drive": drive.as_dict()}
         observations = postflight.check_run(manifest, build_log=log, requested=self.stages)
 
-        energy = read_binding_energy(build.output_dir / self.mmpbsa_subdir)
+        energy_dir = (build.output_dir / self.mmpbsa_subdir).resolve()
+        energy_file = (energy_dir / "FINAL_RESULTS_MMPBSA.dat").resolve()
+        energy = (
+            read_binding_energy(energy_dir)
+            if energy_dir.is_relative_to(build.output_dir.resolve())
+            and energy_file.is_relative_to(build.output_dir.resolve()) else None
+        )
         provenance: dict[str, object] = {
             "run_id": build.run_id,
             "output_dir": str(build.output_dir),
@@ -174,9 +215,14 @@ class PrismStage:
             "driver_exit_code": drive.exit_code,
             "timed_out": drive.timed_out,
             "arguments": dict(build.arguments),
+            "execution": dict(drive.execution),
         }
         if energy is not None:
             provenance["binding_energy"] = energy.as_dict()
+            if not drive.succeeded:
+                provenance["binding_energy_withheld_reason"] = (
+                    "driver did not terminate successfully; retained output is not an admitted label"
+                )
         else:
             provenance["no_binding_energy"] = (
                 f"no FINAL_RESULTS_MMPBSA.dat under {self.mmpbsa_subdir}. Equilibration is "
@@ -186,7 +232,7 @@ class PrismStage:
         return Measurement(
             parent_id=identifier,
             cheap_value=cheap,
-            expensive_value=None if energy is None else energy.total_kcal_mol,
+            expensive_value=None if energy is None or not drive.succeeded else energy.total_kcal_mol,
             observations=observations,
             provenance=provenance,
         )
