@@ -2,14 +2,14 @@
 
 A CADD campaign agent that knows how much to trust its own numbers.
 
-The [2026-09-18 review](docs/review-2026-09-18.md) evaluates the architecture,
-real execution coverage, LLM compatibility, active learning and related agent systems.
-The [runtime guide](docs/runtime-guide.md) covers the new `doctor` command, persistent
-background screening (`screen plan / submit / status`), and interchangeable OpenAI,
+Detailed documentation, reviews and validation records under `docs/` are maintained locally
+and excluded from Git. The overview and runnable examples below remain available in this repository.
+
+ETALON provides the `doctor` command, persistent background screening
+(`screen plan / submit / status`), and interchangeable OpenAI,
 Anthropic and DeepSeek HTTP advisors. Screening jobs survive client disconnects and
 duplicate submissions retain one job. They do not share the active campaign budget or
-automatically launch downstream affinity calculations. See the
-[validation record](docs/validation-2026-09-18.md) for what was actually exercised.
+automatically launch downstream affinity calculations.
 
 ## Executable active learning and composable cascades
 
@@ -19,22 +19,17 @@ default screening tiers**: use an individual component, author a new cascade, or
 pipeline. Register redesigned protocols under new endpoint ids while retaining historical labels
 and a fixed scientific objective.
 
-Start with the [implementation and research guide](docs/active-learning.md), the
-[prior-art and innovation assessment](docs/research-innovation-2026-09-17.md), the
-[initial validation record](docs/validation-2026-09-17.md), the
-[decision-controller validation](docs/validation-decision-2026-09-17.md), and the runnable
-[real-component example](examples/component_learning.py). The guide separates verified engineering
-behavior from unproven scientific efficacy, and documents crash recovery, budgets and limitations.
-The next stage adds [bounded protocol evolution](docs/protocol-learning.md): persist an exact edit
+Start with the runnable [real-component example](examples/component_learning.py).
+Verified engineering behavior does not establish scientific efficacy.
+The next stage adds bounded protocol evolution: persist an exact edit
 space, propose a variant, compile its contracts, authorize a capped trial, then explicitly promote
 or retire it against predeclared operational criteria. Recipes and evidence graphs survive restart;
-retirement stops new queries without deleting acquired labels. See the
-[protocol validation record](docs/validation-protocol-2026-09-17.md).
-The [learned protocol-search baseline](docs/protocol-search.md) now ranks preauthorized edit
+retirement stops new queries without deleting acquired labels.
+The learned protocol-search baseline now ranks preauthorized edit
 combinations from frozen, fixed-panel feedback. It includes shared-linear, random and fixed
 selection, explicit missing-readout penalties, durable decisions and a separate synthetic ablation.
 It does not autonomously authorize or promote protocols, nor establish CADD efficacy.
-An opt-in [economic stopping policy](docs/protocol-stopping.md) compares the expected improvement
+An opt-in economic stopping policy compares the expected improvement
 of a complete audit with an explicitly authorized score/cost exchange rate. It preserves legacy
 searches, never truncates an ongoing panel, and includes a separate stopping/no-stopping ablation.
 Use a dedicated virtual environment for the optional dependencies below. Run these commands from
@@ -42,12 +37,9 @@ the complete checkout root and retain `asset/MANIFEST.json` and both vendored tr
 PRISM workflows currently rely on this checkout plus editable installation: the ordinary wheel
 packages `src/etalon`, not the asset trees, and is not a standalone live-infrastructure deployment.
 
-The current [architecture map](docs/architecture-current.md) distinguishes the inner molecule–endpoint
-loop, bounded protocol-search loop, and explicit human control boundaries. The
-[90-minute integrity review](docs/review-2026-09-17.md) records the latest fixes, regression results,
-compatibility changes and remaining limitations; engineering tests are not CADD efficacy evidence.
-The [next experimental plan](docs/experiment-plan-2026-09-17.md) separates testable claims about
-protocol learning, evidence admission and budget protection; it is a proposed design, not a completed study.
+The architecture distinguishes the inner molecule–endpoint loop, bounded protocol-search loop,
+and explicit human control boundaries. Engineering tests are not CADD efficacy evidence;
+claims about protocol learning, evidence admission and budget protection require scientific validation.
 
 ```bash
 pip install -e '.[active]'                # numeric controller and offline oracle replay
@@ -104,8 +96,8 @@ has to be the code the citation names. `src/etalon/boundary/infra.py` enforces t
 import and refuses when an editable install shadows the vendored copy — which it did,
 silently, the first time it was checked.
 
-> **Not in this repository yet.** `findings/` — the measurement records — and `docs/adr/` — the
-> architectural decisions — are held back for now, so links to them below do not resolve here. The
+> **Kept locally.** `findings/` — the measurement records — and `docs/` — the documentation,
+> including architectural decisions — are excluded from Git. Links to findings below do not resolve here. The
 > numbers they carry are quoted inline throughout this file and in the source, and the MCP server
 > reports the two resources as absent rather than failing. Nothing else reads them.
 
@@ -248,7 +240,7 @@ An advisor can use the `claude` CLI with the operator's existing login, or the o
 `HttpAdvisor` transport for OpenAI, Anthropic or DeepSeek. HTTP credentials are read from
 environment variables at request time; model names are explicit. These transports provide
 proposals to the existing campaign and do not supply an autonomous tool-calling host.
-See [configuration and verification limits](docs/runtime-guide.md).
+Provider-specific response compatibility and live account access require separate validation.
 
 **An advisor proposes and never grants**, and the gradation is by what being wrong costs rather
 than by how confident the model sounds:
@@ -261,7 +253,7 @@ than by how confident the model sounds:
 | a waiver for a `WRONG_SUBJECT` fault | **refused** | the validity of a recorded result |
 | a hypothesis about a divergence | recorded, never acted on | nothing, while marked as one |
 
-[`docs/adr/0003`](docs/adr/0003-an-advisor-proposes-and-never-grants.md) carries the reasoning and
+`docs/adr/0003` carries the reasoning and
 the citations. The short version: the documented failure of these systems is not a wrong answer
 but a confident, well-formatted one — "overexcitement" that declares success despite obvious
 failure, and structured output that carries an impression of rigour its content has not earned.
@@ -281,7 +273,7 @@ connected the two. Every refusal was advice offered beside an action it had no r
 and the sentence above about guards rested on a model choosing to be guarded in round nine of a
 campaign whose workflow it read in round one.
 
-[`docs/adr/0006`](docs/adr/0006-a-guard-on-the-path-nobody-takes-is-not-a-guard.md) named this
+`docs/adr/0006` named this
 class of bug and fixed one instance of it. The class was larger than the instance.
 
 `authority/` closes it by type rather than by documentation. `authorize()` runs the preflight
@@ -328,7 +320,7 @@ independent*.
 
 Applying that to scoring functions and not to the advisors scoring them is where the analogy stopped
 being carried. Every multi-agent system surveyed for
-[`docs/adr/0007`](docs/adr/0007-a-council-is-an-instrument-and-must-be-calibrated.md) — PharmAgents,
+`docs/adr/0007` — PharmAgents,
 DrugAgent, Mozi, Robin, BioDiscoveryAgent, TxAgent, STELLA, PharmaSwarm, DeepMind's AI co-scientist —
 **reports no agreement statistic for its own panel.** No kappa, no correlated-error analysis, no
 measured single-agent comparison. Meanwhile the general literature has been reporting a **mean effect
@@ -698,7 +690,7 @@ they are sixteen chemotypes that bind the same kinase.
 That is the pipeline pulling against itself. The early tiers and the acquisition layer select for
 diversity and scaffold novelty *on purpose* (`findings/0003` is why), and those are exactly the
 molecules a relative method cannot relate.
-[`docs/adr/0005`](docs/adr/0005-if-fep-is-the-endpoint-generation-is-constrained.md) records the three
+`docs/adr/0005` records the three
 ways out and says the choice belongs before generation, not after.
 
 ```bash
@@ -733,25 +725,25 @@ known actives and contributes nothing a campaign could not have bought.
 Every architectural decision is an ADR carrying its own evidence rather than its own
 argument.
 
-- [`docs/adr/0001`](docs/adr/0001-a-build-is-not-a-pure-function.md) — a PRISM build is not a
+- `docs/adr/0001` — a PRISM build is not a
   pure function of its inputs. `gmx genion` takes no seed: two runs from identical inputs
   gave `7c3e3472…` and `098089b3…`. Fixed from outside with a `gmx` shim; same seed gives
   `65ef4554…` twice.
-- [`docs/adr/0002`](docs/adr/0002-a-magnitude-band-cannot-decide-whether-to-refuse.md) — a
+- `docs/adr/0002` — a
   magnitude band cannot decide whether to refuse a molecule. The rule that said otherwise
   blocked a molecule that was entirely correct.
-- [`docs/adr/0004`](docs/adr/0004-a-tier-must-pay-for-itself.md) — a tier must pay for itself, and
+- `docs/adr/0004` — a tier must pay for itself, and
   a stage answering a different question is not a tier.
-- [`docs/adr/0005`](docs/adr/0005-if-fep-is-the-endpoint-generation-is-constrained.md) — if relative
+- `docs/adr/0005` — if relative
   FEP is the endpoint, generation is constrained: 110 of 120 pairs among the panel's most potent
   molecules are not alchemical edges.
-- [`docs/adr/0006`](docs/adr/0006-a-guard-on-the-path-nobody-takes-is-not-a-guard.md) — a guard on
+- `docs/adr/0006` — a guard on
   the path nobody takes is not a guard. The MCP tools took `waived` as a list of fault codes and
   honoured it without constructing a waiver, so every check in `judgment/waiver.py` was bypassed on
   the only path a model uses: **a model could release `F_COORDINATES_ARE_A_DEPICTION` — the cause
   the same tool calls unfixable by a waiver — by typing its name.** `refuse_if_not_an_advisors_decision`
   had zero production callers, and `Act.SPEND` had no implementation at all.
-- [`docs/adr/0007`](docs/adr/0007-a-council-is-an-instrument-and-must-be-calibrated.md) — a council of
+- `docs/adr/0007` — a council of
   advisors is an instrument, and one that has not been calibrated does not get used. The precondition
   was already in this repository, applied to scoring functions; none of the published multi-agent
   drug-discovery systems applies it to its own agents. Measured here, two seats with disjoint evidence
