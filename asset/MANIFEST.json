@@ -14,6 +14,20 @@
       "tracked_files": 269,
       "tree_sha256": "558b669939d5f555ee24111493e78e92a1fec7003dfb85d7aba5bc0cf3da30f6"
     },
+    "molquarry": {
+      "copied_bytes": 465459,
+      "copied_files": 59,
+      "excluded_files": 15,
+      "excluded_prefixes": [
+        "tests/"
+      ],
+      "source_commit": "e3e9a863c8604a8c6c48aef46c81d89252f9b3ea",
+      "source_committed_at": "2026-09-19T18:55:50+08:00",
+      "source_path": "/mnt/e/My_Project/MolQuarry",
+      "source_subject": "Harden workflow recovery, scientific exports and HTTP query handling",
+      "tracked_files": 74,
+      "tree_sha256": "c40adf7dc1a67ca25040e1ee18867bdeee92419b02833a3e81def633ce5446c4"
+    },
     "prism": {
       "copied_bytes": 25856652,
       "copied_files": 504,

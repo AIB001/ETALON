@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Copy the two packages into ETALON/asset as pinned, verifiable trees.
+"""Copy infrastructure packages into ETALON/asset as pinned, verifiable trees.
 
 Three things about this script are deliberate, and two of them were learned by it going
 wrong.
@@ -38,6 +38,7 @@ ASSET = ETALON / "asset"
 SOURCES = {
     "molcascade": Path("/mnt/e/My_Project/MolCascade"),
     "prism": Path("/mnt/e/My_Project/PRISM/PRISM_Alpha/PRISM-main"),
+    "molquarry": Path("/mnt/e/My_Project/MolQuarry"),
 }
 #: Excluded from the asset copy, with the reason recorded rather than implied.
 EXCLUDE_PREFIXES = ("tests/",)
@@ -103,7 +104,8 @@ def vendor_one(name: str, src: Path, *, write: bool) -> dict[str, object]:
         # Digest what is already vendored, so the default run answers "does the asset
         # still match its manifest" without touching anything.
         copied = [
-            str(path.relative_to(dest).as_posix()) for path in sorted(dest.rglob("*")) if path.is_file()
+            str(path.relative_to(dest).as_posix()) for path in sorted(dest.rglob("*"))
+            if path.is_file() and "__pycache__" not in path.parts
         ]
         total_bytes = sum((dest / relative).stat().st_size for relative in copied)
 
@@ -157,6 +159,10 @@ def main() -> int:
         "Without this the script only digests what is already vendored and compares.",
     )
     parser.add_argument(
+        "--asset", action="append", choices=sorted(SOURCES),
+        help="Refresh only the named asset; preserves every other pin and the reference panel.",
+    )
+    parser.add_argument(
         "--allow-dirty",
         action="store_true",
         help="Vendor from a source tree with uncommitted changes to tracked files. The "
@@ -164,9 +170,10 @@ def main() -> int:
         "untrue; this exists for a deliberate experiment, not for convenience.",
     )
     arguments = parser.parse_args()
+    selected = {name: SOURCES[name] for name in dict.fromkeys(arguments.asset or SOURCES)}
 
     if arguments.write and not arguments.allow_dirty:
-        dirty = {name: dirt(src) for name, src in SOURCES.items()}
+        dirty = {name: dirt(src) for name, src in selected.items()}
         offending = {name: lines for name, lines in dirty.items() if lines}
         if offending:
             for name, lines in offending.items():
@@ -181,9 +188,13 @@ def main() -> int:
             )
             return 1
 
-    manifest: dict[str, object] = {"schema_version": 1, "assets": {}}
+    target = ASSET / "MANIFEST.json"
+    manifest: dict[str, object] = (
+        json.loads(target.read_text(encoding="utf-8"))
+        if arguments.asset and target.is_file() else {"schema_version": 1, "assets": {}}
+    )
     assets: dict[str, object] = manifest["assets"]  # type: ignore[assignment]
-    for name, src in SOURCES.items():
+    for name, src in selected.items():
         assets[name] = vendor_one(name, src, write=arguments.write)
         entry = assets[name]
         assert isinstance(entry, dict)
@@ -193,9 +204,9 @@ def main() -> int:
             f"commit {str(entry['source_commit'])[:12]}  "
             f"tree {str(entry['tree_sha256'])[:12]}"
         )
-    manifest["reference"] = lift_reference(write=arguments.write)
+    if "molcascade" in selected:
+        manifest["reference"] = lift_reference(write=arguments.write)
 
-    target = ASSET / "MANIFEST.json"
     rendered = json.dumps(manifest, indent=2, sort_keys=True) + "\n"
     if arguments.write:
         target.write_text(rendered, encoding="utf-8")

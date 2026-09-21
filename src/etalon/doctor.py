@@ -45,6 +45,10 @@ def diagnose(*, prism_python: str | None = None) -> dict[str, Any]:
     active_packages = {"numpy": _package("numpy", "numpy", (1, 24), None),
                        "scipy": packages["scipy"]}
     active = all(row["ready"] for row in active_packages.values())
+    quarry_packages = {"httpx": _package("httpx", "httpx", (0, 27), (1,)),
+                       "pydantic": packages["pydantic"]}
+    quarry = (all(row["ready"] for row in quarry_packages.values())
+              and infrastructure.get("molquarry", {}).get("pinned", False))
     cascade = all(row["ready"] for row in packages.values())
     cascade = cascade and infrastructure["molcascade"].get("pinned", False)
     components: dict[str, Any] = {"ready": False}
@@ -74,11 +78,12 @@ def diagnose(*, prism_python: str | None = None) -> dict[str, Any]:
             simulation["scope"] = "executables only; not a successful PRISM build or affinity calculation"
         except Exception as error:
             simulation = {"ready": False, "problem": str(error)}
-    readiness = {"planning": True, "active": active, "cascade": bool(cascade),
+    readiness = {"planning": True, "active": active, "cascade": bool(cascade), "quarry": bool(quarry),
                  "mcp": mcp["ready"], "prism-build-tools": simulation["ready"]}
     return {
         "python": sys.executable, "python_version": sys.version.split()[0],
         "readiness": readiness, "packages": packages, "active_dependencies": active_packages,
+        "quarry_dependencies": quarry_packages,
         "infrastructure": infrastructure,
         "components": components, "mcp": mcp, "simulation": simulation,
         "advisors": {"claude_cli_installed": shutil.which("claude") is not None,
@@ -86,7 +91,8 @@ def diagnose(*, prism_python: str | None = None) -> dict[str, Any]:
                                          for provider, key in (("openai", "OPENAI_API_KEY"),
                                                                ("anthropic", "ANTHROPIC_API_KEY"),
                                                                ("deepseek", "DEEPSEEK_API_KEY"))}},
-        "install_hint": "From the complete checkout: python -m pip install -e '.[cascade,active,mcp,llm]'",
+        "install_hint": "python -m pip install -e '.[cascade,active,quarry,mcp,llm]' (checkout); "
+                        "use [quarry-deliverables] for optional structure/workbook workflows",
         "scope": "Readiness probes only. Docking backends/weights are checked against a specific screen plan. "
                  "Asset provenance records manifest identities; use tools/verify_assets.py --deep for content verification.",
     }

@@ -50,10 +50,12 @@ def choose_decision(spec: CampaignSpec, candidates: Mapping[str, Candidate],
                        and (task not in allowed or key in allowed[task])
                        and (not endpoint.requires_handoff or candidates[key].handoff)]
                  for task, endpoint in endpoints.items()
-                 if fits_budget(costs[task], remaining) and limits.get(task, 1) > 0}
+                 if endpoint.queryable and fits_budget(costs[task], remaining)
+                 and limits.get(task, 1) > 0}
     objective = endpoints[spec.objective]
     high_cost = costs[spec.objective]
-    guarded = spec.policy == "decision_aware" and spec.confirmation_reserve > 0
+    guarded = (spec.policy == "decision_aware" and spec.confirmation_reserve > 0
+               and objective.queryable)
     if guarded and not available.get(spec.objective):
         # Buying more proxy labels cannot create an actionable final confirmation.
         return []

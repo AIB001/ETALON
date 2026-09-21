@@ -10,6 +10,19 @@ from etalon.mcp._common import Cost, absolute_path, ok, tool
 def register(mcp: Any) -> None:
     @mcp.tool()
     @tool(Cost.CHEAP)
+    def etalon_screen_export(workspace: str, run_id: str, output: str) -> str:
+        """CHEAP. Verify and export a completed screen's final SDF/SMILES shortlist for sourcing.
+
+        Preserves parent/source identifiers and docking sidecars. Requires a final exporter stage;
+        creates a new output file. An identity SDF is not automatically an MD-ready complex pose.
+        """
+        from etalon.boundary.screen import Screen
+
+        return ok(**Screen(absolute_path(workspace, label="workspace")).export_shortlist(
+            run_id, absolute_path(output, label="output")))
+
+    @mcp.tool()
+    @tool(Cost.CHEAP)
     def etalon_doctor(prism_python: str = "") -> str:
         """CHEAP. Check installed dependencies, MCP and optional PRISM build executables.
 

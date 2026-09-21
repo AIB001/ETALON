@@ -62,11 +62,15 @@ class ActiveCampaign:
                          endpoint_limits=state["endpoint_limits"],
                          endpoint_candidates=state["endpoint_candidates"])
         if not choices:
-            if (spec.policy == "decision_aware" and spec.confirmation_reserve
+            executable = [endpoint for endpoint in endpoints.values() if endpoint.queryable]
+            if not executable:
+                reason = "no_executable_endpoints"
+            elif (spec.policy == "decision_aware" and spec.confirmation_reserve
+                    and endpoints[spec.objective].queryable
                     and remaining < cost_quote(endpoints[spec.objective], observations)):
                 reason = "confirmation_unaffordable"
             else:
-                reason = "budget_exhausted" if remaining < min(cost_quote(e, observations) for e in endpoints.values()) else "no_eligible_actions"
+                reason = "budget_exhausted" if remaining < min(cost_quote(e, observations) for e in executable) else "no_eligible_actions"
             return model, [], reason
         choices = [replace(choice, evidence={**choice.evidence, "planning_event_cutoff": state["event_cutoff"]})
                    for choice in choices]

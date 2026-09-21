@@ -1,0 +1,4 @@
+interface:
+  display_name: "MolQuarry Target Modulators"
+  short_description: "Find and reconcile source-backed target modulator evidence"
+  default_prompt: "Use $molquarry-target-modulators to find ligands, inhibitors or agonists for the supplied targets and deliver an evidence-linked Excel workbook, aligned PDB files, prepared ligand SDF files, and the actual AF3 modeling status."

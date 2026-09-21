@@ -1,17 +1,9 @@
-"""``python -m etalon`` -- read a campaign's shape before spending a GPU-year on it.
+"""``python -m etalon`` -- evidence, planning and execution boundaries for CADD campaigns.
 
-Three subcommands answer the questions worth asking before a campaign spends anything. ``plan``
-renders a funnel: which tiers survive, how wide each should be, what the whole thing costs, how many
-of the pool's true actives are expected to reach the end, and which of those numbers rest on a guess.
-``tune`` ranks what a campaign could change about its screen by the actives each change would add,
-which puts engineer-hours and GPU-years in the same units. ``fep`` designs the edge network a relative
-calculation needs and names the molecules it cannot reach -- it exits 1 when any is unreachable, so a
-pipeline script notices before committing GPU-days.
-
-The other two report on what is already installed. ``stages`` prints the priced catalogue so an
-operator can see what every number is and where it came from. ``infra`` says which MolCascade and
-which PRISM would actually load, which is the check that caught an editable install shadowing the
-pinned copy.
+``data`` acquires and freezes database evidence through MolQuarry; ``screen`` runs and exports
+MolCascade pipelines. ``active`` creates/inspects campaign journals and runs offline benchmarks.
+Live active experiments use explicitly configured Python executors. ``plan``, ``tune`` and ``fep``
+assess scientific/compute choices, while ``infra`` and ``doctor`` identify the installed capabilities.
 """
 
 from __future__ import annotations
@@ -171,6 +163,9 @@ def main(argv: list[str] | None = None) -> int:
     from etalon.execution_cli import register as register_execution
 
     register_execution(sub)
+    from etalon.data.cli import register as register_data
+
+    register_data(sub)
 
     plan = sub.add_parser("plan", help="render a funnel's shape, cost and refusals")
     plan.add_argument("--pool", type=int, default=750_000, help="molecules entering the funnel")
@@ -253,7 +248,7 @@ def main(argv: list[str] | None = None) -> int:
     fep.add_argument("--json", action="store_true")
     fep.set_defaults(handler=_fep)
 
-    infra = sub.add_parser("infra", help="say which MolCascade and which PRISM would load")
+    infra = sub.add_parser("infra", help="identify pinned MolCascade, PRISM and MolQuarry")
     infra.add_argument("--json", action="store_true")
     infra.set_defaults(handler=_infra)
 

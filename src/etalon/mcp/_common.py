@@ -33,7 +33,7 @@ import sys
 import threading
 from collections.abc import Callable
 from enum import StrEnum
-from functools import wraps
+from functools import partial, wraps
 from pathlib import Path
 from typing import Any
 
@@ -175,6 +175,12 @@ def tool(cost: Cost) -> Callable[[Callable[..., str]], Callable[..., str]]:
                     retryable=False,
                     tool=function.__name__,
                 )
+            except FileExistsError as error:
+                return fail(
+                    "AlreadyExists", str(error),
+                    hint="Inspect the existing run or artifact. Use a new identifier only for a deliberate new run.",
+                    retryable=False, tool=function.__name__,
+                )
             except Exception as error:  # noqa: BLE001 -- the boundary must not leak a traceback
                 logger.exception("%s raised", function.__name__)
                 transient = isinstance(error, _TRANSIENT)
@@ -194,6 +200,27 @@ def tool(cost: Cost) -> Callable[[Callable[..., str]], Callable[..., str]]:
                     retryable=transient,
                     tool=function.__name__,
                 )
+
+        wrapper.etalon_cost = cost  # type: ignore[attr-defined]
+        return wrapper
+
+    return decorate
+
+
+def threaded_tool(cost: Cost) -> Callable[[Callable[..., str]], Callable[..., Any]]:
+    """Await bounded blocking work in a thread so MCP inspection/heartbeats remain responsive.
+
+    This is not a detached or restartable worker. The same error and stdout boundary is
+    applied inside the thread, and the call still waits for its actual result.
+    """
+    def decorate(function: Callable[..., str]) -> Callable[..., Any]:
+        guarded = tool(cost)(function)
+
+        @wraps(function)
+        async def wrapper(*args: Any, **kwargs: Any) -> str:
+            from anyio import to_thread
+
+            return await to_thread.run_sync(partial(guarded, *args, **kwargs))
 
         wrapper.etalon_cost = cost  # type: ignore[attr-defined]
         return wrapper
@@ -251,4 +278,5 @@ __all__ = [
     "ok",
     "require_mcp",
     "tool",
+    "threaded_tool",
 ]

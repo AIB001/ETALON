@@ -1,6 +1,6 @@
 # Vendored assets
 
-Two packages, copied in rather than depended on, plus one reference panel lifted out of a
+Three packages, copied in rather than depended on, plus one reference panel lifted out of a
 place it could not be found.
 
 > The commits below are checked against `MANIFEST.json` by `tools/verify_assets.py`. They drifted
@@ -12,6 +12,7 @@ place it could not be found.
 | --- | --- | --- | --- | --- |
 | `molcascade/` | `c01a6e0b5152` | 167 | 4.0 MB | Ligand triage and docking cascade. Content-addressed artifacts, enforced contracts, per-molecule gates. |
 | `prism/` | `f0492d964795` | 504 | 24.7 MB | GROMACS system building, MD, FEP, MM/PBSA, PMF, REST2, and a large trajectory-analysis layer. |
+| `molquarry/` | `e3e9a863c860` | 59 | 0.4 MB | Database access, target evidence dossiers, local catalogs and compound sourcing; two upstream skills. |
 | `reference/approved_drugs.py` | from `molcascade` | 1 | 8 KB | 77 approved oral drugs with an in-window / out-of-window split. |
 
 `MANIFEST.json` carries the exact commit, subject and commit date of each source, the file
@@ -26,17 +27,20 @@ statement about a threshold and a rule revision. An asset pinned by commit and v
 tree digest means a result recorded last month can be reproduced today, and means a changed
 asset is a visibly different asset rather than a silently different answer.
 
-Neither package is installed from here by default. ETALON puts `molcascade/src` and `prism`
+The packages are not independently installed by default. ETALON puts `molcascade/src`, `prism` and `molquarry/src`
 on the path explicitly, so which copy is in use is a fact about the process rather than a
 fact about the environment. Verified: importing with those paths first yields
-`asset/molcascade/src/molcascade/__init__.py` and `asset/prism/prism/__init__.py`, a registry
-of 51 plugins, and PRISM 1.2.0.
+`asset/molcascade/src/molcascade/__init__.py`, `asset/prism/prism/__init__.py` and
+`asset/molquarry/src/molquarry/__init__.py`, a registry
+of 52 plugins, PRISM 1.2.0 and MolQuarry 0.4.1. Wheels include the same trees under
+`etalon/_assets`; optional dependencies remain explicit installation extras.
 
 ## What was excluded, and why
 
-`tests/` from both. 102 files and 1.5 MB from MolCascade, 194 files and 19.7 MB from PRISM --
+`tests/` from all three. 102 files and 1.5 MB from MolCascade, 194 files and 19.7 MB from PRISM --
 the latter dominated by full CHARMM36 force-field copies duplicated into FEP test fixtures.
-ETALON calls these packages; it does not run their suites. Every other tracked file was
+MolQuarry's 15 test files are also excluded; upstream suites can be run from their source repositories.
+Every other tracked file was
 copied, including PRISM's `prism/configs/forcefield/` (170 files), which is runtime data a
 build needs rather than test material.
 
@@ -58,7 +62,8 @@ that is not here.
 ## Refreshing an asset
 
 ```bash
-python tools/vendor_assets.py          # re-copies at each source's current HEAD
+python tools/vendor_assets.py          # inspect proposed refresh; no mutation
+python tools/vendor_assets.py --asset molquarry --write  # refresh only this asset
 git -C . diff asset/MANIFEST.json      # read what changed before accepting it
 ```
 
@@ -66,7 +71,7 @@ A refresh changes the tree digest, which is the point: it makes the change revie
 the diff before accepting it, because an asset update is a change to every measurement taken
 afterwards.
 
-## Two properties of these assets that ETALON is built around
+## Properties of these assets that ETALON is built around
 
 **MolCascade enforces its contracts.** `validate_table` checks the declared schema, non-null
 columns, primary-key uniqueness and declared string enums before a stage commits, so a
@@ -74,7 +79,13 @@ contract column is a field a producer cannot leave empty rather than a field it 
 fill. Its artifacts are content-addressed, its stage cache keys hash the full plugin
 descriptor, and a checkpoint whose configuration differs is refused rather than reused.
 
-**PRISM does not run simulations.** Its four `build_*` tools emit a GROMACS tree and a bash
+**ETALON owns PRISM process execution.** PRISM's four `build_*` tools emit a GROMACS tree and a bash
 driver -- `localrun.sh`, `smd_run.sh`, `mmpbsa_run.sh` -- and the caller executes it. The
 hours-to-days part of the work is not in its tool surface at all. Anything driving PRISM must
 therefore own process execution, which is why ETALON has a job layer rather than a tool call.
+PRISM also has simulator APIs; the statement above describes ETALON's builder/driver integration.
+
+**MolQuarry acquisition is evidence, not a measurement ruling.** ETALON bounds HTTP requests,
+seals raw responses and workflow outputs, and registers structures with MolCascade's identity
+policy. Exact assays enter the active loop only through an explicit review, on historical-only
+endpoints. Mutable database results are never fetched inside a cached screening stage.

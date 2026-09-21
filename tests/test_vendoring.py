@@ -109,6 +109,27 @@ def test_the_tool_refuses_to_write_from_a_dirty_source(tmp_path: Path, monkeypat
     assert not (vendor_assets.ASSET / "probe").exists()
 
 
+def test_targeted_refresh_preserves_other_pins_and_reference_without_their_sources(tmp_path, monkeypatch):
+    import json
+
+    source = _repo(tmp_path / "source")
+    assets = tmp_path / "asset"
+    assets.mkdir()
+    previous = {"schema_version": 1, "assets": {"existing": {"source_commit": "keep", "tree_sha256": "keep"}},
+                "reference": {"panel": {"sha256": "keep"}}}
+    manifest = assets / "MANIFEST.json"
+    manifest.write_text(json.dumps(previous))
+    monkeypatch.setattr(vendor_assets, "ETALON", tmp_path)
+    monkeypatch.setattr(vendor_assets, "ASSET", assets)
+    monkeypatch.setattr(vendor_assets, "SOURCES", {"probe": source, "existing": tmp_path / "unavailable"})
+    monkeypatch.setattr(sys, "argv", ["vendor_assets.py", "--write", "--asset", "probe"])
+    assert vendor_assets.main() == 0
+    current = json.loads(manifest.read_text())
+    assert current["assets"]["existing"] == previous["assets"]["existing"]
+    assert current["reference"] == previous["reference"]
+    assert (assets / "probe/tracked.py").read_bytes() == (source / "tracked.py").read_bytes()
+
+
 # -- the prose is part of the provenance chain ----------------------------
 
 

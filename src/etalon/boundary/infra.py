@@ -1,7 +1,7 @@
-"""Reach the two infrastructure packages, and prove which copy was reached.
+"""Reach the pinned infrastructure packages, and prove which copy was reached.
 
-ETALON runs MolCascade and PRISM as infrastructure. That makes one question load-bearing
-before any other: *which* MolCascade, and *which* PRISM. Every measurement this project
+ETALON runs MolCascade, PRISM and MolQuarry as infrastructure. The first question is
+which copy actually executes. Every measurement this project
 records cites a commit from ``asset/MANIFEST.json``, and a citation is only worth
 something if the code that ran is the code the citation names.
 
@@ -47,6 +47,7 @@ from types import ModuleType
 _PACKAGE_ROOTS = {
     "molcascade": Path("molcascade") / "src",
     "prism": Path("prism"),
+    "molquarry": Path("molquarry") / "src",
 }
 
 
@@ -102,11 +103,19 @@ def _manifest(asset_dir: Path) -> dict[str, dict[str, str]]:
     return json.loads(path.read_text(encoding="utf-8"))["assets"]
 
 
+def asset_directory() -> Path:
+    """Use checkout assets in development and the same pinned trees inside a wheel."""
+    installed = Path(__file__).resolve().parents[1] / "_assets"
+    if (installed / "MANIFEST.json").is_file():
+        return installed
+    return Path(__file__).resolve().parents[3] / "asset"
+
+
 def load(name: str, *, asset_dir: Path | None = None) -> Infra:
     """Import a pinned infrastructure package and prove the copy that loaded.
 
     Args:
-        name: ``"molcascade"`` or ``"prism"``.
+        name: ``"molcascade"``, ``"prism"`` or ``"molquarry"``.
         asset_dir: The vendored asset directory. Defaults to ``<repo>/asset``.
 
     Raises:
@@ -118,7 +127,7 @@ def load(name: str, *, asset_dir: Path | None = None) -> Infra:
     if name not in _PACKAGE_ROOTS:
         raise InfraError(f"unknown infrastructure package {name!r}; expected one of {sorted(_PACKAGE_ROOTS)}")
 
-    asset_dir = asset_dir or Path(__file__).resolve().parents[3] / "asset"
+    asset_dir = asset_dir or asset_directory()
     entry = _manifest(asset_dir).get(name)
     if entry is None:
         raise InfraError(f"the manifest at {asset_dir} pins no asset named {name!r}")
@@ -190,9 +199,9 @@ def describe(*, asset_dir: Path | None = None) -> dict[str, object]:
     for name in _PACKAGE_ROOTS:
         try:
             report[name] = load(name, asset_dir=asset_dir).provenance()
-        except InfraError as error:
+        except (InfraError, ImportError) as error:
             report[name] = {"name": name, "pinned": False, "problem": str(error)}
     return report
 
 
-__all__ = ["Infra", "InfraError", "describe", "load"]
+__all__ = ["Infra", "InfraError", "asset_directory", "describe", "load"]

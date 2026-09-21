@@ -33,9 +33,9 @@ An opt-in economic stopping policy compares the expected improvement
 of a complete audit with an explicitly authorized score/cost exchange rate. It preserves legacy
 searches, never truncates an ongoing panel, and includes a separate stopping/no-stopping ablation.
 Use a dedicated virtual environment for the optional dependencies below. Run these commands from
-the complete checkout root and retain `asset/MANIFEST.json` and both vendored trees. Live MolCascade /
-PRISM workflows currently rely on this checkout plus editable installation: the ordinary wheel
-packages `src/etalon`, not the asset trees, and is not a standalone live-infrastructure deployment.
+the complete checkout root and retain `asset/MANIFEST.json` and all three vendored trees. Wheels
+also contain these pinned assets under `etalon/_assets`; external docking engines, PRISM build
+tools, models and optional Python dependencies still require their own environments.
 
 The architecture distinguishes the inner molecule–endpoint loop, bounded protocol-search loop,
 and explicit human control boundaries. Engineering tests are not CADD efficacy evidence;
@@ -83,18 +83,106 @@ In metrology an *etalon* is the primary standard every other instrument is calib
 against. In optics a Fabry–Pérot etalon extracts information from the interference between
 two beams — that is, from their disagreement. Both meanings are the point.
 
-ETALON runs two packages as infrastructure and modifies neither:
+ETALON runs three packages as infrastructure, keeping their pinned source trees intact:
 
 | | | |
 |---|---|---|
 | **MolCascade** | `asset/molcascade` | ligand triage, docking, the handoff contract |
 | **PRISM** | `asset/prism` | system building, MD, MM-PBSA, FEP |
+| **MolQuarry** | `asset/molquarry` | database queries/downloads, target evidence, local catalogs and sourcing |
 
-Both are vendored as digest-pinned trees and recorded in `asset/MANIFEST.json`. They are
+All are vendored as digest-pinned trees and recorded in `asset/MANIFEST.json`. They are
 dependencies *and* evidence: every measurement here cites a commit, so the code that ran
 has to be the code the citation names. `src/etalon/boundary/infra.py` enforces that at
 import and refuses when an editable install shadows the vendored copy — which it did,
 silently, the first time it was checked.
+
+## Database evidence in the campaign
+
+MolQuarry is the data boundary: **acquire → seal evidence → register chemical states → screen /
+learn → inspect shortlist sourcing**. It reuses the existing CADD controller and MolCascade
+identity policy. HTTP requests are bounded independently of simulation quotes; a catalog record
+does not become an activity measurement, and a generated 3D ligand does not become a docked pose.
+
+```bash
+pip install -e '.[cascade,active,quarry,mcp]'
+python -m etalon doctor --require quarry --require cascade
+python -m etalon data sources --source chembl
+python examples/database_campaign.py --workspace runs/database-demo  # new directory; zero HTTP
+```
+
+The example uses an explicitly labeled local fixture catalog and real MolCascade CPU components.
+It preserves a salt-to-parent transformation, imports canonical candidates, acquires three
+molecular-weight readouts, exports an SDF and performs a local sourcing check. Molecular weight
+is an integration readout, not an affinity claim.
+
+Data request kinds are `query`, `collect`, `import_catalog`, `search_catalog`, `download`, `bundle`
+and `sourcing`. Inspect source-specific operation schemas using `data sources --source NAME`.
+A bounded target request, saved as `request.json`, looks like:
+
+```json
+{"kind":"collect","config":{"targets":["P00533"],"taxon":9606,"mode":"ligand","max_pages":5,"max_details":50}}
+```
+
+```bash
+python -m etalon data plan --request request.json --max-requests 100
+python -m etalon data run --request request.json --workspace runs/target --run-id collection \
+  --max-requests 100 --plan-id PLAN_ID_FROM_PREVIOUS_COMMAND
+python -m etalon data status --snapshot runs/target/data/collection
+python -m etalon data prepare --snapshot runs/target/data/collection \
+  --workspace runs/target --run-id library
+```
+
+Runs are synchronous and preserve failed/interrupted directories. Each successful run seals
+the request, input copies, raw QueryResults/workflow files, coverage and actual HTTP usage.
+The timeout is a cooperative network deadline, not a CPU/process kill. `max_requests=0` forbids
+HTTP; retries and redirects share the allowance. Credentials remain managed by MolQuarry.
+The HTTP allowance is per run, not a shared provider/account daily quota.
+
+An incomplete collection requires explicit `--allow-partial` before library preparation.
+Query/catalog records require `--id-field` and `--smiles-field` (dotted paths are supported;
+local catalogs usually use `fields.id` and `fields.smiles`). The library stores every source
+row and rejection in `identity-map.json`, and one canonical parent per row in `library.csv`.
+Use the same identity policy for the subsequent screen; the default matches `campaign.compose`.
+Large libraries belong in bulk screening; the exact active GP retains its existing pool limits.
+
+Create a new empty journal with `active init --config campaign.json --database campaign.sqlite`
+(the JSON contains `spec` and `endpoints`), or use `etalon_active_create` from MCP. Initialization
+does not launch experiments and refuses an existing journal. The runnable example shows actual
+recipe/executor configuration for subsequent live component execution through the Python API.
+
+For a campaign using `MOLECULAR_REPRESENTATION`, `data import-candidates --database ...
+--snapshot ...` adds library candidates. Historical assays use `Endpoint(queryable=False,
+requires_handoff=False, cost=0)` and the exact UniProt accession as `target`. Generate a review
+with `data review-template --snapshot ... --endpoint ... --protocol ... > review.json`, inspect
+the source measurements, then use `data import-assays --database ... --snapshot ... --review
+review.json`. Exact Kd/Ki/IC50/EC50 quantities remain separate; known concentration units and
+explicit p-quantity transforms are supported. Censored values, unresolved identities and
+unreviewed assays remain outside training. Canonical experiment IDs prevent duplicated labels.
+Historical endpoints can train the model but cannot be reserved or advertised as executable
+confirmation; imported evidence cannot certify a runtime protocol audit.
+Use repeated `--candidate PARENT_ID` arguments for an explicit subset when bulk screening has
+reduced a large library to a bounded active pool.
+
+`screen export --workspace ... --run-id ... --output shortlist.sdf` verifies and materializes
+a completed screen's exporter contract. Pass its absolute path to a `sourcing` request:
+`{"kind":"sourcing","input_sdf":"/absolute/shortlist.sdf","config":{"max_mcule_queries":10}}`.
+The output workbook retains parent/source IDs, source coverage and exact versus parent-variant
+matches. Supplier listings do not confirm live stock, and SA/BRICS scores do not prove synthesis.
+
+`data attach-handoffs --database ... --workspace ... --artifact-id ... --rationale ...` binds
+verified `md_system_input/v1` geometry to existing candidates between rounds. Chemical state and
+features remain immutable. The normal receptor-bound preflight and PRISM spend authorization
+still run at execution. MolQuarry experimental/aligned structures need explicit receptor/ligand
+preparation before entering that contract.
+
+The optional `[quarry-deliverables]` extra enables structure/workbook bundle dependencies.
+A `bundle` request takes an absolute collection `snapshot`, a `curation_path` following the
+upstream MolQuarry review schema, and bounded `options`; purchasing defaults to false.
+Its AF3 files are prepared jobs, not automatically submitted predictions. The two upstream
+skills and their references are served as `etalon://skills/molquarry/target-modulators` and
+`etalon://skills/molquarry/compound-sourcing`. ETALON's data tools wrap the pinned SDK; upstream
+tool names in these reference documents are not additional ETALON tools.
 
 > **Kept locally.** `findings/` — the measurement records — and `docs/` — the documentation,
 > including architectural decisions — are excluded from Git. Links to findings below do not resolve here. The
@@ -134,7 +222,8 @@ update it cannot distinguish from noise.
 ```
 src/etalon/
   boundary/     reach the infrastructure, and prove which copy was reached
-    infra.py        which MolCascade, which PRISM — refuses a shadowed import
+    infra.py        pinned MolCascade, PRISM and MolQuarry; refuses a shadowed import
+    quarry.py       bounded database SDK access and actual HTTP usage
     toolchain.py    a gmx shim that seeds the one command PRISM calls unseeded
     screen.py       MolCascade: plan → run → read back verified
     simulate.py     PRISM: build → drive → verify products and controlled process completion
@@ -208,13 +297,13 @@ src/etalon/
 python -m etalon.mcp            # MCP server over stdio
 ```
 
-Nineteen tools, and **each declares what it spends in its own description** so the classification is
+Thirty tools, and **each declares what it spends in its own description** so the classification is
 visible before a model chooses rather than after:
 
 | cost | tools |
 |---|---|
-| **free** | `plan_campaign` `tune_screen` `stages` `infrastructure` `check_handoff` `check_stability` `rule_admissible` `authorize_spend` `council_reliability` `council_adjudicate` `active_status` `screen_status` |
-| **cheap** | `design_fep_network` `active_plan` `active_replay` `doctor` `screen_plan` |
+| **free** | `plan_campaign` `tune_screen` `stages` `infrastructure` `check_handoff` `check_stability` `rule_admissible` `authorize_spend` `council_reliability` `council_adjudicate` `active_status` `screen_status` `data_sources` `data_status` `data_review_template` |
+| **cheap** | `design_fep_network` `active_create` `active_plan` `active_replay` `doctor` `screen_plan` `screen_export` `data_plan` `data_run` `data_prepare` `data_import_candidates` `data_import_assays` `data_attach_handoffs` |
 | **spends** | `screen_submit` (plan-bound bulk execution; cost not metered or reserved in the active journal) |
 | **never by a model** | `recommend_waiver` |
 
@@ -755,13 +844,15 @@ argument.
 
 ## Running it
 
-ETALON needs two environments and knows it. MolCascade runs in `prism`; PRISM's build needs
-AmberTools, which lives in `AmberTools23`. `boundary.simulate.discover()` probes for
+MolCascade and MolQuarry can share the harness environment installed with the extras above.
+PRISM builds need a separate environment providing AmberTools; the original setup used
+`AmberTools23`. `boundary.simulate.discover()` probes for
 `antechamber`, `parmchk2`, `acpype` and `tleap` and names what is absent **before** a build
 starts, because "PRISM failed" an hour into a parameterisation is a much worse message.
 
 ```python
 from pathlib import Path
+from datetime import date
 from etalon.boundary.infra import load
 from etalon.boundary.simulate import Simulate, discover
 from etalon.campaign import Campaign, PrismStage, Waiver, WaiverSet
@@ -792,6 +883,8 @@ Edit the live repo, run *its* test suite, **commit there**, then re-vendor:
 
 ```bash
 python tools/vendor_assets.py --write
+# Or refresh one source without advancing the other pinned assets:
+python tools/vendor_assets.py --asset molquarry --write
 ```
 
 `tools/measure_council.py` is the other falsification probe, beside `tools/falsify_determinism.py`:

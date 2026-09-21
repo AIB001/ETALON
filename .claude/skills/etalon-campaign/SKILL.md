@@ -57,9 +57,46 @@ the numbers section.
 etalon_infrastructure
 ```
 
-Free. Confirms which MolCascade and which PRISM would load. Do this first in any new environment. An
+Free. Confirms which MolCascade, PRISM and MolQuarry would load. Do this first in any new environment. An
 editable install shadowing the vendored copy is silent: the import succeeds, the version is right, and
 every number afterwards cites a commit that did not produce it.
+
+## Database evidence and candidate ingress
+
+For database-derived campaigns, read `etalon://skills/molquarry/target-modulators`; for shortlist
+sourcing, read `etalon://skills/molquarry/compound-sourcing`. Their relative reference documents
+are available under the same resource URI plus `/references/workflow.md` or `/references/results.md`.
+Use ETALON's data tools below to retain the harness's snapshot and admission contracts. The upstream
+documents also name MolQuarry SDK/CLI tools; those names are not extra ETALON MCP tools.
+
+1. Inspect `etalon_data_sources`, then `etalon_data_plan` with an explicit request allowance.
+   `etalon_data_run` supports queries, bounded target collection, local catalog import/search,
+   downloads, reviewed structure bundles and sourcing. Paths inside requests must be absolute.
+   HTTP allowances are separate from campaign simulation costs; inspect partial/error coverage.
+2. `etalon_data_prepare` seals `library.csv`, source rows and their MolCascade identity mapping.
+   Query/catalog input requires explicit id/smiles field mappings. Use the same identity policy
+   for screening. Salt, tautomer and stereo transformations remain visible; don't equate source
+   IDs or full InChIKeys with MolCascade parent IDs.
+3. `etalon_active_create` creates a new journal from explicit spec/endpoints without executing work;
+   it refuses an existing journal. `etalon_data_import_candidates` adds registered states or an
+   explicit bounded subset to that molecular campaign.
+   Historical assays require a separate endpoint with `queryable=false`, `requires_handoff=false`,
+   exact target accession, explicit protocol/quantity/units, and a supplied assay review.
+   Use `etalon_data_review_template`, inspect each assay's target/construct/state/duplicates, then
+   `etalon_data_import_assays`. Bounds and approximate values cannot be exact scalar GP labels.
+   Historical imports never substitute for the live evidence required by protocol audit panels.
+4. Screen using the normal MolCascade path. `etalon_screen_export` materializes a verified final
+   exporter into an SDF/SMILES shortlist. Send its SDF to a `sourcing` data request; preserve
+   missing/failed coverage and exact versus parent-variant matches. Listings and synthesis
+   heuristics do not establish current stock or a validated route.
+5. `etalon_data_attach_handoffs` can bind verified `md_system_input/v1` geometry after candidates
+   were registered. It changes neither molecular identity nor spend authority. MolQuarry 3D
+   conformers and aligned experimental coordinates are not automatically docked poses in the
+   simulation receptor frame; the ordinary receptor-bound preflight remains mandatory.
+
+Data runs are synchronous, bounded operations, not detached workers. Inspect `etalon_data_status`
+after interruption; unsealed directories cannot supply admitted evidence. Never silently retry a
+failed run under an existing id. The data budget is per run; respect shared provider/account quotas.
 
 ## Step 1 — plan before generating anything
 

@@ -68,6 +68,8 @@ def choose(spec: CampaignSpec, candidates: Mapping[str, Candidate], endpoints: M
     offers: list[Choice] = []
     costs = {task: cost_quote(endpoint, observations) for task, endpoint in endpoints.items()}
     for task, endpoint in sorted(endpoints.items()):
+        if not endpoint.queryable:
+            continue
         if limits.get(task, slots) <= 0:
             continue
         cost = costs[task]

@@ -1,4 +1,4 @@
-"""Offline execution and read-only inspection; no implicit live compute from the CLI."""
+"""Campaign setup, offline execution and inspection; no implicit live compute from the CLI."""
 
 from __future__ import annotations
 
@@ -15,6 +15,10 @@ from etalon.active.store import CampaignStore, StateError
 def register(sub: Any) -> None:
     active = sub.add_parser("active", help="persistent active learning: offline replay, benchmark and inspection")
     commands = active.add_subparsers(dest="active_command", required=True)
+    initialize = commands.add_parser("init", help="create an empty configured campaign; execute nothing")
+    initialize.add_argument("--database", required=True, type=Path)
+    initialize.add_argument("--config", required=True, type=Path, help="JSON with spec and endpoints")
+    initialize.set_defaults(handler=handle)
     catalogue = commands.add_parser("components", help="discover MolCascade criteria and individual plugin contracts")
     catalogue.set_defaults(handler=handle)
     for name in ("status", "plan", "export", "recommend", "protocols", "searches"):
@@ -61,7 +65,15 @@ def handle(arguments: argparse.Namespace) -> int:
         output = getattr(arguments, "output", None)
         if output is not None and output.exists():
             raise FileExistsError(f"refusing to overwrite {output}")
-        result = _run(arguments)
+        if arguments.active_command == "init":
+            from etalon.active.setup import create_campaign
+
+            configuration = json.loads(arguments.config.read_text(encoding="utf-8"))
+            if not isinstance(configuration, dict) or set(configuration) != {"spec", "endpoints"}:
+                raise ValueError("campaign configuration must contain exactly spec and endpoints")
+            result = create_campaign(arguments.database, **configuration)
+        else:
+            result = _run(arguments)
         if output is not None:
             output.parent.mkdir(parents=True, exist_ok=True)
             with output.open("x", encoding="utf-8") as handle:

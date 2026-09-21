@@ -5,19 +5,19 @@ against. In optics a Fabry-Perot etalon extracts information from the interferen
 between two beams -- that is, from their disagreement. The name carries both meanings
 because both are what this system is for.
 
-It runs two packages as infrastructure, pinned and verified under ``asset/``: MolCascade
-for ligand triage and docking, PRISM for system building, MD and free energy. Neither is
-modified. What ETALON adds is a campaign that is allowed to learn from its own expensive
+It runs three packages as pinned infrastructure: MolQuarry for database evidence and sourcing,
+MolCascade for ligand triage and docking, and PRISM for system building, MD and free energy.
+Their vendored implementations remain intact. ETALON adds a campaign allowed to learn from expensive
 measurements, under conditions it states.
 
-The shape is four layers, and the order is the argument.
+The main boundaries separate evidence acquisition, numerical control, science and admission.
 
 ``boundary`` reaches the infrastructure and proves which copy it reached. ``faults`` asks,
 of one handoff record, whether a number computed from it would be about the molecule it is
 filed under -- cheaply, before a GPU-second is spent. ``learn`` decides which measurements
 may update the screen and whether a proposed change beats the panel's own resolution.
-``campaign`` is the loop, and it keeps an append-only ledger that cannot forget a round it
-abandoned.
+``data`` seals source evidence and registers chemical states. ``active`` owns transactional
+experiment selection and feedback; the older ``campaign`` loop retains its append-only ledger.
 
 The feedback idea is not new and this project does not claim it is: DeepDriveMD, IMPECCABLE
 and Colmena all put machine learning inside a CADD campaign, and an earlier draft of this

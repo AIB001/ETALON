@@ -52,7 +52,7 @@ def _skill_path() -> Path:
 def build() -> Any:
     """Construct the server with every tool and resource registered."""
 
-    from etalon.mcp import active, execution, governance, planning
+    from etalon.mcp import active, data, execution, governance, planning
 
     server_class = require_mcp()
     mcp = server_class("etalon")
@@ -61,6 +61,32 @@ def build() -> Any:
     governance.register(mcp)
     active.register(mcp)
     execution.register(mcp)
+    data.register(mcp)
+
+    @mcp.resource("etalon://skills/molquarry/{skill}")
+    def molquarry_workflow(skill: str) -> str:
+        """Pinned upstream workflows: target-modulators or compound-sourcing.
+
+        Use ETALON's data tools for sealed acquisition and campaign ingress. These documents
+        also describe advanced MolQuarry SDK workflows, not additional ETALON MCP tools.
+        """
+        from etalon.boundary.infra import asset_directory
+
+        if skill not in {"target-modulators", "compound-sourcing"}:
+            raise ValueError("unknown MolQuarry workflow")
+        return (asset_directory() / "molquarry" / "skills" / ("molquarry-" + skill)
+                / "SKILL.md").read_text(encoding="utf-8")
+
+    @mcp.resource("etalon://skills/molquarry/{skill}/references/{reference}")
+    def molquarry_reference(skill: str, reference: str) -> str:
+        """The reference document linked by each pinned MolQuarry workflow."""
+        from etalon.boundary.infra import asset_directory
+
+        known = {"target-modulators": "workflow.md", "compound-sourcing": "results.md"}
+        if known.get(skill) != reference:
+            raise ValueError("unknown MolQuarry workflow reference")
+        return (asset_directory() / "molquarry" / "skills" / ("molquarry-" + skill)
+                / "references" / reference).read_text(encoding="utf-8")
 
     @mcp.resource(SKILL_RESOURCE)
     def campaign_workflow() -> str:
@@ -116,7 +142,7 @@ def costs() -> dict[str, str]:
     Derived from the decorator rather than from a list, so a tool cannot be added without one.
     """
 
-    from etalon.mcp import active, execution, governance, planning
+    from etalon.mcp import active, data, execution, governance, planning
 
     found: dict[str, str] = {}
 
@@ -134,6 +160,7 @@ def costs() -> dict[str, str]:
     governance.register(collector)
     active.register(collector)
     execution.register(collector)
+    data.register(collector)
     return found
 
 

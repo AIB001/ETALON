@@ -1,0 +1,16 @@
+.venv/
+.molquarry/
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+.ruff_cache/
+build/
+dist/
+.env
+downloads/
+docs/
+examples/
+example/
+results/
+MolQuarry_*/

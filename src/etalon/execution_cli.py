@@ -13,19 +13,21 @@ def register(sub: Any) -> None:
     doctor = sub.add_parser("doctor", help="check dependencies and execution readiness without running science")
     doctor.add_argument("--prism-python", help="interpreter in the PRISM/AmberTools environment")
     doctor.add_argument("--require", action="append", default=[],
-                        choices=("planning", "active", "cascade", "mcp", "prism-build-tools"))
+                        choices=("planning", "active", "cascade", "quarry", "mcp", "prism-build-tools"))
     doctor.set_defaults(handler=handle)
     screen = sub.add_parser("screen", help="plan, submit and inspect a real bulk MolCascade screen")
     commands = screen.add_subparsers(dest="screen_command", required=True)
-    for name in ("plan", "submit", "status"):
+    for name in ("plan", "submit", "status", "export"):
         command = commands.add_parser(name)
         command.add_argument("--workspace", required=True)
-        if name != "status":
+        if name in {"plan", "submit"}:
             command.add_argument("--config", required=True)
             command.add_argument("--library", help="library override; omit for a flat pipeline")
             command.add_argument("--allow-copyleft", action="store_true")
         if name != "plan":
             command.add_argument("--run-id", required=True)
+        if name == "export":
+            command.add_argument("--output", required=True, help="new SDF/SMILES shortlist file")
         if name == "submit":
             command.add_argument("--plan-id", required=True, help="plan_id returned by screen plan")
             command.add_argument("--workers", type=int, default=1)
@@ -44,7 +46,11 @@ def handle(arguments: argparse.Namespace) -> int:
             else:
                 from etalon.screening import plan_screen, screen_status, submit_screen
 
-                if arguments.screen_command == "status":
+                if arguments.screen_command == "export":
+                    from etalon.boundary.screen import Screen
+
+                    report = Screen(arguments.workspace).export_shortlist(arguments.run_id, arguments.output)
+                elif arguments.screen_command == "status":
                     report = screen_status(arguments.workspace, arguments.run_id)
                 elif arguments.screen_command == "plan":
                     report = plan_screen(arguments.config, arguments.library, arguments.workspace,

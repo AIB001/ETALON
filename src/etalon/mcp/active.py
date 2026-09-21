@@ -1,4 +1,4 @@
-"""Read-only learning-state inspection and bounded offline replay for agent clients."""
+"""Explicit campaign creation, state inspection and bounded offline replay for agent clients."""
 
 from __future__ import annotations
 
@@ -9,6 +9,19 @@ from etalon.mcp._common import Cost, absolute_path, ok, tool
 
 
 def register(mcp: Any) -> None:
+    @mcp.tool()
+    @tool(Cost.CHEAP)
+    def etalon_active_create(database: str, spec: dict[str, Any], endpoints: list[dict[str, Any]]) -> str:
+        """CHEAP. Create a new explicit single-target campaign without launching any experiment.
+
+        Supply scientific quantity, units, protocol and cost for each endpoint. Imported assays
+        use queryable=false and requires_handoff=false. Existing journals are never overwritten;
+        use active_status to inspect a previous creation. Then import candidates through data tools.
+        """
+        from etalon.active.setup import create_campaign
+
+        return ok(**create_campaign(absolute_path(database, label="database"), spec, endpoints))
+
     @mcp.tool()
     @tool(Cost.FREE)
     def etalon_active_status(database: str) -> str:

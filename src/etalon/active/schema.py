@@ -55,12 +55,16 @@ class Endpoint:
     max_replicates: int = 1
     prior_mean: float = 0.0
     prior_scale: float = 1.0
+    # Historical assay evidence can train the model without advertising an executable assay.
+    queryable: bool = True
 
     def __post_init__(self) -> None:
         for name in ("id", "target", "quantity", "units", "protocol", "direction"):
             _text(getattr(self, name), name)
         if type(self.requires_handoff) is not bool:
             raise ValueError("requires_handoff must be an explicit boolean")
+        if type(self.queryable) is not bool:
+            raise ValueError("queryable must be an explicit boolean")
         if self.direction not in {"minimize", "maximize"}:
             raise ValueError("direction must be minimize or maximize")
         if self.quantity.lower() in {"ddg", "relative_free_energy", "rbfe"}:
@@ -69,9 +73,9 @@ class Endpoint:
         finite(self.noise, "noise", minimum=0.0)
         finite(self.prior_mean, "prior_mean")
         finite(self.prior_scale, "prior_scale", minimum=0.0)
-        if (self.cost <= 0 or self.noise <= 0 or self.prior_scale <= 0
+        if ((self.queryable and self.cost <= 0) or self.noise <= 0 or self.prior_scale <= 0
                 or type(self.max_replicates) is not int or self.max_replicates < 1):
-            raise ValueError("cost, noise floor and max_replicates must be positive")
+            raise ValueError("executable cost, noise floor and max_replicates must be positive")
 
     def as_dict(self) -> dict[str, Any]:
         return asdict(self)

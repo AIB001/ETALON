@@ -403,6 +403,26 @@ class Screen:
 
     # -- read ---------------------------------------------------------------
 
+    def export_shortlist(self, run_id: str, output: str | Path) -> dict[str, Any]:
+        """Materialize a completed screen's verified final export for MolQuarry or another consumer.
+
+        Preserves MolCascade parent/source ids and any docking evidence sidecar. A generic
+        SDF export remains an identity file, not an MD-ready pose or an affinity measurement.
+        Existing outputs are never overwritten.
+        """
+        from molcascade.handoff import materialize_shortlist
+        from molcascade.plugins import create_builtin_registry
+        from molcascade.runtime import LocalRunner
+
+        exported = materialize_shortlist(LocalRunner(self.workspace, plugins=create_builtin_registry()),
+                                          run_id, output)
+        return {"path": str(exported.path.resolve()), "sha256": exported.sha256,
+                "row_count": exported.row_count, "record_format": exported.record_format,
+                "source_artifact_id": exported.source_artifact_id,
+                "export_spec_id": exported.export_spec_id, "identified_count": exported.identified_count,
+                "docking_sidecar": str(exported.docking.path.resolve()) if exported.docking else None,
+                "infrastructure": self.infra.provenance()}
+
     def read(self, artifact_id: str, *, contract_id: str | None = None) -> list[dict[str, Any]]:
         """Read a committed artifact's rows, after verifying its digests.
 

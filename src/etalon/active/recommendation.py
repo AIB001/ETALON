@@ -42,7 +42,7 @@ def recommend(spec: CampaignSpec, candidates: Mapping[str, Candidate], endpoints
 
     def row(key: str) -> dict[str, Any]:
         records = evidence[key]
-        eligible = (attempts[(key, spec.objective)] < endpoint.max_replicates
+        eligible = (endpoint.queryable and attempts[(key, spec.objective)] < endpoint.max_replicates
                     and limits.get(spec.objective, 1) > 0
                     and (spec.objective not in allowed or key in allowed[spec.objective])
                     and (not endpoint.requires_handoff or bool(candidates[key].handoff)))

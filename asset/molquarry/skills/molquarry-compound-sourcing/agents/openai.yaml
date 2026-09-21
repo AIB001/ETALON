@@ -1,0 +1,4 @@
+interface:
+  display_name: "MolQuarry Compound Sourcing"
+  short_description: "Check compound identity, catalog and synthesis evidence"
+  default_prompt: "Use $molquarry-compound-sourcing to screen the supplied SDF for exact library matches, supplier listings and synthesis evidence, then return a traceable Excel workbook."

@@ -45,13 +45,14 @@ class Collector:
 
 
 def _tools() -> dict[str, object]:
-    from etalon.mcp import active, execution, governance, planning
+    from etalon.mcp import active, data, execution, governance, planning
 
     collector = Collector()
     planning.register(collector)
     governance.register(collector)
     active.register(collector)
     execution.register(collector)
+    data.register(collector)
     return collector.tools
 
 

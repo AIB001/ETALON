@@ -116,7 +116,8 @@ class CampaignStore:
                 # Older journals omit newly introduced default policy settings. Compare their
                 # meaning without rewriting history or changing a non-default setting.
                 old = json.loads(previous[0])
-                normalized = {**old, "spec": CampaignSpec(**old["spec"]).as_dict()}
+                normalized = {**old, "spec": CampaignSpec(**old["spec"]).as_dict(),
+                              "endpoints": [Endpoint(**e).as_dict() for e in old["endpoints"]]}
                 if canonical(normalized) != body:
                     raise StateError("campaign configuration differs from its journal; use a new database")
             if previous is None:
@@ -175,7 +176,7 @@ class CampaignStore:
                     or db.execute("SELECT 1 FROM rounds WHERE status='running'").fetchone()):
                 raise StateError("finish running rounds and resolve pending actions before redesigning the available protocols")
             config = json.loads(row[0])
-            known = {e["id"]: e for e in config["endpoints"]}
+            known = {e["id"]: Endpoint(**e).as_dict() for e in config["endpoints"]}
             controlled = {e["protocol"] for e in known.values() if db.execute(
                 "SELECT 1 FROM metadata WHERE key=?", ("protocol:endpoint:" + e["id"],)).fetchone()}
             target = known[config["spec"]["objective"]]["target"]
@@ -198,9 +199,12 @@ class CampaignStore:
             db.execute("UPDATE metadata SET body=? WHERE key='configuration'", (canonical(config),))
 
     def add_candidates(self, candidates: Sequence[Candidate]) -> int:
-        self.configuration()
         added = 0
         with self.connection(write=True) as db:
+            spec, _ = self._configuration(db)
+            known_ids = {row[0] for row in db.execute("SELECT id FROM candidates")}
+            if len(known_ids | {candidate.id for candidate in candidates}) > spec.max_candidates:
+                raise ValueError("candidate import exceeds the active pool limit")
             first = db.execute("SELECT body FROM candidates LIMIT 1").fetchone()
             width = len(json.loads(first[0])["features"]) if first else None
             for candidate in candidates:
@@ -222,8 +226,58 @@ class CampaignStore:
     @staticmethod
     def _candidates(db: sqlite3.Connection) -> dict[str, Candidate]:
         rows = db.execute("SELECT body FROM candidates ORDER BY id").fetchall()
-        return {value["id"]: Candidate.from_dict(value)
+        bindings = {row[0].removeprefix("candidate-handoff:"): json.loads(row[1])["record"]
+                    for row in db.execute("SELECT key,body FROM metadata WHERE key LIKE 'candidate-handoff:%'")}
+        return {value["id"]: Candidate.from_dict({
+                    **value, "handoff": bindings.get(value["id"], value.get("handoff", {}))})
                 for row in rows if (value := json.loads(row[0]))}
+
+    def bind_handoffs(self, rows: Sequence[dict[str, Any]], *, source: dict[str, Any],
+                      rationale: str) -> int:
+        """Attach verified screening geometry to existing chemical states between rounds.
+
+        Candidate identity/features remain immutable. A handoff is an additional immutable
+        resource with its own event; it never changes an existing geometry binding and never
+        grants permission to run MD. The runner still checks the actual receptor and mints a
+        spend authorization at dispatch. Use data.ingress.attach_handoffs to verify artifacts.
+        """
+        if not isinstance(source, dict) or not source or not isinstance(rationale, str) or not rationale.strip():
+            raise ValueError("handoff binding requires source provenance and a rationale")
+        canonical(source)
+        if any(not isinstance(row, dict) for row in rows):
+            raise ValueError("handoff rows must be mappings")
+        identities = [row.get("parent_id") for row in rows]
+        if any(not isinstance(key, str) or not key for key in identities) or len(set(identities)) != len(identities):
+            raise ValueError("handoff parent ids must be nonempty and unique")
+        added = 0
+        with self.connection(write=True) as db:
+            self._configuration(db)
+            if (db.execute("SELECT 1 FROM actions WHERE status IN ('reserved','running')").fetchone()
+                    or db.execute("SELECT 1 FROM rounds WHERE status='running'").fetchone()):
+                raise StateError("resolve pending actions and rounds before binding handoffs")
+            for record in rows:
+                identifier = record["parent_id"]
+                existing = db.execute("SELECT body FROM candidates WHERE id=?", (identifier,)).fetchone()
+                if existing is None:
+                    raise ValueError("handoff requires a registered candidate state")
+                candidate = Candidate.from_dict(json.loads(existing[0]))
+                if record.get("parent_smiles") != candidate.smiles:
+                    raise ValueError("handoff changes the registered chemical state")
+                if record.get("status") != "OK" or not record.get("molblock"):
+                    raise ValueError("handoff has no successful geometry to bind")
+                record = json.loads(canonical(record))
+                key = "candidate-handoff:" + identifier
+                previous = db.execute("SELECT body FROM metadata WHERE key=?", (key,)).fetchone()
+                bound = json.loads(previous[0])["record"] if previous else candidate.handoff
+                if bound:
+                    if canonical(bound) != canonical(record):
+                        raise StateError("candidate handoff is already bound to different geometry")
+                    continue
+                body = {"record": record, "source": source, "rationale": rationale}
+                db.execute("INSERT INTO metadata VALUES (?,?)", (key, canonical(body)))
+                self._event(db, "candidate_handoff_bound", {"candidate_id": identifier, **body})
+                added += 1
+        return added
 
     def candidates(self) -> dict[str, Candidate]:
         with self.connection() as db:
@@ -330,6 +384,8 @@ class CampaignStore:
             if endpoint_id not in endpoints:
                 raise ValueError("reserve requires a registered endpoint")
             endpoint = endpoints[endpoint_id]
+            if not endpoint.queryable:
+                raise StateError("historical-only endpoints cannot reserve or execute actions")
             if db.execute("SELECT 1 FROM candidates WHERE id=?", (candidate_id,)).fetchone() is None:
                 raise ValueError("reserve requires a registered candidate")
             current = db.execute("SELECT status FROM rounds WHERE id=?", (round_id,)).fetchone()
@@ -347,17 +403,17 @@ class CampaignStore:
             remaining = self._balance(db, spec.budget)["remaining"]
             if not fits_budget(quote, remaining):
                 raise BudgetExhausted("action exceeds the unreserved budget")
-            if spec.policy == "decision_aware" and spec.confirmation_reserve and endpoint_id != spec.objective:
+            if (spec.policy == "decision_aware" and spec.confirmation_reserve
+                    and endpoints[spec.objective].queryable and endpoint_id != spec.objective):
                 # Enforce the guard in the same transaction as the reservation. A stale plan
                 # or a concurrent historical import must not consume the final quoted assay.
                 high = endpoints[spec.objective]
                 counts = dict(db.execute("SELECT candidate_id,COUNT(*) FROM actions WHERE endpoint_id=? "
                                          "GROUP BY candidate_id", (spec.objective,)).fetchall())
                 eligible = 0
-                for candidate_row in db.execute("SELECT body FROM candidates"):
-                    candidate = json.loads(candidate_row[0])
-                    eligible += int(counts.get(candidate["id"], 0) < high.max_replicates
-                                    and (not high.requires_handoff or bool(candidate["handoff"])))
+                for candidate in self._candidates(db).values():
+                    eligible += int(counts.get(candidate.id, 0) < high.max_replicates
+                                    and (not high.requires_handoff or bool(candidate.handoff)))
                 guard = min(spec.confirmation_reserve, eligible) * cost_quote(high, history)
                 if not eligible or not fits_budget(quote + guard, remaining):
                     raise BudgetExhausted("proxy action would consume the objective confirmation budget")
@@ -406,39 +462,92 @@ class CampaignStore:
     def import_evaluation(self, result: Evaluation, *, source_id: str) -> None:
         """Seed from explicit historical evidence. Costs supplied here count toward the budget."""
 
+        with self.connection(write=True) as db:
+            self._import_evaluation(db, result, source_id=source_id)
+
+    def import_reviewed_evaluations(self, results: Sequence[tuple[str, Evaluation]], *,
+                                   review: dict[str, Any]) -> int:
+        """Atomically import a reviewed batch between rounds with global experiment deduplication.
+
+        This storage seam trusts its caller's scientific review. The external data adapter
+        verifies sealed evidence, target, chemical state, censoring, units and assay scope.
+        A canonical experiment id cannot be reused for another candidate or endpoint.
+        """
+        if not isinstance(review, dict) or not review:
+            raise ValueError("review provenance is required")
+        canonical(review)
+        added = 0
+        with self.connection(write=True) as db:
+            _, endpoints = self._configuration(db)
+            if (db.execute("SELECT 1 FROM actions WHERE status IN ('reserved','running')").fetchone()
+                    or db.execute("SELECT 1 FROM rounds WHERE status='running'").fetchone()):
+                raise StateError("resolve pending rounds before importing reviewed evidence")
+            review_id = digest(review)
+            db.execute("INSERT OR IGNORE INTO metadata VALUES (?,?)",
+                       ("external-review:" + review_id, canonical(review)))
+            for experiment_id, result in results:
+                if not isinstance(experiment_id, str) or not experiment_id.strip():
+                    raise ValueError("a stable canonical experiment id is required")
+                endpoint = endpoints.get(result.endpoint_id)
+                if endpoint is None or endpoint.queryable or endpoint.requires_handoff:
+                    raise ValueError("external assays require a historical-only, non-handoff endpoint")
+                if review.get("target"):
+                    target_key = "external-assay-target:" + endpoint.id
+                    target_body = canonical(review["target"])
+                    bound = db.execute("SELECT body FROM metadata WHERE key=?", (target_key,)).fetchone()
+                    if bound and bound[0] != target_body:
+                        raise StateError("assay target or construct changed under an existing endpoint")
+                    db.execute("INSERT OR IGNORE INTO metadata VALUES (?,?)", (target_key, target_body))
+                key = "external-experiment:" + experiment_id
+                identity = {"candidate_id": result.candidate_id, "endpoint_id": result.endpoint_id,
+                            "value": result.value, "units": result.units}
+                previous = db.execute("SELECT body FROM metadata WHERE key=?", (key,)).fetchone()
+                if previous:
+                    if json.loads(previous[0])["identity"] != identity:
+                        raise StateError("experiment id already names different evidence; cannot duplicate or relabel it")
+                    continue
+                self._import_evaluation(db, result, source_id="external-experiment:" + experiment_id)
+                db.execute("INSERT INTO metadata VALUES (?,?)", (key, canonical({
+                    "identity": identity, "review_id": review_id})))
+                added += 1
+            self._event(db, "assay_review_imported", {"review_id": review_id, "added": added,
+                                                      "accepted_rows": len(results)})
+        return added
+
+    def _import_evaluation(self, db: sqlite3.Connection, result: Evaluation, *, source_id: str) -> None:
+
         if not isinstance(source_id, str) or not source_id.strip():
             raise ValueError("a known endpoint and a stable source id are required")
         identifier = "import-" + digest([source_id, result.candidate_id, result.endpoint_id])
         ruling = rule(Measurement(result.candidate_id, None, result.value, result.checks,
                                   result.units, result.provenance), require_comparator=False)
-        with self.connection(write=True) as db:
-            _, endpoints = self._configuration(db)
-            if result.endpoint_id not in endpoints:
-                raise ValueError("a known endpoint and a stable source id are required")
-            if result.units != endpoints[result.endpoint_id].units:
-                raise ValueError("historical observation units differ from the endpoint")
-            if db.execute("SELECT 1 FROM candidates WHERE id=?", (result.candidate_id,)).fetchone() is None:
-                raise ValueError("historical observation requires a registered candidate")
-            previous = db.execute("SELECT body FROM observations WHERE action_id=?", (identifier,)).fetchone()
-            if previous is not None:
-                if previous[0] != canonical(result.as_dict()):
-                    raise StateError("historical source changed; record a new source version")
-                return
-            ruling = self._protocol_ruling(db, result, ruling, executed=False)
-            admitted = result.status == "ok" and ruling.teaches
-            count = db.execute("SELECT COUNT(*) FROM actions WHERE candidate_id=? AND endpoint_id=?",
-                               (result.candidate_id, result.endpoint_id)).fetchone()[0]
-            action = Action(identifier, 0, result.candidate_id, result.endpoint_id, count, 0.0,
-                            {"source_id": source_id})
-            db.execute("INSERT INTO actions VALUES (?,?,?,?,?,0,?,?,?)", (
-                identifier, 0, result.candidate_id, result.endpoint_id, count, result.cost,
-                "completed" if admitted else "invalid", canonical(action.as_dict()),
-            ))
-            db.execute("INSERT INTO observations VALUES (?,?,?,?)", (
-                identifier, int(admitted), canonical(result.as_dict()), canonical(ruling.as_dict()),
-            ))
-            self._event(db, "observation_imported", {"action": action.as_dict(),
-                                                   "result": result.as_dict(), "admitted": admitted})
+        _, endpoints = self._configuration(db)
+        if result.endpoint_id not in endpoints:
+            raise ValueError("a known endpoint and a stable source id are required")
+        if result.units != endpoints[result.endpoint_id].units:
+            raise ValueError("historical observation units differ from the endpoint")
+        if db.execute("SELECT 1 FROM candidates WHERE id=?", (result.candidate_id,)).fetchone() is None:
+            raise ValueError("historical observation requires a registered candidate")
+        previous = db.execute("SELECT body FROM observations WHERE action_id=?", (identifier,)).fetchone()
+        if previous is not None:
+            if previous[0] != canonical(result.as_dict()):
+                raise StateError("historical source changed; record a new source version")
+            return
+        ruling = self._protocol_ruling(db, result, ruling, executed=False)
+        admitted = result.status == "ok" and ruling.teaches
+        count = db.execute("SELECT COUNT(*) FROM actions WHERE candidate_id=? AND endpoint_id=?",
+                           (result.candidate_id, result.endpoint_id)).fetchone()[0]
+        action = Action(identifier, 0, result.candidate_id, result.endpoint_id, count, 0.0,
+                        {"source_id": source_id})
+        db.execute("INSERT INTO actions VALUES (?,?,?,?,?,0,?,?,?)", (
+            identifier, 0, result.candidate_id, result.endpoint_id, count, result.cost,
+            "completed" if admitted else "invalid", canonical(action.as_dict()),
+        ))
+        db.execute("INSERT INTO observations VALUES (?,?,?,?)", (
+            identifier, int(admitted), canonical(result.as_dict()), canonical(ruling.as_dict()),
+        ))
+        self._event(db, "observation_imported", {"action": action.as_dict(),
+                                               "result": result.as_dict(), "admitted": admitted})
 
     @staticmethod
     def _actions(db: sqlite3.Connection) -> list[dict[str, Any]]:
