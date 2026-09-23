@@ -1801,7 +1801,7 @@ CRITERIA: tuple[CriterionSpec, ...] = (
                         kind="choice",
                         choices=(
                             ("relaxed", "Relaxed: 7-50 heavy atoms, rejection at 160 demerits"),
-                            ("regular", "Regular: the published default, 7-40 atoms, rejection at 100"),
+                            ("regular", "Regular: published default, 7-40 atoms, rejection at 100"),
                             ("rejections_only", "Outright rejections only, no demerit scoring"),
                         ),
                         help=(
@@ -3497,6 +3497,88 @@ CRITERIA: tuple[CriterionSpec, ...] = (
                             "is stronger for Vina affinity, so which end filters depends "
                             "on the scale chosen above."
                         ),
+                    ),
+                ),
+            ),
+        ),
+    ),
+    CriterionSpec(
+        id="redock_consistency",
+        label="Dock-redock pose consistency",
+        question="Does an independent re-search reproduce the retained docking pose?",
+        stage="docking_metrics",
+        evidence="derived_metric",
+        summary="Independent Uni-Dock search from fresh parent-SMILES geometry, after docking.",
+        options=(
+            BackendOption(
+                id="unidock_redock",
+                label="Independent Uni-Dock redock",
+                engine="Uni-Dock",
+                summary=("Fixed-receptor-frame, symmetry-corrected heavy-atom RMSD; "
+                         "no ligand alignment."),
+                plugin_ref="docking.redock_consistency@0.1.0",
+                gate_plugin="derived.numeric_evidence_gate@0.1.0",
+                license_spdx="Apache-2.0",
+                requires=("meeko",),
+                recommended=True,
+                citation=("Bell EW, Zhang Y. DockRMSD. J Cheminform. 2019. "
+                          "doi:10.1186/s13321-019-0362-7"),
+                defaults={
+                    "schema_version": 1,
+                    "executable": "",
+                    "source_engine_id": "unidock",
+                    "source_seed": 20_260_823,
+                    "seed": 20_260_824,
+                    "search_mode": "balance",
+                    "scoring": "vina",
+                },
+                gate_defaults={
+                    "schema_version": 1,
+                    "metric_id": "dock_redock_rmsd",
+                    "expected_units": "ANGSTROM",
+                    "expected_direction": "LOWER_BETTER",
+                    "maximum": 2.0,
+                    "maximum_exclusive": True,
+                    "on_unscorable": "reject",
+                },
+                notes=(
+                    "2 A is a configurable engineering default borrowed from crystal-redocking "
+                    "evaluation, not proof of experimental accuracy. Agreement may reproduce a "
+                    "wrong pose; benchmark target actives and crystal ligands separately. "
+                    "The original rank-zero docking pose is exported unchanged. Missing, "
+                    "nonfinite, identity-mismatched and failed comparisons cannot pass."
+                ),
+                thresholds=(
+                    ThresholdField(
+                        name="maximum",
+                        label="RMSD must be below",
+                        target="gate",
+                        unit="A",
+                        minimum=0.01,
+                        maximum=20.0,
+                        step=0.1,
+                    ),
+                    ThresholdField(
+                        name="seed",
+                        label="Independent search seed",
+                        kind="integer",
+                        minimum=1,
+                        maximum=2**31 - 1,
+                        step=1,
+                    ),
+                    ThresholdField(
+                        name="source_seed",
+                        label="Original docking seed",
+                        kind="integer",
+                        minimum=0,
+                        maximum=2**31 - 1,
+                        step=1,
+                    ),
+                    ThresholdField(
+                        name="executable",
+                        label="Uni-Dock executable",
+                        kind="text",
+                        environment_variable="MOLCASCADE_UNIDOCK_EXECUTABLE",
                     ),
                 ),
             ),

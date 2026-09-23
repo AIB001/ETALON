@@ -37,6 +37,8 @@ from functools import partial, wraps
 from pathlib import Path
 from typing import Any
 
+from etalon.active.store import StateError
+
 logger = logging.getLogger("etalon.mcp")
 
 
@@ -158,6 +160,13 @@ def tool(cost: Cost) -> Callable[[Callable[..., str]], Callable[..., str]]:
             try:
                 with StdoutToStderr():
                     return function(*args, **kwargs)
+            except StateError as error:
+                logger.warning("%s refused: %s", function.__name__, error)
+                return fail(
+                    "StateError", str(error),
+                    hint="Refresh status and the current plan or observation. Reconcile unfinished work before submitting a new execution.",
+                    retryable=False, tool=function.__name__,
+                )
             except (ValueError, KeyError) as error:
                 logger.warning("%s refused: %s", function.__name__, error)
                 return fail(

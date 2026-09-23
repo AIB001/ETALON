@@ -202,6 +202,7 @@ class DerivedMetricUnits(StrEnum):
     KCAL_PER_MOL_PER_HEAVY_ATOM_POW = "KCAL_PER_MOL_PER_HEAVY_ATOM_POW"
     TEU = "TEU"
     COUNT = "COUNT"
+    ANGSTROM = "ANGSTROM"
 
 
 class DerivedMetricDirection(StrEnum):
@@ -230,6 +231,7 @@ class UnscorableAction(StrEnum):
 class DerivedMetricEvidenceGateConfig(_NumericBoundsConfig):
     """Bind one derived metric, one method and one scale to a numeric window."""
 
+    maximum_exclusive: bool = False
     metric_id: str = Field(min_length=1, max_length=256)
     #: The digest of the parameters the metric was computed with.  Left unset it
     #: is resolved from the evidence, which is the common case: one featurizer
@@ -498,12 +500,13 @@ def _outcome_for_value(
     minimum: float | None,
     maximum: float | None,
     reason_prefix: str,
+    maximum_exclusive: bool = False,
 ) -> tuple[bool, str]:
-    if value is None:
+    if value is None or not math.isfinite(value):
         return False, f"{reason_prefix}_MISSING"
     if minimum is not None and value < minimum:
         return False, f"{reason_prefix}_BELOW_MINIMUM"
-    if maximum is not None and value > maximum:
+    if maximum is not None and (value > maximum or (maximum_exclusive and value == maximum)):
         return False, f"{reason_prefix}_ABOVE_MAXIMUM"
     return True, f"{reason_prefix}_PASS"
 
@@ -1059,7 +1062,8 @@ def _evaluate_derived_metric(
             "direction": config.expected_direction.value,
             "minimum": config.minimum,
             "maximum": config.maximum,
-            "bounds_inclusive": True,
+            "bounds_inclusive": not config.maximum_exclusive,
+            **({"maximum_exclusive": True} if config.maximum_exclusive else {}),
             "missing_policy": "REJECT",
             "unscorable_policy": config.on_unscorable.value,
         }
@@ -1091,6 +1095,7 @@ def _evaluate_derived_metric(
                     minimum=config.minimum,
                     maximum=config.maximum,
                     reason_prefix="DERIVED_METRIC",
+                    maximum_exclusive=config.maximum_exclusive,
                 )
             elif status != DerivedMetricStatus.OK.value:
                 passed, reason_code = _outcome_for_status(
@@ -1103,6 +1108,7 @@ def _evaluate_derived_metric(
                     minimum=config.minimum,
                     maximum=config.maximum,
                     reason_prefix="DERIVED_METRIC",
+                    maximum_exclusive=config.maximum_exclusive,
                 )
             _insert_result(
                 connection,
@@ -1120,7 +1126,8 @@ def _evaluate_derived_metric(
                     "status": status,
                     "minimum": config.minimum,
                     "maximum": config.maximum,
-                    "bounds_inclusive": True,
+                    "bounds_inclusive": not config.maximum_exclusive,
+                    **({"maximum_exclusive": True} if config.maximum_exclusive else {}),
                     "unscorable_policy": config.on_unscorable.value,
                     "derived_not_measured": True,
                 },

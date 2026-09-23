@@ -1,0 +1,117 @@
+{
+  "scope": "Single-fixture software integration smoke; not affinity validation or crystal-pose accuracy",
+  "date": "2026-09-23",
+  "gpu": "NVIDIA GeForce RTX 4090",
+  "fixture": "1iep / imatinib",
+  "inputs": {
+    "repository_commit": "3c65c0b3e6c2c1d183f6a175ecb65e3c5ba91645",
+    "files": [
+      {
+        "url": "https://raw.githubusercontent.com/ccsb-scripps/AutoDock-Vina/3c65c0b3e6c2c1d183f6a175ecb65e3c5ba91645/example/basic_docking/data/1iep_ligand.sdf",
+        "path": "1iep_ligand.sdf",
+        "sha256": "051b8742c32adc05c07fb486a4e7c9327f84e131cee33ac4e6a568d07553eb38"
+      },
+      {
+        "url": "https://raw.githubusercontent.com/ccsb-scripps/AutoDock-Vina/3c65c0b3e6c2c1d183f6a175ecb65e3c5ba91645/example/basic_docking/data/1iep_receptorH.pdb",
+        "path": "1iep_receptorH.pdb",
+        "sha256": "5f6aee6029f9a2a2c2be32d4eb948ae70808690573e1b69a0850cdffd7048ca7"
+      },
+      {
+        "url": "https://raw.githubusercontent.com/ccsb-scripps/AutoDock-Vina/3c65c0b3e6c2c1d183f6a175ecb65e3c5ba91645/example/basic_docking/solution/1iep_receptor.pdbqt",
+        "path": "1iep_receptor.pdbqt",
+        "sha256": "f13cf3b36f61d87c3b58983e0b8ecf1c3456a685eb86dfe9ccfb139c7bdc2586"
+      },
+      {
+        "url": "https://raw.githubusercontent.com/ccsb-scripps/AutoDock-Vina/3c65c0b3e6c2c1d183f6a175ecb65e3c5ba91645/example/basic_docking/solution/1iep_receptor.box.txt",
+        "path": "1iep_receptor.box.txt",
+        "sha256": "3dff08200b5b9c2ca0932c832c9dffc5823b39caec6c92f76be5f7c5ea49d8de"
+      }
+    ]
+  },
+  "molcascade": {
+    "name": "molcascade",
+    "version": "0.1.0a0",
+    "source_commit": "06f15d7e82748fce7ab4c2c28adac226eab1fc51",
+    "tree_sha256": "3a63111bc33bc22566fc12fa798188cde95f7dda70bace890f582b01b1b8a8ad",
+    "pinned": true
+  },
+  "protocol_revision": "b66508cb396f376ef0d9cb57aacfce4f2348a6958e639b5dec284b99f1dbd9dc",
+  "search_seeds": [
+    20260823,
+    20260824
+  ],
+  "dock_score_kcal_mol": -12.14,
+  "redock_score_kcal_mol": -12.2,
+  "rmsd_angstrom": 1.023328719477817,
+  "acceptance": "finite, symmetry-corrected heavy-atom fixed-receptor-frame RMSD < 2.0 angstrom",
+  "accepted_handoffs": 1,
+  "original_pose_preserved": true,
+  "raw_engine_files": [
+    {
+      "path": "raw-engine-vendored/20260823/invocation.json",
+      "sha256": "406933e8f0a0bbac2227bb2a36c5d77478c2d653fd54a221533f48a2a3cb8409"
+    },
+    {
+      "path": "raw-engine-vendored/20260823/ligand-000000.pdbqt",
+      "sha256": "31dac6b340bd8f3556f808e1a6f7bcf7905cbf9175f7e1355ca2b557a0ad9793"
+    },
+    {
+      "path": "raw-engine-vendored/20260823/ligand-000000_out.pdbqt",
+      "sha256": "b485f0c2d2435cf10471635264443f2d97b936e4fd5c11d00910c4de09dbfa2e"
+    },
+    {
+      "path": "raw-engine-vendored/20260823/ligand_index.txt",
+      "sha256": "6d08828d0524dd0b2e2bd6803a72b495d13cb7b64dd0dad4f773efd68918b9a5"
+    },
+    {
+      "path": "raw-engine-vendored/20260823/stderr.log",
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "path": "raw-engine-vendored/20260823/stdout.log",
+      "sha256": "0d4db8672e11b074338343a0af98134a293a54a1ecade608c550fe3123e338c5"
+    },
+    {
+      "path": "raw-engine-vendored/20260824/invocation.json",
+      "sha256": "36b05af4e5f47810d43121b3bba8e8134208f362547221775afd67df28b4ee75"
+    },
+    {
+      "path": "raw-engine-vendored/20260824/ligand-000000.pdbqt",
+      "sha256": "2b9c2afee8ec494135a2fae9758d53d8924966bf859d099bca5e787598252551"
+    },
+    {
+      "path": "raw-engine-vendored/20260824/ligand-000000_out.pdbqt",
+      "sha256": "2e10ea2d19ff7c7c6fc7daee5b3186ab1867ed6e9b47f6dcb8d6007e98cc38d7"
+    },
+    {
+      "path": "raw-engine-vendored/20260824/ligand_index.txt",
+      "sha256": "85eb12a727a05de8c53241903740606d771c730d0df35c1b026b15a935db9307"
+    },
+    {
+      "path": "raw-engine-vendored/20260824/stderr.log",
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "path": "raw-engine-vendored/20260824/stdout.log",
+      "sha256": "8c8c591b5cb610d3d196c74f06c3c068c8728bd32440d0c5b32df92f35c0c95b"
+    }
+  ],
+  "report_sha256": "9ec03ebcb4afe3795443d1064ac3e17d1c60ad7122f71dec2bec73d973de9c2d",
+  "unidock_binary_sha256": "f07165b95e3711ad54195754966e24a1a36b857627de5c01b9a20e42476e7322",
+  "search_policy": {
+    "center": [
+      15.19,
+      53.903,
+      16.917
+    ],
+    "size": [
+      20.0,
+      20.0,
+      20.0
+    ],
+    "scoring": "vina",
+    "search_mode": "balance",
+    "num_modes": 1,
+    "pose_quality": "default enabled"
+  }
+}

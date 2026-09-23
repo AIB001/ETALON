@@ -225,6 +225,8 @@ class CascadeExecutor:
             return missing("the requested recipe did not report complete successful execution",
                            "CASCADE_INCOMPLETE", status="invalid")
         parents: dict[str, str] = {}
+        terminal_parents: set[str] = set()
+        terminal_stage = None
         for stage in result.committed:
             try:
                 parent_rows = screen.read(stage.artifact_id, contract_id="parent/v1")
@@ -243,9 +245,21 @@ class CascadeExecutor:
                     return missing("the same parent identity has conflicting SMILES across stages", "CHEMICAL_STATE_MISMATCH")
                 stage_parents.add(identifier)
                 parents[identifier] = smiles
+            # The last population is the cascade's decision, including parallel
+            # policy joins. A union of historical populations resurrects rejected
+            # molecules; intersecting them would incorrectly override an ANY join.
+            # Exporters without a parent contract leave this population intact.
+            terminal_parents = stage_parents
+            terminal_stage = stage
         if len(parents) != 1:
             return missing("selected input did not produce exactly one registered chemical state", "CHEMICAL_STATE_CARDINALITY")
         parent_id, smiles = next(iter(parents.items()))
+        provenance["terminal_population"] = {
+            "stage_id": terminal_stage.stage_id if terminal_stage else None,
+            "artifact_id": terminal_stage.artifact_id if terminal_stage else None,
+            "count": len(terminal_parents),
+            "candidate_survived": parent_id in terminal_parents,
+        }
         from rdkit import Chem
 
         expected_mol, actual_mol = Chem.MolFromSmiles(candidate.smiles), Chem.MolFromSmiles(smiles)
@@ -276,6 +290,15 @@ class CascadeExecutor:
             return missing("readout does not contain a valid numeric scalar", "READOUT_INVALID")
         if not math.isfinite(value) or rows[0].get("status", "OK") != "OK":
             return missing("readout value is invalid or its status is not OK", "READOUT_INVALID")
+        if parent_id not in terminal_parents:
+            # Retain the early measurement for inspection, but do not train a
+            # gated endpoint on a molecule the requested protocol rejected.
+            provenance["raw_readout"] = {
+                "value": value, "units": endpoint.units, "readout": asdict(readout),
+                "artifact_id": matches[0].artifact_id, "molcascade_parent_id": parent_id,
+            }
+            return missing("selected molecule did not survive the requested cascade's final population",
+                           "CANDIDATE_FILTERED", status="invalid")
         changed = changed_input(inputs)
         if changed:
             return missing(f"protocol input changed or missing before admission: {changed}",

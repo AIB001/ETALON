@@ -10,9 +10,9 @@ place it could not be found.
 
 | Asset | Source commit | Files | Size | What it is |
 | --- | --- | --- | --- | --- |
-| `molcascade/` | `c01a6e0b5152` | 167 | 4.0 MB | Ligand triage and docking cascade. Content-addressed artifacts, enforced contracts, per-molecule gates. |
+| `molcascade/` | `06f15d7e8274` | 168 | 4.0 MB | Ligand triage, docking and independent redock consistency. Content-addressed artifacts, enforced contracts, per-molecule gates. |
 | `prism/` | `f0492d964795` | 504 | 24.7 MB | GROMACS system building, MD, FEP, MM/PBSA, PMF, REST2, and a large trajectory-analysis layer. |
-| `molquarry/` | `e3e9a863c860` | 59 | 0.4 MB | Database access, target evidence dossiers, local catalogs and compound sourcing; two upstream skills. |
+| `molquarry/` | `82f4f34e54cb` | 64 | 0.5 MB | Database access, target evidence dossiers, local catalogs and compound sourcing; six discoverable search skills. |
 | `reference/approved_drugs.py` | from `molcascade` | 1 | 8 KB | 77 approved oral drugs with an in-window / out-of-window split. |
 
 `MANIFEST.json` carries the exact commit, subject and commit date of each source, the file
@@ -32,14 +32,14 @@ on the path explicitly, so which copy is in use is a fact about the process rath
 fact about the environment. Verified: importing with those paths first yields
 `asset/molcascade/src/molcascade/__init__.py`, `asset/prism/prism/__init__.py` and
 `asset/molquarry/src/molquarry/__init__.py`, a registry
-of 52 plugins, PRISM 1.2.0 and MolQuarry 0.4.1. Wheels include the same trees under
+of 53 plugins, PRISM 1.2.0 and MolQuarry 0.5.0. Wheels include the same trees under
 `etalon/_assets`; optional dependencies remain explicit installation extras.
 
 ## What was excluded, and why
 
-`tests/` from all three. 102 files and 1.5 MB from MolCascade, 194 files and 19.7 MB from PRISM --
+`tests/` from all three. 103 files from MolCascade, 194 files and 19.7 MB from PRISM --
 the latter dominated by full CHARMM36 force-field copies duplicated into FEP test fixtures.
-MolQuarry's 15 test files are also excluded; upstream suites can be run from their source repositories.
+MolQuarry's 16 test files are also excluded; upstream suites can be run from their source repositories.
 Every other tracked file was
 copied, including PRISM's `prism/configs/forcefield/` (170 files), which is runtime data a
 build needs rather than test material.

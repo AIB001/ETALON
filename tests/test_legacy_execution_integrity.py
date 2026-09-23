@@ -448,7 +448,7 @@ def _not_running(pid):
         try:
             if status.read_text().split(")", 1)[1].strip().startswith("Z"):
                 return True
-        except FileNotFoundError:
+        except (FileNotFoundError, ProcessLookupError):
             return True
         time.sleep(0.01)
     return False

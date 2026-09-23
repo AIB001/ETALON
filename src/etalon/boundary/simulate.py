@@ -71,7 +71,7 @@ import subprocess
 import sys
 import tempfile
 import time
-from collections.abc import Iterable, Mapping, Sequence
+from collections.abc import Callable, Iterable, Mapping, Sequence
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from functools import wraps
@@ -245,6 +245,7 @@ class _CapturedRun:
 
 def _run_owned(
     command: Sequence[str], *, timeout: float, env: Mapping[str, str], cwd: str | None = None,
+    process_observer: Callable[[int], None] | None = None,
 ) -> _CapturedRun:
     """Bound one owned POSIX session, retaining partial output on timeout or interruption.
 
@@ -256,18 +257,51 @@ def _run_owned(
     if not _PROCESS_GROUPS_SUPPORTED:
         raise SimulationError("controlled PRISM execution requires POSIX process groups; this platform is unsupported")
     started = time.monotonic()
+    gate_read = gate_write = None
     try:
+        launch = list(command)
+        descriptor_options = {}
+        if process_observer is not None:
+            # The scientific command cannot start until its owner is durably recorded.
+            # A killed parent closes the sole write end: the waiting child then exits
+            # without executing anything. exec preserves the recorded PID/session.
+            gate_read, gate_write = os.pipe()
+            launcher = (
+                "import os,sys\n"
+                "fd=int(sys.argv[1])\n"
+                "try: allowed=os.read(fd,1)\n"
+                "finally: os.close(fd)\n"
+                "if allowed!=b'1': sys.exit(125)\n"
+                "os.execvpe(sys.argv[2],sys.argv[2:],os.environ)\n"
+            )
+            launch = [sys.executable, "-c", launcher, str(gate_read), *launch]
+            descriptor_options = {"pass_fds": (gate_read,)}
         process = subprocess.Popen(
-            list(command), stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+            launch, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
             text=True, encoding="utf-8", errors="replace", start_new_session=True,
-            env=dict(env), cwd=cwd,
+            env=dict(env), cwd=cwd, **descriptor_options,
         )
-    except OSError as error:
-        return _CapturedRun(None, "", str(error), "launch_failed", time.monotonic() - started)
+    except BaseException as error:
+        for descriptor in (gate_read, gate_write):
+            if descriptor is not None:
+                os.close(descriptor)
+        if isinstance(error, OSError):
+            return _CapturedRun(None, "", str(error), "launch_failed", time.monotonic() - started)
+        raise
     status = "completed"
     cleanup: dict[str, object] = {}
     stdout = stderr = ""
     try:
+        if gate_read is not None:
+            os.close(gate_read)
+            gate_read = None
+        # Register ownership while cleanup is already armed. A failed journal write
+        # must terminate the process we just started, not leave untracked compute.
+        if process_observer is not None:
+            process_observer(process.pid)
+            os.write(gate_write, b"1")
+            os.close(gate_write)
+            gate_write = None
         stdout, stderr = process.communicate(timeout=timeout)
         if process.returncode != 0:
             status = "failed"
@@ -280,7 +314,11 @@ def _run_owned(
     except Exception as error:
         status = "failed"
         stderr = f"capture failed: {type(error).__name__}: {error}"
+        cleanup["capture_error"] = stderr
     finally:
+        for descriptor in (gate_read, gate_write):
+            if descriptor is not None:
+                os.close(descriptor)
         # Even a successful shell must not leave an untracked background child running.
         # This is exactly the process group created above, never our inherited group.
         try:
@@ -787,11 +825,15 @@ class Simulate:
         environment: Environment,
         *,
         infra: Infra | None = None,
+        process_observer: Callable[[int], None] | None = None,
     ) -> None:
+        if process_observer is not None and not callable(process_observer):
+            raise ValueError("process_observer must be callable")
         self.workspace = Path(workspace).expanduser().resolve()
         self.workspace.mkdir(parents=True, exist_ok=True)
         self.environment = environment
         self.infra = infra or load("prism")
+        self.process_observer = process_observer
 
     # -- build --------------------------------------------------------------
 
@@ -955,6 +997,7 @@ class Simulate:
             ],
             timeout=timeout,
             env=self.environment.exported(asset_root=self.infra.import_root),
+            **({"process_observer": self.process_observer} if self.process_observer is not None else {}),
         )
         captured.write_text(
             f"$ prism.system(...) -> {output_dir}\n--- stdout ---\n{completed.stdout}\n"
@@ -1165,6 +1208,7 @@ class Simulate:
         completed = _run_owned(
             ["bash", str(script)], cwd=str(record.md_dir), timeout=timeout,
             env=self.environment.exported(asset_root=self.infra.import_root),
+            **({"process_observer": self.process_observer} if self.process_observer is not None else {}),
         )
         text = (f"{completed.stdout}\n{completed.stderr}\n"
                 f"--- execution {completed.status}; requested limit {timeout}s ---\n")

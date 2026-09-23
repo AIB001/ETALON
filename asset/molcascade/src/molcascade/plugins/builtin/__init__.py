@@ -20,6 +20,7 @@ from molcascade.plugins.builtin.docking import (
     RDKitLigandConformerPlugin,
     UniDockPlugin,
 )
+from molcascade.plugins.builtin.docking.redock import RedockPlugin
 from molcascade.plugins.builtin.druglikeness import RDKitDrugLikenessPlugin
 from molcascade.plugins.builtin.evidence_gates import (
     NativeDerivedMetricEvidenceGatePlugin,
@@ -107,6 +108,7 @@ BUILTIN_STAGE_PLUGINS: tuple[StagePlugin, ...] = (
     NativeDockingScoreEvidenceGatePlugin(),
     NormalizedDockingScorePlugin(),
     PoseStrainPlugin(),
+    RedockPlugin(),
     SpecificityPanelPlugin(),
     NativeDerivedMetricEvidenceGatePlugin(),
     ADMETAIV2PredictorPlugin(),

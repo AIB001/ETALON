@@ -35,6 +35,7 @@ def create_server(quarry: MolQuarry | None = None):
         "MolQuarry",
         lifespan=lifespan,
         instructions=(
+            "Use list_skills/read_skill for bundled search workflows. "
             "Discover sources, inspect describe_source input schemas, then call query_database. "
             "Pass next_parameters unchanged for subsequent pages. "
             "Preserve raw assay context and provenance. "
@@ -62,6 +63,20 @@ def create_server(quarry: MolQuarry | None = None):
             structuredContent=data,
             isError=failed,
         )
+
+    @server.tool(annotations=local)
+    async def list_skills() -> CallToolResult:
+        """Discover bundled search workflows and their readable supporting resources."""
+        from .skills import list_skills as discover
+
+        return await anyio.to_thread.run_sync(lambda: invoke(discover))
+
+    @server.tool(annotations=local)
+    async def read_skill(name: str, path: str = "SKILL.md") -> CallToolResult:
+        """Read a bundled skill or a supporting resource returned by list_skills."""
+        from .skills import read_skill as read_resource
+
+        return await anyio.to_thread.run_sync(lambda: invoke(lambda: read_resource(name, path)))
 
     @server.tool(annotations=local)
     async def list_sources(

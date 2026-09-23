@@ -35,7 +35,7 @@ expensive one, and it is where a campaign can refuse a molecule for free.
 
 from __future__ import annotations
 
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -251,6 +251,7 @@ class Screen:
         *,
         prefer: str = "docked_pose",
         protonation_state_id: str | None = None,
+        evidence_from: Mapping[str, str] | None = None,
         tier_id: str = "z_md_handoff",
     ) -> Path:
         """Append the MD handoff tier to a cascade, and write the composed config.
@@ -274,6 +275,11 @@ class Screen:
                 did. Left alone the gate records ``INHERITED_FROM_STANDARDIZER``, which
                 is honest and is what the preflight layer refuses; passing a real value
                 here is the remedy, not a way of silencing it.
+            evidence_from: Explicit contract-to-stage bindings when the cascade has
+                multiple pose or conformer producers. For example,
+                ``{"docking_score/v1": "docking_score"}`` preserves the original
+                scored pose after a redock consistency gate. The compiler checks
+                that each named producer supplies the requested contract.
         """
 
         import yaml
@@ -316,6 +322,12 @@ class Screen:
             settings=settings,
             registry=create_builtin_registry(),
         )
+        if evidence_from is not None:
+            from molcascade.cascade.models import CriterionConfig
+
+            criterion = CriterionConfig.model_validate({
+                **criterion.model_dump(mode="json"), "evidence_from": dict(evidence_from),
+            })
         tier = {
             "id": tier_id,
             "title": "Handoff to simulation",
@@ -454,12 +466,15 @@ class Screen:
                 table = pq.read_table(directory / str(relative))
                 for row in table.to_pylist():
                     rows.append({**row, "_port": output.port, "_contract": output.contract_id})
-        if contract_id is not None and not rows:
-            available = sorted({output.contract_id for output in manifest.outputs})
+        available = sorted({output.contract_id for output in manifest.outputs})
+        if contract_id is not None and contract_id not in available:
             raise KeyError(
                 f"artifact {artifact_id[:12]} has no port carrying {contract_id!r}; "
                 f"it carries {available}"
             )
+        # A present but empty population is a scientific result: every candidate
+        # was rejected. It must not look like an absent output contract, which
+        # consumers may legitimately skip when inspecting multi-output stages.
         return rows
 
     def artifact_carrying(self, result: ScreenResult, contract_id: str) -> str | None:

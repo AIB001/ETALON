@@ -26,6 +26,10 @@ def build_parser():
     parser.add_argument("--no-cache", action="store_true", help="Disable response cache")
     sub = parser.add_subparsers(dest="command", required=True, parser_class=Parser)
     sub.add_parser("categories", help="List data responsibility categories")
+    sub.add_parser("skills", help="List bundled agent skills and supporting resources")
+    skill = sub.add_parser("skill", help="Read a bundled skill or a listed supporting resource")
+    skill.add_argument("name")
+    skill.add_argument("--path", default="SKILL.md")
     sources = sub.add_parser("sources", help="Discover implemented/planned sources")
     sources.add_argument("--category", choices=list(CATEGORIES))
     sources.add_argument("--implemented", action="store_true")
@@ -151,6 +155,12 @@ def main(argv=None):
         with MolQuarry(home=args.home, cache=not args.no_cache) as quarry:
             if args.command == "categories":
                 result = {"ok": True, "categories": CATEGORIES}
+            elif args.command in {"skills", "skill"}:
+                from .skills import list_skills, read_skill
+
+                result = (
+                    list_skills() if args.command == "skills" else read_skill(args.name, args.path)
+                )
             elif args.command == "sources":
                 result = {
                     "ok": True,

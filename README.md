@@ -2,14 +2,43 @@
 
 A CADD campaign agent that knows how much to trust its own numbers.
 
-Detailed documentation, reviews and validation records under `docs/` are maintained locally
-and excluded from Git. The overview and runnable examples below remain available in this repository.
+Detailed reviews and validation records under `docs/` are maintained locally and excluded from Git.
+The [durable runtime guide and research references](src/etalon/runtime/README.md), this overview
+and runnable examples are tracked and included with the implementation.
 
 ETALON provides the `doctor` command, persistent background screening
 (`screen plan / submit / status`), and interchangeable OpenAI,
 Anthropic and DeepSeek HTTP advisors. Screening jobs survive client disconnects and
-duplicate submissions retain one job. They do not share the active campaign budget or
-automatically launch downstream affinity calculations.
+duplicate submissions retain one job. The standalone screening API retains its own journal.
+The unified runtime below links data, screening and registered active execution in one durable workflow.
+
+## Durable CADD workflows and LLM control
+
+`etalon.runtime` connects MolQuarry evidence acquisition, MolCascade screening and registered
+MolCascade/PRISM executors through the existing campaign journal and scientific admission rules.
+It provides plan, submit, status, cancel, reconcile, configuration generation and bounded artifact
+reading through both CLI and MCP. SQLite records cross-stage state, resource reservations, costs,
+heartbeats, execution receipts and the next undispatched step; workers survive client disconnection.
+
+Three controller modes share the same validators: deterministic `ordered`, internal HTTP `advisor`,
+and `external` for an LLM host calling observe/advance. A decision selects a ready declared node;
+success requires verified artifacts. Actual HTTP usage, campaign charges and declared compute quotes
+retain separate units. Unknown outcomes keep their reservations until reconciliation.
+
+```bash
+pip install -e '.[cascade,quarry,active,mcp]'
+python examples/durable_campaign.py --workspace /absolute/new/runtime-demo
+python -m etalon workflow status --workspace /absolute/new/runtime-demo --job-id database-campaign
+python -m etalon workflow artifact --workspace /absolute/new/runtime-demo --job-id database-campaign \
+  --node-id learn --kind result --member /observations --limit 10
+python -m etalon workflow capabilities
+```
+
+The example executes real CPU properties for three fixture molecules with zero HTTP requests.
+The live PRISM executor requires a receptor-bound handoff, explicit runtime environment and a real
+MM-PBSA readout; it does not supply a complete FEP or independent-replica workflow. This is bounded
+automation of configured science. Read the [runtime guide](src/etalon/runtime/README.md), also served
+as `etalon://runtime`, for operation contracts, recovery semantics, limitations and literature.
 
 ## Executable active learning and composable cascades
 
@@ -90,6 +119,24 @@ ETALON runs three packages as infrastructure, keeping their pinned source trees 
 | **MolCascade** | `asset/molcascade` | ligand triage, docking, the handoff contract |
 | **PRISM** | `asset/prism` | system building, MD, MM-PBSA, FEP |
 | **MolQuarry** | `asset/molquarry` | database queries/downloads, target evidence, local catalogs and sourcing |
+
+The [three-module review and research plan](src/etalon/runtime/SCREENING_REVIEW.md) describes
+the new search workflows, redock policy, implemented admission fixes and proposed scientific
+validation. New MolCascade default cascades include an independent Uni-Dock redock gate after
+docking: symmetry-corrected heavy-atom RMSD must be **< 2.0 Å** in the receptor coordinate frame.
+The original scored pose is retained. This measures prediction consistency; experimental pose
+accuracy and binding activity require separate evidence. Explicit component recipes remain
+caller-authored, and existing saved configurations are not silently upgraded.
+
+ETALON admits a component-cascade readout only when the candidate survives its final population.
+An earlier score from a candidate rejected by a later gate remains in provenance but cannot train
+the endpoint as an accepted result. MD handoffs can explicitly bind their pose/conformer producer
+through `Screen.with_handoff(..., evidence_from={"docking_score/v1": "docking_score"})`.
+
+The [minimal redock example](examples/redock_screen.py) runs conformer preparation, docking,
+consistency filtering and original-pose handoff with a supplied receptor PDB, matching PDBQT,
+box and `id,smiles` CSV. Add `--plan-only` to inspect its compiled protocol without docking.
+It requires Meeko, PoseBusters and an installed Uni-Dock GPU executable in addition to `[cascade]`.
 
 All are vendored as digest-pinned trees and recorded in `asset/MANIFEST.json`. They are
 dependencies *and* evidence: every measurement here cites a commit, so the code that ran
@@ -179,9 +226,12 @@ preparation before entering that contract.
 The optional `[quarry-deliverables]` extra enables structure/workbook bundle dependencies.
 A `bundle` request takes an absolute collection `snapshot`, a `curation_path` following the
 upstream MolQuarry review schema, and bounded `options`; purchasing defaults to false.
-Its AF3 files are prepared jobs, not automatically submitted predictions. The two upstream
-skills and their references are served as `etalon://skills/molquarry/target-modulators` and
-`etalon://skills/molquarry/compound-sourcing`. ETALON's data tools wrap the pinned SDK; upstream
+Its AF3 files are prepared jobs, not automatically submitted predictions. All six upstream
+skills are discoverable at `etalon://skills/molquarry`: `target-modulators`, `compound-sourcing`,
+`analogue-search`, `selectivity-evidence`, `structure-templates` and `assay-literature`.
+Read each at `etalon://skills/molquarry/<name>` and follow its indexed reference URIs.
+MolQuarry also exposes bounded PubChem `substructure` queries alongside similarity search.
+ETALON's data tools wrap the pinned SDK; upstream
 tool names in these reference documents are not additional ETALON tools.
 
 > **Kept locally.** `findings/` — the measurement records — and `docs/` — the documentation,
@@ -221,6 +271,12 @@ update it cannot distinguish from noise.
 
 ```
 src/etalon/
+  runtime/      durable workflows across data, screening and registered active execution
+    service.py      submit/status/cancel/reconcile; fenced local workers and receipts
+    controller.py   bounded ordered/advisor/external decisions from verified artifacts
+    executors.py    immutable MolCascade/PRISM registrations in the campaign journal
+    operations.py   existing scientific services, artifact verification and cost reconciliation
+    artifacts.py    immutable screening configurations and bounded evidence reads
   boundary/     reach the infrastructure, and prove which copy was reached
     infra.py        pinned MolCascade, PRISM and MolQuarry; refuses a shadowed import
     quarry.py       bounded database SDK access and actual HTTP usage
@@ -328,7 +384,8 @@ measurements and the ADRs, because a refusal quoted without its measurement look
 An advisor can use the `claude` CLI with the operator's existing login, or the optional
 `HttpAdvisor` transport for OpenAI, Anthropic or DeepSeek. HTTP credentials are read from
 environment variables at request time; model names are explicit. These transports provide
-proposals to the existing campaign and do not supply an autonomous tool-calling host.
+proposals to the existing campaign. The runtime's `advisor` mode reuses the HTTP transport
+for a bounded observe/decide/execute/verify loop; `external` mode exposes that loop to an LLM host.
 Provider-specific response compatibility and live account access require separate validation.
 
 **An advisor proposes and never grants**, and the gradation is by what being wrong costs rather

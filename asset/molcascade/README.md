@@ -775,3 +775,38 @@ python -m build
 Linux or WSL2 is recommended for large production workers and optional native backends.
 The generated HTML is intended to remain portable across Windows, Linux, and macOS
 browsers.
+
+### Independent redock consistency (default)
+
+The starter cascade now runs `t9_redock` immediately after the docking gates,
+using `docking.redock_consistency@0.1.0`. It re-searches the retained Uni-Dock
+candidates from fresh ETKDG geometry and a different random seed. The chemical
+state is read from the original pose and checked against the parent, preserving
+any stereoisomer selected when the parent left stereochemistry unspecified;
+the original coordinates are discarded before independent embedding.
+Acceptance requires **symmetry-corrected heavy-atom RMSD < 2.0 Å**, with both
+poses in the same receptor coordinate frame and **no ligand alignment**.
+Exactly 2.0 Å fails; missing poses, nonfinite coordinates, incompatible chemical
+identity, exhausted symmetry mapping, and failed re-search cannot pass.
+
+This checks agreement between predictions, not accuracy against an experimental
+crystal ligand and not binding affinity. The 2 Å boundary is a configurable
+engineering default inspired by common crystal-redocking evaluation; calibrate
+it for each target with known actives and separate crystal-ligand redocking.
+See [DockRMSD](https://doi.org/10.1186/s13321-019-0362-7),
+[spyrmsd](https://doi.org/10.1186/s13321-020-00455-2), and
+[PoseBusters](https://doi.org/10.1039/D3SC04185A).
+
+The gate reads `derived_metric/v1`, metric `dock_redock_rmsd`, unit `ANGSTROM`.
+The evidence retains the original pose digest, original method, both seeds,
+repeat pose, score, and comparison policy. Original docking scores and exported
+poses remain unchanged; the gate decides which parents reach later metrics and
+MD. The source method and receptor must match the declared configuration, so
+changing the source engine settings requires copying those settings to redock
+and retaining the old seed as `source_seed`. Search uses the new `seed`.
+
+The builder exposes the RMSD ceiling and independent seed. To explicitly opt out,
+disable or remove `t9_redock` in the cascade JSON, or call
+`default_cascade(include_redock=False)`. This skips a second GPU search and is
+visible in the saved plan. Only the default retained Uni-Dock pose is tested;
+other engine poses need their own validation before being substituted downstream.

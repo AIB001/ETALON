@@ -463,6 +463,7 @@ DERIVED_METRIC_V1 = DataContract(
             "KCAL_PER_MOL_PER_HEAVY_ATOM_POW",
             "TEU",
             "COUNT",
+            "ANGSTROM",
         ),
         "direction": ("HIGHER_BETTER", "LOWER_BETTER"),
         "status": ("OK", "NOT_APPLICABLE", "OUT_OF_DOMAIN", "BACKEND_FAILED"),

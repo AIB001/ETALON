@@ -1276,6 +1276,48 @@ def _docking_tier(registry: PluginRegistry) -> TierConfig | None:
     )
 
 
+def _redock_tier(registry: PluginRegistry, docking: TierConfig | None) -> TierConfig | None:
+    """Validate the retained Uni-Dock pose by independent seeded re-search."""
+    source_id = _kcal_docking_source(docking)
+    if source_id is None or docking is None:
+        return None
+    source = next(item for item in docking.criteria if item.id == source_id)
+    settings = dict(source.settings)
+    source_seed = int(settings.get("seed", DEFAULT_SEED))
+    settings.update(
+        {
+            "source_engine_id": "unidock",
+            "source_seed": source_seed,
+            "seed": source_seed % (2**31 - 2) + 1,
+            "keep_poses": True,
+        }
+    )
+    criterion = _criterion_if_available(
+        "redock_consistency",
+        registry,
+        settings=settings,
+        evidence_from={DOCKING_SCORE_V1.id: source_id},
+    )
+    if criterion is None:
+        raise PluginError(
+            "default docking requires the redock consistency adapter",
+            code="REDOCK_DEFAULT_UNAVAILABLE",
+        )
+    return TierConfig(
+        id="t9_redock",
+        title="Independent redock consistency",
+        mode=TierMode.ALL,
+        criteria=(criterion,),
+        note=(
+            "Fresh ETKDG input and a different search seed; keep only finite symmetry-corrected "
+            "heavy-atom RMSD < 2.0 A in the fixed receptor frame. The original dock pose is "
+            "retained. This is prediction consistency, not crystal-pose accuracy or binding "
+            "validation. Calibrate with target actives and experimental poses. Disabling this "
+            "tier is an explicit opt-out recorded in the cascade."
+        ),
+    )
+
+
 #: Adapters whose docking scores are interaction energies in kcal/mol.  The
 #: post-docking metrics below are only defined on that scale -- ligand
 #: efficiency divides a score by heavy atoms, and dividing KarmaDock's MDN
@@ -1440,6 +1482,7 @@ def default_cascade(
     registry: PluginRegistry | None = None,
     target_count: int = DEFAULT_TARGET_COUNT,
     boltz2_settings: Mapping[str, Any] | None = None,
+    include_redock: bool = True,
 ) -> CascadeConfig:
     """Build the starter cascade against the plugins this installation has."""
 
@@ -1459,6 +1502,7 @@ def default_cascade(
             _structure_qc_tier(active),
             _conformer_tier(active),
             docking,
+            _redock_tier(active, docking) if include_redock else None,
             _docking_metrics_tier(active, docking),
             _affinity_tier(active, boltz2_settings=boltz2_settings),
         )

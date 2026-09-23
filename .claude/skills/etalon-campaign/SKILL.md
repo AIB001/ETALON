@@ -1,6 +1,6 @@
 ---
 name: etalon-campaign
-description: Run a complete structure-based drug-discovery campaign end to end — generative models through screening, MD stability, and relative free energy — with a budget, a learned screen, and refusals that stop a wrong number before it becomes a recorded one. Use for any large-scale CADD campaign, virtual screening funnel design, compute-budget allocation across docking/MM-PBSA/FEP tiers, or when asked how much a screening change is worth.
+description: Operate ETALON CADD campaigns with bounded database acquisition, composable screening, registered active executors, scientific admission and durable LLM-controlled workflows. Use for campaign execution, database-to-screening integration, compute-budget planning, artifact inspection and recovery; includes planning guidance for MD/MM-PBSA/FEP while distinguishing installed execution capabilities.
 ---
 
 # Running a CADD campaign with ETALON
@@ -12,7 +12,8 @@ looked fine and was about a different molecule.
 This workflow is built so that **everything cheap refuses, and everything expensive is guarded by
 something cheap.** You cannot confirm 750,000 actions with the operator, so the governance is not
 per-action confirmation: you confirm the *plan* once, and then the refusals are automatic and you read
-them.
+them. Existing user authorization for the concrete scope and budget remains valid; do not ask for it
+again at each stage.
 
 ## The one rule
 
@@ -27,6 +28,12 @@ refused. `granted_by` is a person's name; writing your own there is refused too,
 the name back in their result so the operator can see whose it is.
 
 ## The pipeline, with what each stage costs
+
+This table describes the broader scientific design space and illustrative planning costs. PRISM
+tool names refer to the upstream application, not additional ETALON MCP methods. Inspect
+`etalon_workflow_capabilities` and `etalon://runtime` for installed executable operations. ETALON's
+registered PRISM executor currently wraps a receptor-bound single MM-PBSA readout path; complete
+FEP networks and independent-replica orchestration require further implementation and validation.
 
 | stage | tool | GPU-hours per molecule | what it answers |
 |---|---|---|---|
@@ -63,9 +70,11 @@ every number afterwards cites a commit that did not produce it.
 
 ## Database evidence and candidate ingress
 
-For database-derived campaigns, read `etalon://skills/molquarry/target-modulators`; for shortlist
-sourcing, read `etalon://skills/molquarry/compound-sourcing`. Their relative reference documents
-are available under the same resource URI plus `/references/workflow.md` or `/references/results.md`.
+Discover the pinned acquisition skills and their reference URIs at `etalon://skills/molquarry`.
+Use `target-modulators` for target evidence, `compound-sourcing` for shortlist sourcing,
+`analogue-search` for similar/substructure compounds, `selectivity-evidence` for measured
+counter-target panels, `structure-templates` for receptor/ligand structural evidence, and
+`assay-literature` for experimental context. Read each at `etalon://skills/molquarry/<name>`.
 Use ETALON's data tools below to retain the harness's snapshot and admission contracts. The upstream
 documents also name MolQuarry SDK/CLI tools; those names are not extra ETALON MCP tools.
 
@@ -94,9 +103,58 @@ documents also name MolQuarry SDK/CLI tools; those names are not extra ETALON MC
    conformers and aligned experimental coordinates are not automatically docked poses in the
    simulation receptor frame; the ordinary receptor-bound preflight remains mandatory.
 
-Data runs are synchronous, bounded operations, not detached workers. Inspect `etalon_data_status`
+New MolCascade default cascades apply independent Uni-Dock redocking after docking. Accept
+finite symmetry-corrected heavy-atom RMSD **< 2.0 Å**, measured in the fixed receptor frame
+without ligand alignment; missing or failed comparisons reject. This is a configurable pose
+consistency criterion, not crystal-pose accuracy or affinity evidence. Use an independently
+generated input preserving the selected chemical state and a different search seed. Retain the
+original scored pose for handoff, and bind `evidence_from` explicitly if several producers exist.
+Include the additional search in the resource quote. Existing fixed or custom component recipes
+need an explicit redock component/gate; do not claim they inherit a new default automatically.
+
+Only a candidate surviving the final population can supply an accepted component-cascade label.
+An earlier score with `CANDIDATE_FILTERED` remains an auditable raw readout, not an admitted
+measurement. An empty population is a valid screening outcome and cannot be skipped as though
+its contract were missing. Changing gates requires a new protocol, preserving the old evidence.
+
+Direct `etalon_data_run` calls are synchronous, bounded operations. The unified runtime can execute
+the same service as a detached `data.acquire` node. Inspect `etalon_data_status`
 after interruption; unsealed directories cannot supply admitted evidence. Never silently retry a
 failed run under an existing id. The data budget is per run; respect shared provider/account quotas.
+
+## Durable workflow execution
+
+Read `etalon://runtime` for the JSON schema, exact operation arguments, accounting and recovery
+contracts. Use the unified workflow service when a task crosses data, screening and active stages.
+
+1. Inspect `etalon_workflow_capabilities`. Generate an explicit MolCascade configuration with
+   `etalon_screen_configure`. Prepare `molcascade` or `prism` executors with
+   `etalon_executor_prepare`; use their returned endpoints in `campaign.create`, or register
+   them in an existing campaign using `etalon_executor_register` with a rationale.
+2. Build an `etalon-workflow/1` graph of registered operations, absolute inputs, output references,
+   dependencies and resource allowances. `etalon_workflow_plan` returns the normalized spec and
+   input-bound `plan_id`. Scientific protocols, assay reviews and admission thresholds are explicit
+   inputs; a controller decision cannot change them after submission.
+3. Call `etalon_workflow_submit` with the same spec/plan and a stable `job_id` under the authorized
+   budget. Repeating that request returns the same execution. For a configured active campaign,
+   `etalon_active_execution_plan` and `etalon_active_submit` provide the same service with one node.
+4. `ordered` mode executes ready nodes automatically. `advisor` uses the configured HTTP model with
+   a persisted call allowance. In `external` mode, call `etalon_workflow_observe`, inspect verified
+   results, then `etalon_workflow_advance` with exactly `observation_id`, `node_id`, and `reason`.
+   Choose a ready node or `pause`. A stale observation or premature `finish` is refused.
+5. Read `etalon_workflow_status` and `etalon_workflow_artifact`. MCP `ok=true` means the call
+   succeeded; workflow completion requires `job.state=succeeded`. The service checks actual
+   artifacts and journal admission; a successful subprocess or model assertion is insufficient.
+6. Cancellation is a request via `etalon_workflow_cancel`. After the worker and scientific child
+   sessions stop, `etalon_workflow_reconcile` verifies existing receipts. It never silently reruns
+   dispatched science. Missing outcomes retain reserved costs. Documented failure settlements may
+   report costs and local evidence but cannot invent an admitted measurement. Use `resume=true`
+   only to continue undispatched work within the original scope.
+
+Do not add unlike resource units: HTTP requests/bytes are metered; campaign charges come from its
+journal; compute quotes and caller-supplied failure costs remain explicitly labeled. The service
+does not measure GPU utilization or token-priced model spend. Do not mutate the same campaign
+through an unrelated runner while its runtime node is active.
 
 ## Step 1 — plan before generating anything
 
@@ -118,8 +176,8 @@ is to measure it, which is two columns and a Spearman on your panel.
 9.9 of 750. That is not a defect of the plan; it is what a funnel does, and it is why the next step
 matters more than buying compute.
 
-Then show the operator the rendered plan and get agreement on the budget. **This is the one
-confirmation the campaign needs up front.**
+Then show the operator the rendered plan and obtain budget agreement if the current session has
+not already authorized that concrete scope. Do not repeat an existing authorization.
 
 ## Step 2 — find out what is worth changing before you change anything
 

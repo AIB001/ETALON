@@ -1,32 +1,32 @@
 {
   "assets": {
     "molcascade": {
-      "copied_bytes": 4151772,
-      "copied_files": 167,
-      "excluded_files": 102,
+      "copied_bytes": 4177833,
+      "copied_files": 168,
+      "excluded_files": 103,
       "excluded_prefixes": [
         "tests/"
       ],
-      "source_commit": "c01a6e0b5152a1959b6820de2d723551b37c0c6b",
-      "source_committed_at": "2026-09-12T11:12:28+08:00",
+      "source_commit": "06f15d7e82748fce7ab4c2c28adac226eab1fc51",
+      "source_committed_at": "2026-09-23T17:51:33+08:00",
       "source_path": "/mnt/e/My_Project/MolCascade",
-      "source_subject": "Let a campaign with no receptor hand off its conformers",
-      "tracked_files": 269,
-      "tree_sha256": "558b669939d5f555ee24111493e78e92a1fec7003dfb85d7aba5bc0cf3da30f6"
+      "source_subject": "Gate default docking survivors by independent redock pose consistency",
+      "tracked_files": 271,
+      "tree_sha256": "3a63111bc33bc22566fc12fa798188cde95f7dda70bace890f582b01b1b8a8ad"
     },
     "molquarry": {
-      "copied_bytes": 465459,
-      "copied_files": 59,
-      "excluded_files": 15,
+      "copied_bytes": 488909,
+      "copied_files": 64,
+      "excluded_files": 16,
       "excluded_prefixes": [
         "tests/"
       ],
-      "source_commit": "e3e9a863c8604a8c6c48aef46c81d89252f9b3ea",
-      "source_committed_at": "2026-09-19T18:55:50+08:00",
+      "source_commit": "82f4f34e54cb5229d17d7a5fb3440c7188aa41a3",
+      "source_committed_at": "2026-09-23T17:48:00+08:00",
       "source_path": "/mnt/e/My_Project/MolQuarry",
-      "source_subject": "Harden workflow recovery, scientific exports and HTTP query handling",
-      "tracked_files": 74,
-      "tree_sha256": "c40adf7dc1a67ca25040e1ee18867bdeee92419b02833a3e81def633ce5446c4"
+      "source_subject": "Add discoverable CADD search skills and bounded substructure queries",
+      "tracked_files": 80,
+      "tree_sha256": "2fd408599d2e0ba8a40edf9736ff94632b4943bbedbfcd06c0f94eb47c7e60fe"
     },
     "prism": {
       "copied_bytes": 25856652,

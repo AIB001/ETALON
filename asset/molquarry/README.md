@@ -2,9 +2,20 @@
 
 MolQuarry gives agents a consistent way to discover CADD data sources, query scientific evidence, download official files, and search authorized local catalogs. Its target workflow produces organized **PDB structures and alignments, an Excel compound workbook, RDKit-prepared 3D SDF files, source evidence and AF3 job inputs**.
 
-**Version 0.4.1 covers 51 sources in 12 categories:** 41 remote query/file-discovery adapters and 10 official access guides with local import/search. There are **109 query/discovery operations and 28 download operations**, plus `resources` on each source. These counts describe implemented operations, not complete coverage or public API availability at every website.
+**Version 0.5.0 covers 51 sources in 12 categories:** 41 remote query/file-discovery adapters and 10 official access guides with local import/search. There are **110 query/discovery operations and 28 download operations**, plus `resources` on each source. These counts describe implemented operations, not complete coverage or public API availability at every website.
 
-The [target modulator skill](skills/molquarry-target-modulators/SKILL.md) guides inhibitor and agonist discovery. The MTDH/SND1 example (`examples/mtdh_snd1/README.md`, local workspace) contains an executed public-source search and deliverables. Original 50-source verification and the Gleevec FDA approval case remain in verification (`docs/verification.md`, local workspace); the current workflow review is in workflow review (`docs/workflow-review.md`, local workspace).
+Six bundled skills turn these adapters into focused search workflows:
+
+| Skill | Search and review task |
+| --- | --- |
+| [Target modulators](skills/molquarry-target-modulators/SKILL.md) | Target-to-ligand, inhibitor and agonist evidence dossiers |
+| [Compound sourcing](skills/molquarry-compound-sourcing/SKILL.md) | Exact identities, catalog evidence and make-versus-buy review |
+| [Analogue search](skills/molquarry-analogue-search/SKILL.md) | Bounded fingerprint similarity and supplied-core substructure expansion |
+| [Selectivity evidence](skills/molquarry-selectivity-evidence/SKILL.md) | Measured off-target/counter-screen profiles and comparable selectivity ratios |
+| [Structure templates](skills/molquarry-structure-templates/SKILL.md) | Experimental receptor/ligand templates and redocking reference selection |
+| [Assay literature](skills/molquarry-assay-literature/SKILL.md) | Primary assay context, conflicting potency claims and traceable passages |
+
+The new workflows use existing source queries plus PubChem `substructure`; they are agent-guided searches, not automatic conclusions about activity, selectivity or patent novelty. The MTDH/SND1 example (`examples/mtdh_snd1/README.md`, local workspace) contains an executed public-source search and deliverables. Original 50-source verification and the Gleevec FDA approval case remain in verification (`docs/verification.md`, local workspace); the current workflow review is in workflow review (`docs/workflow-review.md`, local workspace).
 
 The Git repository contains runtime code, tests, scripts, skills and this README. Extended `docs/`, `examples/`, `example/`, build artifacts and generated results remain local and are intentionally excluded from Git. Live verification commands write their own evidence locally.
 
@@ -161,7 +172,7 @@ All sources expose `resources` and the shared local CSV/TSV/SDF import/search to
 | 36 | [Open Reaction Database](https://github.com/open-reaction-database/ord-data) / `ord` | [x] File discovery | `tree` | `dataset` | semantic_passed |
 | 37 | [PDBbind+](https://www.pdbbind-plus.org.cn/) / `pdbbind` | [x] Local import; [ ] Remote API | Official access guide and local search | — | website_only |
 | 38 | [PLINDER](https://plinder-org.github.io/plinder/tutorial/dataset.html) / `plinder` | [x] File discovery | `objects` | `object` | blocked |
-| 39 | [PubChem Compound / BioAssay](https://pubchem.ncbi.nlm.nih.gov/docs/pug-rest) / `pubchem` | [x] Public API | `properties`, `batch_properties`, `source_categories`, `similarity`, `assay`, `files` | `sdf`, `artifact` | semantic_passed |
+| 39 | [PubChem Compound / BioAssay](https://pubchem.ncbi.nlm.nih.gov/docs/pug-rest) / `pubchem` | [x] Public API | `properties`, `batch_properties`, `source_categories`, `similarity`, `substructure`, `assay`, `files` | `sdf`, `artifact` | semantic_passed; substructure live smoke 2026-09-23 |
 | 40 | [RCSB PDB / wwPDB](https://www.rcsb.org/docs/programmatic-access/web-apis-overview) / `rcsb` | [x] Public API | `entry`, `ligand`, `nonpolymer_entity`, `polymer_entity`, `search`, `by_uniprot` | `structure` | semantic_passed |
 | 41 | [Reactome](https://reactome.org/ContentService/) / `reactome` | [x] Public API | `pathway`, `pathways_by_uniprot`, `files` | `artifact` | semantic_passed |
 | 42 | [STRING](https://string-db.org/help/api/) / `string` | [x] Public API | `map_ids`, `network`, `partners`, `enrichment`, `version` | — | semantic_passed |
@@ -219,9 +230,18 @@ Known boundaries:
 }
 ```
 
-There are **13 MCP tools**: `list_sources`, `describe_source`, `query_database`, `plan_download`, `download_data`, `import_catalog`, `local_catalogs`, `search_local_catalog`, `collect_target_evidence`, `build_target_bundle`, `import_af3_results`, `screen_compound_sourcing`, and `export_target_inventory`. Workflow paths are relative to `MOLQUARRY_WORKSPACE`, defaulting to the server's current working directory. Set it to the agent's project directory when starting a server from another location. Workflow outputs never default to `~`.
+There are **15 MCP tools**: `list_skills`, `read_skill`, `list_sources`, `describe_source`, `query_database`, `plan_download`, `download_data`, `import_catalog`, `local_catalogs`, `search_local_catalog`, `collect_target_evidence`, `build_target_bundle`, `import_af3_results`, `screen_compound_sourcing`, and `export_target_inventory`. Workflow paths are relative to `MOLQUARRY_WORKSPACE`, defaulting to the server's current working directory. Set it to the agent's project directory when starting a server from another location. Workflow outputs never default to `~`.
 
-The repository skill is [skills/molquarry-target-modulators/SKILL.md](skills/molquarry-target-modulators/SKILL.md). Load this skill in the agent or expose it through the agent's project skill mechanism; no global home-directory installation is performed. Start with `list_sources → describe_source → query_database`, or use `collect_target_evidence` and the reviewed bundle workflow. MCP network tasks run outside the event loop; large files are returned as paths and manifests.
+Skills and supporting references ship inside the wheel and source distribution. Discover them through MCP `list_skills`, load an entrypoint with `read_skill(name)`, and read a listed reference with `read_skill(name, path)`. The SDK equivalents are `molquarry.skills.list_skills()` and `read_skill(name, path="SKILL.md")`; discovery returns each name, description, entrypoint and readable resources. No global home-directory installation is performed.
+
+```bash
+molquarry skills
+molquarry skill molquarry-analogue-search
+molquarry skill molquarry-target-modulators --path references/workflow.md
+molquarry query pubchem substructure --params '{"smiles":"CC(=O)Oc1ccccc1C(=O)O","limit":5}'
+```
+
+Start with `list_skills → read_skill → describe_source → query_database`, or use `collect_target_evidence` and the reviewed bundle workflow. Substructure defaults to exact stereochemistry, charge and isotope matching (unspecified query centers remain unspecified). It returns capped CIDs with unknown total and no continuation. Retain this limit and all matching options; neither a hit nor a missing record proves activity or novelty. MCP network tasks run outside the event loop; large files are returned as paths and manifests.
 
 SDK example:
 
@@ -273,7 +293,8 @@ Missing credentials fail before requests. Authenticated responses do not enter t
 
 - [x] 51 sources, 12 categories, strict schemas and source-specific access levels.
 - [x] 41 remote adapters and 10 authorized local-file workflows.
-- [x] SDK, JSON CLI and 13 MCP tools.
+- [x] SDK, JSON CLI and 15 MCP tools, including installed skill/resource discovery.
+- [x] Six distributed search skills, including analogue/core expansion, selectivity evidence, structure templates and primary assay review.
 - [x] Pacing, retries, cache isolation, response limits, original-file manifests and bounded local imports.
 - [x] Europe PMC abstracts/full text, ChEMBL assay/document expansion and RCSB entity traversal.
 - [x] Inhibitor/agonist collection with identity resolution, provenance, review queue and coverage.

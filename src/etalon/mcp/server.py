@@ -17,6 +17,7 @@ Claude Code skill uses, so a model reaching ETALON through either path reads the
 
 from __future__ import annotations
 
+import json
 from pathlib import Path
 from typing import Any
 
@@ -25,6 +26,7 @@ from etalon.mcp._common import Cost, require_mcp
 #: The skill, shipped inside the package so an installed ETALON serves the same text the repository's
 #: .claude/skills directory holds. Kept as one file with one copy on disk; see ``_skill_path``.
 SKILL_RESOURCE = "etalon://skills/campaign"
+RUNTIME_RESOURCE = "etalon://runtime"
 
 
 def _skill_path() -> Path:
@@ -52,7 +54,7 @@ def _skill_path() -> Path:
 def build() -> Any:
     """Construct the server with every tool and resource registered."""
 
-    from etalon.mcp import active, data, execution, governance, planning
+    from etalon.mcp import active, data, execution, governance, planning, runtime
 
     server_class = require_mcp()
     mcp = server_class("etalon")
@@ -62,31 +64,50 @@ def build() -> Any:
     active.register(mcp)
     execution.register(mcp)
     data.register(mcp)
+    runtime.register(mcp)
+
+    @mcp.resource("etalon://skills/molquarry")
+    def molquarry_workflows() -> str:
+        """Discover all pinned acquisition workflows and their reference resource URIs."""
+        from etalon.boundary.infra import load
+
+        load("molquarry")
+        from molquarry.skills import list_skills
+
+        rows = []
+        for entry in list_skills()["skills"]:
+            slug = entry["name"].removeprefix("molquarry-")
+            uri = "etalon://skills/molquarry/" + slug
+            rows.append({**entry, "uri": uri, "references": [
+                uri + "/" + path for path in entry["resources"]
+                if path.startswith("references/")
+            ]})
+        return json.dumps({"skills": rows, "execution": "Use ETALON data tools for sealed acquisition."},
+                          ensure_ascii=False)
 
     @mcp.resource("etalon://skills/molquarry/{skill}")
     def molquarry_workflow(skill: str) -> str:
-        """Pinned upstream workflows: target-modulators or compound-sourcing.
+        """Read a pinned workflow; discover names at etalon://skills/molquarry.
 
         Use ETALON's data tools for sealed acquisition and campaign ingress. These documents
         also describe advanced MolQuarry SDK workflows, not additional ETALON MCP tools.
         """
-        from etalon.boundary.infra import asset_directory
+        from etalon.boundary.infra import load
 
-        if skill not in {"target-modulators", "compound-sourcing"}:
-            raise ValueError("unknown MolQuarry workflow")
-        return (asset_directory() / "molquarry" / "skills" / ("molquarry-" + skill)
-                / "SKILL.md").read_text(encoding="utf-8")
+        load("molquarry")
+        from molquarry.skills import read_skill
+
+        return read_skill("molquarry-" + skill)["content"]
 
     @mcp.resource("etalon://skills/molquarry/{skill}/references/{reference}")
     def molquarry_reference(skill: str, reference: str) -> str:
         """The reference document linked by each pinned MolQuarry workflow."""
-        from etalon.boundary.infra import asset_directory
+        from etalon.boundary.infra import load
 
-        known = {"target-modulators": "workflow.md", "compound-sourcing": "results.md"}
-        if known.get(skill) != reference:
-            raise ValueError("unknown MolQuarry workflow reference")
-        return (asset_directory() / "molquarry" / "skills" / ("molquarry-" + skill)
-                / "references" / reference).read_text(encoding="utf-8")
+        load("molquarry")
+        from molquarry.skills import read_skill
+
+        return read_skill("molquarry-" + skill, "references/" + reference)["content"]
 
     @mcp.resource(SKILL_RESOURCE)
     def campaign_workflow() -> str:
@@ -99,6 +120,16 @@ def build() -> Any:
         """
 
         return _skill_path().read_text(encoding="utf-8")
+
+    @mcp.resource(RUNTIME_RESOURCE)
+    def runtime_workflow() -> str:
+        """Durable workflow and executor protocol, resource budgets and verified completion rules.
+
+        Read before workflow submission or external controller decisions. The same document
+        ships with the runtime package and describes how to inspect and recover saved work.
+        """
+
+        return (Path(__file__).resolve().parents[1] / "runtime" / "README.md").read_text(encoding="utf-8")
 
     @mcp.resource("etalon://findings")
     def findings() -> str:
@@ -142,7 +173,7 @@ def costs() -> dict[str, str]:
     Derived from the decorator rather than from a list, so a tool cannot be added without one.
     """
 
-    from etalon.mcp import active, data, execution, governance, planning
+    from etalon.mcp import active, data, execution, governance, planning, runtime
 
     found: dict[str, str] = {}
 
@@ -161,6 +192,7 @@ def costs() -> dict[str, str]:
     active.register(collector)
     execution.register(collector)
     data.register(collector)
+    runtime.register(collector)
     return found
 
 

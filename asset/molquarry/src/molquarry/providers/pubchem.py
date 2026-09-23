@@ -24,6 +24,15 @@ class SimilarityInput(InputModel):
     limit: int = Field(default=20, ge=1, le=100)
 
 
+class SubstructureInput(InputModel):
+    smiles: str = Field(min_length=1, max_length=4000)
+    stereo: Literal["ignore", "exact", "relative", "nonconflicting"] = "exact"
+    match_charges: bool = True
+    match_isotopes: bool = True
+    rings_not_embedded: bool = False
+    limit: int = Field(default=20, ge=1, le=100)
+
+
 class AssayInput(InputModel):
     aid: int = Field(gt=0)
 
@@ -67,6 +76,12 @@ class PubChem(Provider):
         "similarity": Operation(
             "PubChem 2D fingerprint similarity (not a patent novelty verdict).",
             SimilarityInput,
+            {"smiles": "CC(=O)Oc1ccccc1C(=O)O", "limit": 5},
+        ),
+        "substructure": Operation(
+            "Bounded PubChem substructure search for a supplied SMILES core; defaults to "
+            "exact stereo, charge and isotope matching. No exhaustive scaffold search is implied.",
+            SubstructureInput,
             {"smiles": "CC(=O)Oc1ccccc1C(=O)O", "limit": 5},
         ),
         "assay": Operation(
@@ -128,6 +143,28 @@ class PubChem(Provider):
         if operation == "assay":
             response = self.request("GET", f"{BASE}/assay/aid/{params.aid}/description/JSON")
             return Page(response.data["PC_AssayContainer"], [response.provenance])
+        if operation == "substructure":
+            response = self.request(
+                "POST",
+                f"{BASE}/compound/fastsubstructure/smiles/cids/JSON",
+                params={
+                    "Stereo": params.stereo,
+                    "MatchCharges": str(params.match_charges).lower(),
+                    "MatchIsotopes": str(params.match_isotopes).lower(),
+                    "RingsNotEmbedded": str(params.rings_not_embedded).lower(),
+                    "MaxRecords": params.limit,
+                },
+                form={"smiles": params.smiles},
+            )
+            return Page(
+                [{"CID": cid} for cid in response.data["IdentifierList"]["CID"]],
+                [response.provenance],
+                warnings=[
+                    "Results are capped by MaxRecords, with unknown total and no continuation; "
+                    "they are substructure leads, not verified activity, stock or novelty. "
+                    "Unspecified query stereochemistry remains unspecified."
+                ],
+            )
         response = self.request(
             "POST",
             f"{BASE}/compound/fastsimilarity_2d/smiles/cids/JSON",

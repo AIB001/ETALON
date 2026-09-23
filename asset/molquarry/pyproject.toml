@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "molquarry"
-version = "0.4.1"
+version = "0.5.0"
 description = "Agent-friendly discovery, queries and reproducible downloads for CADD data sources"
 readme = "README.md"
 requires-python = ">=3.11"
@@ -23,6 +23,9 @@ molquarry-mcp = "molquarry.mcp_server:main"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/molquarry"]
+
+[tool.hatch.build.targets.wheel.force-include]
+"skills" = "molquarry/skill_resources"
 
 [tool.hatch.build.targets.sdist]
 exclude = ["/examples/mtdh_snd1/output"]

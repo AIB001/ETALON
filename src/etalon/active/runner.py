@@ -7,6 +7,7 @@ an operator resolves the real outcome, rather than guessing whether an external 
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from dataclasses import replace
 from pathlib import Path
 from time import perf_counter
@@ -30,12 +31,18 @@ class Executor(Protocol):
 class ActiveCampaign:
     def __init__(self, store: CampaignStore, executor: Executor | None = None, *,
                  receptor_path: str | Path | None = None, waivers: WaiverSet | None = None,
-                 toolchain_active: bool | None = None) -> None:
+                 toolchain_active: bool | None = None,
+                 checkpoint: Callable[[], None] | None = None,
+                 result_observer: Callable[[Action, Evaluation], None] | None = None) -> None:
         self.store = store
         self.executor = executor
         self.receptor_path = Path(receptor_path).resolve() if receptor_path is not None else None
         self.waivers = waivers or WaiverSet()
         self.toolchain_active = toolchain_active
+        # Runtime hooks do not change selection or admission. A failed receipt write must
+        # leave the action pending, so the observer is outside the executor error handler.
+        self.checkpoint = checkpoint
+        self.result_observer = result_observer
 
     def plan(self) -> tuple[MultiEndpointGP | None, list[Choice], str]:
         """Read-only planning. The same decision is recomputed before execution."""
@@ -108,6 +115,8 @@ class ActiveCampaign:
                              "score": choice.score, "evidence": choice.evidence} for choice in choices]}
 
     def run_round(self) -> dict[str, Any]:
+        if self.checkpoint is not None:
+            self.checkpoint()
         started = perf_counter()
         model, choices, reason = self.plan()
         planning_seconds = perf_counter() - started
@@ -131,6 +140,8 @@ class ActiveCampaign:
         from etalon.active.protocols import ProtocolUnavailable
 
         for choice in choices:
+            if self.checkpoint is not None:
+                self.checkpoint()
             try:
                 action = self.store.reserve(round_id, choice.candidate_id, choice.endpoint_id,
                                             {**choice.evidence, "score": choice.score})
@@ -160,9 +171,12 @@ class ActiveCampaign:
                                            toolchain_active=self.toolchain_active, waivers=self.waivers)
                     grant = require(candidate.handoff, authorized.grants, receptor_path=self.receptor_path)
                 except (OSError, ValueError, PermissionError) as error:
-                    self.store.resolve(action.id, Evaluation(candidate.id, endpoint.id, None, endpoint.units,
+                    result = Evaluation(candidate.id, endpoint.id, None, endpoint.units,
                         0.0, status="blocked", checks=checks,
-                        provenance={"phase": "preflight", "error": str(error)}), waivers=self.waivers)
+                        provenance={"phase": "preflight", "error": str(error)})
+                    if self.result_observer is not None:
+                        self.result_observer(action, result)
+                    self.store.resolve(action.id, result, waivers=self.waivers)
                     executed.append(action.id)
                     continue
             self.store.start_action(action.id)
@@ -184,6 +198,8 @@ class ActiveCampaign:
                 **result.provenance, "endpoint_protocol": endpoint.protocol,
                 "authorization": grant.as_dict() if grant else None,
             })
+            if self.result_observer is not None:
+                self.result_observer(action, result)
             self.store.resolve(action.id, result, waivers=self.waivers)
             executed.append(action.id)
         summary = {"actions": executed, "balance": self.store.balance(), "stop_reason": reason,

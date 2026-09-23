@@ -50,6 +50,7 @@ def test_stdio_acquisition_to_campaign_uses_pinned_data_tools_and_skill_resource
     pytest.importorskip("mcp")
     from mcp import ClientSession, StdioServerParameters
     from mcp.client.stdio import stdio_client
+    from mcp.shared.exceptions import McpError
 
     fixture = tmp_path / "catalog.csv"
     fixture.write_text("id,smiles\nfixture-ethanol,CCO\n")
@@ -70,6 +71,21 @@ def test_stdio_acquisition_to_campaign_uses_pinned_data_tools_and_skill_resource
             reference = await session.read_resource(
                 "etalon://skills/molquarry/compound-sourcing/references/results.md")
             assert reference.contents[0].text
+            index = await session.read_resource("etalon://skills/molquarry")
+            workflows = json.loads(index.contents[0].text)["skills"]
+            assert {row["name"] for row in workflows} == {
+                "molquarry-target-modulators", "molquarry-compound-sourcing",
+                "molquarry-analogue-search", "molquarry-selectivity-evidence",
+                "molquarry-structure-templates", "molquarry-assay-literature",
+            }
+            for workflow in workflows:
+                text = (await session.read_resource(workflow["uri"])).contents[0].text
+                assert workflow["name"] in text
+                for uri in workflow["references"]:
+                    assert (await session.read_resource(uri)).contents[0].text
+            # Only resources in the pinned skill index can be read.
+            with pytest.raises(McpError):
+                await session.read_resource("etalon://skills/molquarry/not-a-workflow")
 
             async def call(name, arguments):
                 result = await session.call_tool(name, arguments)
