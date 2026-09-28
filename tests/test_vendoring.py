@@ -13,6 +13,7 @@ clean is precisely what would make such a test pass for the wrong reason.
 
 from __future__ import annotations
 
+import ast
 import importlib.util
 import subprocess
 import sys
@@ -152,3 +153,81 @@ def test_the_asset_readme_names_the_commits_the_manifest_pins() -> None:
     for name, recorded in manifest["assets"].items():
         short = recorded["source_commit"][:12]
         assert short in text, f"asset/README.md does not name {name}'s pinned commit {short}"
+
+
+# -- the other half of pinning: the modules that reach for a vendored package -----------------
+
+#: The three vendored distributions. A bare ``from <one of these> import ...`` resolves through
+#: ``sys.path``, which an editable install can own.
+_VENDORED = frozenset({"molcascade", "molquarry", "prism"})
+
+
+def _vendored_imports(tree: ast.AST) -> set[str]:
+    """Root names of the vendored packages a module imports directly."""
+
+    found: set[str] = set()
+    for node in ast.walk(tree):
+        if isinstance(node, ast.ImportFrom) and node.module and node.level == 0:
+            root = node.module.split(".")[0]
+            if root in _VENDORED:
+                found.add(root)
+        elif isinstance(node, ast.Import):
+            for alias in node.names:
+                root = alias.name.split(".")[0]
+                if root in _VENDORED:
+                    found.add(root)
+    return found
+
+
+def _calls_load(tree: ast.AST) -> bool:
+    """Whether the module calls something named ``load`` -- ``load(...)`` or ``infra.load(...)``."""
+
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.Call):
+            continue
+        function = node.func
+        if isinstance(function, ast.Name) and function.id == "load":
+            return True
+        if isinstance(function, ast.Attribute) and function.attr == "load":
+            return True
+    return False
+
+
+def test_every_module_reaching_a_vendored_package_pins_it_first() -> None:
+    """``boundary.infra.load`` refuses a shadowed copy -- but only where something calls it.
+
+    This is ADR 0006's shape once more. ``load`` checks ``sys.modules``, checks the resolved path
+    and refuses an editable install that has taken the name, and a module that imports
+    ``molcascade`` without calling it gets none of that: the import succeeds, the version looks
+    right, and every number afterwards cites a commit that did not produce it.
+
+    Four modules did exactly that -- ``learn/surrogate.py``, ``learn/bundle.py``,
+    ``data/service.py`` and ``runtime/operations.py``, none of which contained the word ``load``.
+    Two were pinned in practice by a ``Quarry`` or ``Screen`` constructed earlier in the same
+    function; two were not pinned by anything, and one of those is the featuriser whose entire
+    argument is that training and inference share MolCascade's own code.
+
+    What this test does not establish: ordering. A module that pins in one function and imports
+    bare in another satisfies it. That is a weaker property than the one wanted, and it is the
+    strongest one a per-module check can carry -- a per-function rule would flag ``boundary``'s
+    own adapters, which legitimately pin once in ``__init__`` and import in twenty methods.
+    """
+
+    root = Path(__file__).resolve().parent.parent / "src" / "etalon"
+    unpinned: list[str] = []
+    reaching = 0
+    for path in sorted(root.rglob("*.py")):
+        tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
+        imports = _vendored_imports(tree)
+        if not imports:
+            continue
+        reaching += 1
+        if not _calls_load(tree):
+            unpinned.append(f"{path.relative_to(root)} imports {sorted(imports)}")
+
+    assert not unpinned, (
+        "these modules import a vendored package without calling boundary.infra.load, so a "
+        "shadowing editable install would be silent:\n  " + "\n  ".join(unpinned)
+    )
+    # A guard that matched nothing would pass forever. The count is a floor, not a target.
+    assert reaching >= 10, f"only {reaching} modules reach a vendored package; has the layout moved?"

@@ -13,6 +13,7 @@ from typing import Any
 
 from etalon.active.schema import canonical, digest
 from etalon.active.store import CampaignStore, StateError
+from etalon.boundary.infra import load
 from etalon.data.artifacts import file_hash, read_snapshot
 from etalon.runtime.schema import absolute, bounded_int, fields, references
 
@@ -562,6 +563,9 @@ def verify(operation: str, params: dict, result: dict, *, active_start: dict | N
         if run["status"] != "SUCCEEDED" or run["failed_stages"] or not run["stages"]:
             raise StateError("screening did not finish successfully; Python return is not scientific success")
         screen = Screen(result["workspace"])
+        # Screen's own construction pins MolCascade, so this call is redundant today and is here
+        # because the next reader should not have to know that to be sure this import is pinned.
+        load("molcascade")
         from molcascade.artifacts.store import LocalArtifactStore
 
         artifacts = LocalArtifactStore(screen.workspace)

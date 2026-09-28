@@ -39,6 +39,7 @@ from numbers import Integral
 from pathlib import Path
 from typing import Any
 
+from etalon.boundary.infra import load
 from etalon.learn.conformal import Calibration
 from etalon.learn.surrogate import Surrogate, representation
 
@@ -100,6 +101,8 @@ def _digest_bytes(payload: bytes) -> str:
 def _bundle_digest(directory: Path) -> str:
     """Use the consumer's validation and digest contract, without loading an ONNX runtime."""
 
+    # The consumer's contract is only the consumer's if it comes from the pinned consumer.
+    load("molcascade")
     from molcascade.plugins.builtin.custom_model import inspect_model_bundle
 
     try:
@@ -214,6 +217,7 @@ def export(
     }
     # Validate before creating anything. The downstream inspector also checks the
     # staged bytes; neither operation imports an inference runtime or executes a graph.
+    load("molcascade")
     from molcascade.plugins.builtin.custom_model import ModelBundleManifest
 
     try:

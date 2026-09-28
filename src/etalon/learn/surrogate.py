@@ -49,6 +49,8 @@ from dataclasses import dataclass, field
 from numbers import Real
 from typing import Any
 
+from etalon.boundary.infra import load
+
 #: RDKit descriptors, named rather than taken wholesale. The full list is ~210 columns and at
 #: n in the low hundreds that is more features than molecules -- a model fitted on it is fitting
 #: the panel. These nine are the ones a medicinal chemist would name for potency in a series.
@@ -132,6 +134,10 @@ def representation() -> Any:
     bundle's manifest. One object, so the two cannot disagree.
     """
 
+    # Pinned before the import, not after. A bare ``from molcascade...`` binds whichever copy
+    # sys.path found, and the whole argument above -- that training and inference share MolCascade's
+    # featurisation -- holds only if both are the featurisation the manifest names.
+    load("molcascade")
     from molcascade.chemistry.featurizers import (
         DescriptorBlock,
         MorganBlock,
@@ -155,6 +161,8 @@ def featurize(smiles: Sequence[str], spec: Any = None) -> Features:
     """
 
     import numpy as np
+
+    load("molcascade")
     from molcascade.chemistry.featurizers import Featurizer
 
     chosen = spec if spec is not None else representation()

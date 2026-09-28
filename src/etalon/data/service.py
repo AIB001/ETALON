@@ -8,6 +8,7 @@ import shutil
 from pathlib import Path
 from typing import Any
 
+from etalon.boundary.infra import load
 from etalon.boundary.quarry import DataBudget, Quarry
 from etalon.data.artifacts import digest, file_hash, new_run, read_snapshot, seal, write_json
 
@@ -44,6 +45,10 @@ def _inputs(request: dict[str, Any]) -> list[Path]:
 
 def plan_data(request: dict[str, Any], *, budget: DataBudget | None = None) -> dict[str, Any]:
     """Validate request schemas and bind local bytes without querying any remote service."""
+    # Explicit, though the Quarry below pins MolQuarry on construction. Every schema validated here
+    # comes from the vendored package, and which copy that is should not depend on a reader noticing
+    # that the context manager happens to be entered first.
+    load("molquarry")
     budget = budget or DataBudget()
     if not isinstance(request, dict) or request.get("kind") not in _FIELDS:
         raise ValueError(f"data kind must be one of {sorted(_FIELDS)}")
@@ -121,6 +126,7 @@ def plan_data(request: dict[str, Any], *, budget: DataBudget | None = None) -> d
 
 
 def _query_pages(client: Any, request: dict[str, Any], output: Path) -> dict[str, Any]:
+    load("molquarry")
     from molquarry.errors import MolQuarryError
 
     parameters = request.get("parameters", {})
