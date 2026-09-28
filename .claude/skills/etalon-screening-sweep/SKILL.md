@@ -66,12 +66,15 @@ You do five things. A supervisor does the other five hundred.
  1. 建面板                    ┐
  2. calibrate_gates           │  科学判断      ingest 完成的 chunk
  3. authorize_gates           │  只做一次  →   到水位线就发批
- 4. campaign_plan（配比）     │                批次交给空闲设备
+ 4. devices + campaign_plan   │                批次交给空闲设备
  5. 启动 supervisor           ┘                终态 run 记进 ledger
                                                崩溃留下的认领自愈
  ── 之后每隔 15–30 分钟 ──                     生成循环轮转 chunk
- 读 status，只在科学信号上介入
+ 读 status，只在科学信号上介入                 退役 loop 的卡转给筛选
 ```
+
+The last line is the one thing in that column that is off by default; see
+`migrate_retired_devices` below.
 
 One campaign was supervised by a person reading a status script every five minutes for 44 hours:
 about 500 readings, **fewer than ten of which needed a decision**. `Supervisor.tick()` is the other
@@ -96,15 +99,44 @@ supervisor = Supervisor(
     generation=PrismGeneration(),
     screen=MolCascadeScreening(screen, cascade, plan.revision_id, target=target),
     retire=lambda tag: tag in retired_by_productivity,   # your scientific rule
+    migrate_retired_devices=True,           # a stopped loop's card joins the screeners
 )
 supervisor.run(interval=60)                 # returns when the campaign is complete
 ```
+
+`migrate_retired_devices` is off by default and you almost always want it on. `screen_devices` was
+fixed for the supervisor's life, so a campaign that retired four of five generation loops finished on
+the screeners it started with while four cards sat idle. With it set, a device joins the pool on the
+pass after its last generator stops — and only when **every** generator on that card has stopped,
+since two loops on one card is a normal configuration.
+
+It is off by default because of the machine rather than the science: on a shared host, cards you gave
+to generation may be owed back when generation ends, and a supervisor that keeps them competes with
+whoever was waiting. When off, the first pass that finds an idle card says so in `notes` once. It
+never hands a device back — restart the supervisor with the lists it should have instead.
 
 `retire` is the seam where your judgement enters the loop. The supervisor stops a generator on two
 mechanical conditions — its molecule target, and five consecutive barren chunks — and on nothing else.
 Exhaustion is a scientific call; feed it `etalon_generation_productivity`'s verdict.
 
 ## The order
+
+### 0. Measure the machine, before sizing anything against it
+
+```
+etalon_devices                              # what cards exist, their memory, the cores
+etalon_campaign_plan(pool_size=..., screen_devices=..., generation_devices=..., detect=true)
+```
+
+`etalon_campaign_plan` takes the device counts as integers and its shipped defaults — 3 screeners, 5
+generators — describe the one campaign they were measured on. With `detect=true` it measures the host
+and **refuses a plan asking for more devices than exist**, which is the one error here that no care in
+the rates can catch. `recommended_split` names the balance point for the total.
+
+Both shipped rates (95 minutes a batch, 4,100 unique molecules a generator-hour) were measured once
+and **neither records the device it was measured on**, so detection cannot tell you they still hold.
+The result says which of its numbers are yours and which are borrowed, in `basis`. Re-measure them on
+your own cascade and target before trusting a split computed from them.
 
 ### 1. Calibrate, before anything else
 

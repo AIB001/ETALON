@@ -69,6 +69,8 @@ class TickReport:
     generation_started: tuple[str, ...] = ()
     generation_finished: tuple[dict[str, Any], ...] = ()
     retired: tuple[str, ...] = ()
+    #: Devices that joined the screening pool this pass because their generators stopped.
+    migrated: tuple[str, ...] = ()
     notes: tuple[str, ...] = ()
 
     @property
@@ -85,6 +87,7 @@ class TickReport:
                 self.generation_started,
                 self.generation_finished,
                 self.retired,
+                self.migrated,
             )
         )
 
@@ -101,6 +104,7 @@ class TickReport:
             "generation_started": list(self.generation_started),
             "generation_finished": [dict(row) for row in self.generation_finished],
             "retired": list(self.retired),
+            "migrated": list(self.migrated),
             "notes": list(self.notes),
         }
 
@@ -127,12 +131,19 @@ class Supervisor:
         workspace: Where batch libraries are written.
         generators: The loops filling the pool. Empty is legitimate -- a campaign screening a library
             it already has needs no generation.
-        screen_devices: Devices available for screening. One batch per device at a time.
+        screen_devices: Devices available for screening. One batch per device at a time. Grows when
+            ``migrate_retired_devices`` is set and a generator's card falls idle.
         generation: Runs one chunk. Injected; see :data:`GenerationDriver`.
         screen: Screens one batch. Injected; see :data:`ScreenDriver`.
         retire: Given a generator's tag, whether to stop it. Injected because the decision is
             scientific -- :mod:`etalon.generate.productivity` computes it, and an operator may
             override. Default never retires.
+        migrate_retired_devices: Whether a device whose every generator has stopped joins
+            ``screen_devices``. Off by default, and the default is about the machine rather than the
+            science: on a shared host an operator who gave five GPUs to generation may intend them
+            returned when generation ends, and a supervisor that silently keeps them competes with
+            whoever was waiting for one. When off, the first pass that finds such a device says so in
+            ``notes`` once, because an idle GPU nobody mentions is the failure this exists to stop.
     """
 
     def __init__(
@@ -146,6 +157,7 @@ class Supervisor:
         generation: GenerationDriver | None = None,
         screen: ScreenDriver | None = None,
         retire: Callable[[str], bool] | None = None,
+        migrate_retired_devices: bool = False,
     ) -> None:
         if not revision_id.strip():
             raise ValueError("a supervisor needs the compiled revision its batches belong to")
@@ -155,10 +167,14 @@ class Supervisor:
         self.revision_id = revision_id
         self.workspace = Path(workspace)
         self.generators = {generator.tag: generator for generator in generators}
-        self.screen_devices = tuple(screen_devices)
+        # Deduplicated because a device named twice would be offered two batches at once, and the
+        # second claim would be refused by the sweep rather than by anything that could explain it.
+        self.screen_devices = tuple(dict.fromkeys(screen_devices))
         self.generation = generation
         self.screen = screen
         self.retire = retire or (lambda _tag: False)
+        self.migrate_retired_devices = bool(migrate_retired_devices)
+        self._noted_idle: set[str] = set()
         self.jobs: list[_Job] = []
         self.barren: dict[str, int] = {}
         self.stopped: set[str] = set()
@@ -183,7 +199,10 @@ class Supervisor:
 
         The order is deliberate. Reaping first means a device freed this pass is usable this pass.
         Ingesting before emitting means a chunk that just landed can complete a batch. Recovering
-        before claiming means a batch a crash orphaned is re-offered rather than stranded.
+        before claiming means a batch a crash orphaned is re-offered rather than stranded. Migrating
+        before starting screens means a generation device released on the *previous* pass screens on
+        this one -- the stop decision stays in :meth:`_start_generation` alone, so a device retired
+        here waits one interval rather than being decided about twice.
         """
 
         notes: list[str] = []
@@ -197,6 +216,7 @@ class Supervisor:
         # exact case recovery exists for.
         recovered = self.sweep.recover()
         emitted = self._emit()
+        migrated = self._migrate(notes)
         started_screens = self._start_screens(notes)
         started_generation, retired = self._start_generation(notes)
 
@@ -215,6 +235,7 @@ class Supervisor:
             generation_started=started_generation,
             generation_finished=finished,
             retired=retired,
+            migrated=migrated,
             notes=tuple(notes),
         )
 
@@ -324,6 +345,58 @@ class Supervisor:
             started.append(f"{batch.batch_id}@{device}")
         return tuple(started)
 
+    def _migrate(self, notes: list[str]) -> tuple[str, ...]:
+        """Hand a device whose generators have all stopped to the screening pool.
+
+        ``screen_devices`` used to be fixed for the life of the supervisor, so a campaign that
+        retired four of five generation loops finished on the screeners it started with and the other
+        four cards sat idle. :func:`etalon.mcp.sweep.etalon_campaign_plan` advises the move and an
+        operator made it by hand on one campaign -- eighteen hours in, three devices -- and that move
+        produced half of that campaign's hits. This is the same move, made when the loop ends rather
+        than when somebody notices.
+
+        A device is taken only when **every** generator configured on it has stopped, because one
+        model on one card across two loops is a normal configuration and the card is not free until
+        both are done. It is also refused while any job still holds the device: ``stopped`` is only
+        set for a tag with no running chunk, so the two conditions agree today, and the second is
+        here so that they still agree if the first ever changes.
+
+        What it does not do: take a device back. Screening keeps it for the rest of the campaign, and
+        a generator that an operator restarts on that card would contend with a screen. Restart the
+        supervisor with the device lists it should have instead.
+        """
+
+        configured = {generator.device for generator in self.generators.values()}
+        held = {job.device for job in self.jobs}
+        idle = sorted(
+            device
+            for device in configured
+            if device not in self.screen_devices
+            and device not in held
+            and all(
+                tag in self.stopped
+                for tag, generator in self.generators.items()
+                if generator.device == device
+            )
+        )
+        if not idle:
+            return ()
+        if not self.migrate_retired_devices:
+            fresh = [device for device in idle if device not in self._noted_idle]
+            if fresh:
+                self._noted_idle.update(fresh)
+                notes.append(
+                    f"{', '.join(fresh)} has been idle since its generators stopped and is not "
+                    "screening. Construct the supervisor with migrate_retired_devices=True, or name "
+                    "the device in screen_devices, to use it."
+                )
+            return ()
+        self.screen_devices = self.screen_devices + tuple(idle)
+        notes.append(
+            f"{', '.join(idle)} joined the screening pool; every generator on it has stopped."
+        )
+        return tuple(idle)
+
     def _exhausted_target(self, tag: str) -> bool:
         generator = self.generators[tag]
         produced = sum(result.delivered for result in self.chunks.get(tag, ()))
@@ -381,6 +454,10 @@ class Supervisor:
         return {
             "revision_id": self.revision_id,
             "sweep": self.sweep.state(),
+            # Reported because it grows: a reader comparing two readings needs to see that a device
+            # moved from generation to screening, not infer it from a note that scrolled past.
+            "screen_devices": list(self.screen_devices),
+            "migrate_retired_devices": self.migrate_retired_devices,
             "running": [
                 {
                     "kind": job.kind,

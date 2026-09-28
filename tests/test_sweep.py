@@ -648,8 +648,21 @@ def test_a_chunk_cannot_be_more_unique_than_delivered() -> None:
 # -- the supervisor: the loop that replaces a person checking every five minutes ----------
 
 
-def _campaign(tmp_path, keyed, *, chunk=8, total=24, batch_size=10):
-    """A whole campaign with fake drivers, wired the way a real one is."""
+def _campaign(
+    tmp_path,
+    keyed,
+    *,
+    chunk=8,
+    total=24,
+    batch_size=10,
+    generator_devices=("cuda:0",),
+    migrate=False,
+):
+    """A whole campaign with fake drivers, wired the way a real one is.
+
+    ``generator_devices`` takes one entry per generation loop, so naming a device twice builds the
+    two-loops-one-card configuration that ``tag`` exists to distinguish.
+    """
 
     import json
 
@@ -665,17 +678,20 @@ def _campaign(tmp_path, keyed, *, chunk=8, total=24, batch_size=10):
         batch_size=batch_size,
         gate=authorize_gate(calibration(), provenance=screen.provenance()),
     )
-    generator = Generator(
-        tag="flowr_a",
-        model="flowr",
-        pocket=Pocket("A22", "reference", tmp_path / "ref.sdf"),
-        device="cuda:0",
-        protein=tmp_path / "p.pdb",
-        output_root=tmp_path / "gen",
-        generation_config=tmp_path / "g.yaml",
-        chunk=chunk,
-        total=total,
-    )
+    generators = [
+        Generator(
+            tag=f"flowr_{chr(ord('a') + n)}",
+            model="flowr",
+            pocket=Pocket("A22", "reference", tmp_path / "ref.sdf"),
+            device=device,
+            protein=tmp_path / "p.pdb",
+            output_root=tmp_path / "gen",
+            generation_config=tmp_path / "g.yaml",
+            chunk=chunk,
+            total=total,
+        )
+        for n, device in enumerate(generator_devices)
+    ]
 
     produced = {"n": 0}
 
@@ -714,10 +730,11 @@ def _campaign(tmp_path, keyed, *, chunk=8, total=24, batch_size=10):
         sweep,
         revision_id="rev-1",
         workspace=tmp_path / "ws",
-        generators=[generator],
+        generators=generators,
         screen_devices=("cuda:5", "cuda:6"),
         generation=generate,
         screen=screen_batch,
+        migrate_retired_devices=migrate,
     )
     return supervisor, sweep, screen
 
@@ -923,3 +940,260 @@ def test_the_generation_command_sets_no_cuda_mask() -> None:
     command = generator.command(1)
     assert "--device" in command and command[command.index("--device") + 1] == "cuda:3"
     assert not any("CUDA_VISIBLE_DEVICES" in part for part in command)
+
+
+# -- a retired generator's device, which used to sit idle for the rest of the campaign -------
+
+
+def test_a_retired_generator_hands_its_device_to_screening(tmp_path, keyed) -> None:
+    """The move an operator made by hand eighteen hours in, made when the loop ends instead.
+
+    ``screen_devices`` was fixed at construction, so a campaign that retired its generators finished
+    on the screeners it started with. One campaign's hand-made version of this move -- three devices
+    -- produced half that campaign's hits.
+    """
+
+    supervisor, _, _ = _campaign(tmp_path, keyed, migrate=True)
+    assert "cuda:0" not in supervisor.screen_devices
+
+    _drain(supervisor)
+
+    assert supervisor.state()["generators"]["flowr_a"]["stopped"] is True
+    assert "cuda:0" in supervisor.screen_devices, "the retired generator's card never joined"
+    assert supervisor.state()["screen_devices"] == ["cuda:5", "cuda:6", "cuda:0"]
+
+
+def test_migration_is_reported_and_is_not_a_quiet_pass(tmp_path, keyed) -> None:
+    """A device changing hands is an event. 490 of 500 passes are quiet and this is not one of them."""
+
+    import time
+
+    supervisor, _, _ = _campaign(tmp_path, keyed, migrate=True)
+    reports = []
+    for _ in range(40):
+        report = supervisor.tick()
+        reports.append(report)
+        if supervisor.complete():
+            break
+        time.sleep(0.05)
+
+    moved = [report for report in reports if report.migrated]
+    assert len(moved) == 1, "the device should change hands exactly once"
+    assert moved[0].migrated == ("cuda:0",)
+    assert not moved[0].quiet
+    assert "cuda:0" in moved[0].as_dict()["migrated"]
+    assert any("joined the screening pool" in note for note in moved[0].notes)
+
+
+def test_without_the_flag_the_idle_device_is_named_once_and_not_taken(tmp_path, keyed) -> None:
+    """Off by default, because on a shared host those cards may be owed back to the machine.
+
+    An idle GPU nobody mentions is the failure this exists to stop, so the refusal to take it still
+    has to say it is there -- once, not every sixty seconds for forty-four hours.
+    """
+
+    import time
+
+    supervisor, _, _ = _campaign(tmp_path, keyed, migrate=False)
+    reports = []
+    for _ in range(40):
+        reports.append(supervisor.tick())
+        if supervisor.complete():
+            break
+        time.sleep(0.05)
+
+    assert "cuda:0" not in supervisor.screen_devices, "the device was taken without being asked"
+    assert all(report.migrated == () for report in reports)
+    mentions = [
+        note
+        for report in reports
+        for note in report.notes
+        if "cuda:0" in note and "idle" in note
+    ]
+    assert len(mentions) == 1, f"said it {len(mentions)} times, not once: {mentions}"
+    assert "migrate_retired_devices=True" in mentions[0]
+
+
+def test_a_card_shared_by_two_loops_is_not_taken_until_both_stop(tmp_path, keyed) -> None:
+    """One model across two loops on one card is a normal configuration.
+
+    ``tag`` rather than the model is the generator's identity precisely because of this shape, and a
+    card handed to screening while one of its loops still generates would contend for its memory.
+    """
+
+    supervisor, _, _ = _campaign(
+        tmp_path, keyed, generator_devices=("cuda:0", "cuda:0"), total=8, chunk=8, migrate=True
+    )
+    assert set(supervisor.generators) == {"flowr_a", "flowr_b"}
+
+    # Stop one loop by hand and tick: one of two is not enough.
+    supervisor.stopped.add("flowr_a")
+    supervisor.tick()
+    assert "cuda:0" not in supervisor.screen_devices, "taken while flowr_b could still generate"
+
+    _drain(supervisor)
+    assert supervisor.state()["generators"]["flowr_b"]["stopped"] is True
+
+    # One more pass, and the reason is the tick order: a generator stopped in `_start_generation` is
+    # migrated at the top of the *next* pass, so the stop decision stays in one place rather than
+    # being made twice per tick. On a sixty-second interval that is one interval of latency; here it
+    # is one explicit call, and it is asserted rather than hidden because a reader draining to
+    # completion would otherwise conclude migration was broken.
+    assert supervisor.tick().migrated == ("cuda:0",)
+    assert "cuda:0" in supervisor.screen_devices
+
+
+def test_a_device_named_in_both_lists_is_not_offered_two_batches(tmp_path, keyed) -> None:
+    """A duplicate lane would be claimed twice and refused by the sweep rather than by anything
+    that could explain it."""
+
+    supervisor, _, _ = _campaign(tmp_path, keyed, generator_devices=("cuda:5",), migrate=True)
+    assert supervisor.screen_devices == ("cuda:5", "cuda:6")
+
+    _drain(supervisor)
+    assert supervisor.screen_devices.count("cuda:5") == 1
+
+
+# -- sizing a campaign against a machine that actually exists --------------------------------
+
+
+def _sweep_tool(name, **arguments):
+    """Call one registered sweep tool and parse its result.
+
+    Parsing here rather than in each test because a tool returns a JSON string: an assertion written
+    against the string would pass on a substring that appeared in an error message.
+    """
+
+    import json
+
+    from etalon.mcp import sweep
+
+    class Collector:
+        def __init__(self):
+            self.tools = {}
+
+        def tool(self, *_args, **_kwargs):
+            def register(function):
+                self.tools[function.__name__] = function
+                return function
+
+            return register
+
+    collector = Collector()
+    sweep.register(collector)
+    return json.loads(collector.tools[name](**arguments))
+
+
+def test_the_planner_reproduces_the_campaign_it_was_measured_on() -> None:
+    """5 generation loops against 6 screen workers, which sat generation-limited by 3.7x."""
+
+    plan = _sweep_tool(
+        "etalon_campaign_plan", pool_size=1_056_280, screen_devices=6, generation_devices=5
+    )
+    assert plan["ok"]
+    assert plan["capacity_ratio"] == 3.7
+    assert plan["binding_constraint"] == "generation"
+
+
+def test_the_advised_move_is_the_one_the_operator_actually_made() -> None:
+    """The shipped formula said four; the balance point says three, and three is what that campaign's
+    operator moved eighteen hours in.
+
+    Four is not absurd -- it lands at 0.68, inside the tolerated band by 0.01 -- but it is 1.47x
+    imbalanced the other way where three is 1.16x. The assertion is therefore that three sits closer
+    to parity, not that four trips a threshold: it does not, and an earlier version of this test
+    claimed it did.
+    """
+
+    advised = _sweep_tool(
+        "etalon_campaign_plan", pool_size=1_056_280, screen_devices=6, generation_devices=5
+    )
+    assert advised["recommended_split"] == {
+        "total_devices": 11, "generation": 8, "screening": 3, "basis": "declared",
+    }
+    assert "Move 3 device(s)" in advised["advice"][0]
+
+    # The split it names is balanced; the move the old formula named is not.
+    balanced = _sweep_tool(
+        "etalon_campaign_plan", pool_size=1_056_280, screen_devices=3, generation_devices=8
+    )
+    overshot = _sweep_tool(
+        "etalon_campaign_plan", pool_size=1_056_280, screen_devices=2, generation_devices=9
+    )
+    assert 0.67 <= balanced["capacity_ratio"] <= 1.5, balanced["capacity_ratio"]
+    assert abs(balanced["capacity_ratio"] - 1.0) < abs(overshot["capacity_ratio"] - 1.0), (
+        f"three ({balanced['capacity_ratio']}) should sit closer to parity than four "
+        f"({overshot['capacity_ratio']})"
+    )
+
+
+def test_a_plan_may_not_ask_for_more_devices_than_the_host_has() -> None:
+    """The one arithmetic error no care in the rates can catch: a plan for a machine that is not there.
+
+    The refusal has to name both numbers, because "8 requested, 1 detected" is the whole diagnosis.
+    """
+
+    detected = _sweep_tool("etalon_devices")
+    assert detected["ok"]
+    asked_screen = detected["total"] + 4
+    result = _sweep_tool(
+        "etalon_campaign_plan",
+        pool_size=1000,
+        screen_devices=asked_screen,
+        generation_devices=4,
+        detect=True,
+    )
+    assert not result["ok"]
+    assert result["error"]["retryable"] is False, "a machine does not grow on retry"
+    message = result["error"]["message"]
+    assert str(asked_screen + 4) in message
+    assert f"{detected['total']} were detected" in message
+
+
+def test_detection_names_the_pinned_commit_it_measured_through() -> None:
+    """A reading that cannot say which MolCascade produced it cannot be cited later.
+
+    An editable install shadowing the vendored tree is silent, so the commit is reported beside the
+    measurement rather than assumed from the manifest.
+    """
+
+    from etalon.boundary.infra import load
+
+    reading = _sweep_tool("etalon_devices")
+    assert reading["ok"]
+    assert reading["measured_by"]["source_commit"] == load("molcascade").source_commit
+    assert reading["measured_by"]["function"] == "molcascade.environment.detect_environment"
+    # Detection must not invent an accelerator, and must not omit the count.
+    assert reading["total"] == len(reading["devices"])
+    assert (reading["accelerator"] == "none") == (reading["total"] == 0)
+
+
+def test_the_plan_says_which_of_its_numbers_are_borrowed() -> None:
+    """Both shipped rates were measured on one campaign and neither records its device.
+
+    A plan built entirely from defaults is a plan for somebody else's machine, and the result has to
+    say so rather than leaving it in a docstring the caller did not read.
+    """
+
+    borrowed = _sweep_tool("etalon_campaign_plan", pool_size=1000)
+    assert "default" in borrowed["basis"]["minutes_per_batch"]
+    assert "no device recorded" in borrowed["basis"]["minutes_per_batch"]
+    assert "no device recorded" in borrowed["basis"]["unique_per_generator_hour"]
+    assert borrowed["basis"]["devices"] == "declared by the caller"
+
+    supplied = _sweep_tool(
+        "etalon_campaign_plan", pool_size=1000, minutes_per_batch=42.0, unique_per_generator_hour=900.0
+    )
+    assert supplied["basis"]["minutes_per_batch"] == "caller"
+    assert supplied["basis"]["unique_per_generator_hour"] == "caller"
+
+
+def test_one_device_is_reported_as_unsplittable_rather_than_split() -> None:
+    """Half a GPU is not a lane. Generating and screening on one card is sequential, not a ratio."""
+
+    plan = _sweep_tool(
+        "etalon_campaign_plan", pool_size=1000, screen_devices=1, generation_devices=0
+    )
+    assert plan["ok"]
+    assert plan["recommended_split"]["total_devices"] == 1
+    assert "cannot be split" in plan["recommended_split"]["note"]

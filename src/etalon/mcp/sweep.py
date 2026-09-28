@@ -429,6 +429,63 @@ def register(mcp: Any) -> None:
 
     @mcp.tool()
     @tool(Cost.FREE)
+    def etalon_devices() -> str:
+        """FREE. Measure this machine's accelerators and cores instead of being told about them.
+
+        ``etalon_campaign_plan`` takes device counts as integers and had no way to check them, so a
+        plan could be computed for a machine that does not exist -- and its shipped defaults describe
+        the single campaign they were measured on, not the host answering this call.
+
+        Detection is MolCascade's ``detect_environment``: one ``nvidia-smi`` fork, **no torch import**,
+        and it never raises. A machine that answers nothing returns a reading full of nulls plus a note
+        saying why, because "we could not tell" is not an outage.
+
+        Two things this does not establish. ``memory_free_mib`` is one snapshot taken now, not a
+        reservation, and a neighbouring tenant between allocations looks idle -- attribute load with
+        the commands in ``etalon-campaign-monitoring`` before concluding a card is yours. And a card
+        detected here may still be unreachable by a framework: a ``torch`` built ``+cpu`` sees none of
+        them, which this call cannot see and a screen will discover.
+        """
+
+        from etalon.boundary.infra import load
+
+        # Pinned before the import rather than after. A bare ``from molcascade...`` binds whichever
+        # copy sys.path found, and an editable install shadowing the vendored tree is silent -- which
+        # is the failure load() exists to refuse, and the reason the commit is reported below.
+        infra = load("molcascade")
+        from molcascade.environment import detect_environment
+
+        environment = detect_environment()
+        devices = [
+            {
+                "device": f"cuda:{gpu.index}",
+                "index": gpu.index,
+                "vendor": str(gpu.vendor),
+                "name": gpu.name,
+                "memory_total_gib": gpu.memory_total_gib,
+                "memory_free_mib": gpu.memory_free_mib,
+                "compute_capability": gpu.compute_capability,
+                "driver_version": gpu.driver_version,
+            }
+            for gpu in environment.gpus
+        ]
+        return ok(
+            devices=devices,
+            total=len(devices),
+            accelerator=str(environment.accelerator),
+            usable_cores=environment.cpu.usable_cores,
+            total_gpu_memory_gib=environment.total_gpu_memory_gib,
+            wsl=environment.platform.wsl,
+            notes=list(environment.notes),
+            measured_by={
+                "asset": infra.name,
+                "source_commit": infra.source_commit,
+                "function": "molcascade.environment.detect_environment",
+            },
+        )
+
+    @mcp.tool()
+    @tool(Cost.FREE)
     def etalon_campaign_plan(
         pool_size: int,
         batch_size: int = 20000,
@@ -436,6 +493,7 @@ def register(mcp: Any) -> None:
         generation_devices: int = 5,
         minutes_per_batch: float = 95.0,
         unique_per_generator_hour: float = 4100.0,
+        detect: bool = False,
     ) -> str:
         """FREE. Size a sweep's generation and screening against each other, before starting one.
 
@@ -447,8 +505,21 @@ def register(mcp: Any) -> None:
 
         Returns molecules per hour on each side, which side binds, and how long the pool takes.
 
+        The device counts are yours to declare and detection does not overrule them -- but with
+        ``detect=True`` this call measures the machine and **refuses a plan that asks for more devices
+        than exist**, which is the one arithmetic error here that no amount of care in the rates can
+        catch. ``recommended_split`` is the balance point for whatever total it ends up with.
+
+        One honesty note that the result now carries rather than only this docstring: both shipped
+        rates were measured on one campaign and **neither records the device it was measured on**, so
+        detecting an 80 GB card cannot tell you the 95 minutes still holds. Re-measure them on your
+        own cascade and target before trusting a split computed from them.
+
         Args:
             pool_size: Molecules the campaign intends to screen. Zero for an open-ended sweep.
+            detect: Measure the host with :func:`etalon_devices` and cross-check the declared counts
+                against it. Off by default so the tool stays pure arithmetic that runs anywhere,
+                including a laptop planning a run for a cluster.
             minutes_per_batch: Wall clock for one batch through the cascade. 95 measured on a
                 20,000-molecule batch with two docking engines and a redock tier.
             unique_per_generator_hour: New-to-the-library molecules one generation loop delivers per
@@ -462,18 +533,73 @@ def register(mcp: Any) -> None:
         if minutes_per_batch <= 0 or unique_per_generator_hour <= 0:
             raise ValueError("rates must be positive")
 
+        machine: dict[str, Any] | None = None
+        if detect:
+            from etalon.boundary.infra import load
+
+            load("molcascade")
+            from molcascade.environment import detect_environment
+
+            environment = detect_environment()
+            names = sorted({gpu.name for gpu in environment.gpus})
+            machine = {
+                "detected_devices": len(environment.gpus),
+                "device_names": names,
+                "usable_cores": environment.cpu.usable_cores,
+                "notes": list(environment.notes),
+            }
+            asked = screen_devices + generation_devices
+            if asked > len(environment.gpus):
+                raise ValueError(
+                    f"this plan asks for {asked} devices ({screen_devices} screening + "
+                    f"{generation_devices} generation) and {len(environment.gpus)} were detected"
+                    + (f" ({', '.join(names)})" if names else "")
+                    + ". Every rate below would be arithmetic about a machine that does not exist. "
+                    "Declare the counts this host has, or plan without detect=True for a different one."
+                )
+
+        per_screen_device = (60.0 / minutes_per_batch) * batch_size
         produced = generation_devices * unique_per_generator_hour
-        consumed = screen_devices * (60.0 / minutes_per_batch) * batch_size
+        consumed = screen_devices * per_screen_device
         binding = "generation" if produced < consumed else "screening"
         ratio = (consumed / produced) if produced else float("inf")
         hours = (pool_size / min(produced, consumed)) if pool_size and min(produced, consumed) else None
 
+        # The balance point, closed form: generation and screening match when
+        # g * r_gen == s * r_screen with g + s fixed, so g = total * r_screen / (r_gen + r_screen).
+        # Reported beside `advice` rather than replacing it because they answer different questions --
+        # advice frees the screeners that current generation does not need, this says where the two
+        # sides meet once the freed cards are generating too.
+        total_devices = machine["detected_devices"] if machine else screen_devices + generation_devices
+        split: dict[str, Any] | None = None
+        if total_devices >= 2:
+            generating = round(total_devices * per_screen_device / (unique_per_generator_hour + per_screen_device))
+            generating = min(max(generating, 1), total_devices - 1)
+            split = {
+                "total_devices": total_devices,
+                "generation": generating,
+                "screening": total_devices - generating,
+                "basis": "detected" if machine else "declared",
+            }
+        elif total_devices == 1:
+            split = {
+                "total_devices": 1,
+                "note": "one device cannot be split; generate a pool first, then screen it.",
+            }
+
         advice = []
         if binding == "generation" and ratio > 1.5:
-            movable = max(0, int(screen_devices - max(1, consumed / (ratio * (60.0 / minutes_per_batch) * batch_size))))
+            # The move comes from `recommended_split` rather than from a second calculation here. The
+            # earlier one asked how many screeners the *current* generation rate does not need, which
+            # ignores that a moved card then generates: on the 5-generation/6-screening campaign it
+            # said four. Four lands at 0.68, which is 1.47x imbalanced the other way -- inside the
+            # band this advice tolerates, by 0.01, and still worse than the 1.16 that three gives.
+            # Three is also the move that campaign's operator actually made.
+            move = max(1, screen_devices - split["screening"]) if split and "screening" in split else 1
             advice.append(
-                f"Screening has {ratio:.1f}x the capacity generation is feeding it. Move about "
-                f"{movable or 1} device(s) from screening to generation; the screen will still keep up."
+                f"Screening has {ratio:.1f}x the capacity generation is feeding it. Move {move} "
+                f"device(s) from screening to generation; the screen still keeps up, and the two "
+                "sides meet at the split in recommended_split."
             )
         elif binding == "screening" and ratio < 0.67:
             advice.append(
@@ -493,5 +619,22 @@ def register(mcp: Any) -> None:
             binding_constraint=binding,
             capacity_ratio=round(ratio, 2) if produced else None,
             hours_to_screen_pool=None if hours is None else round(hours, 1),
+            recommended_split=split,
+            machine=machine,
             advice=advice,
+            # Which inputs are this campaign's and which are borrowed. Every number here is either
+            # supplied by the caller or a default measured on one other campaign, and the two are
+            # worth different amounts of trust -- a plan built entirely from the second column is a
+            # plan for somebody else's machine.
+            basis={
+                "devices": "detected" if machine else "declared by the caller",
+                "minutes_per_batch": (
+                    "caller" if minutes_per_batch != 95.0 else "default, measured once on a "
+                    "20,000-molecule batch with two docking engines and a redock tier; no device recorded"
+                ),
+                "unique_per_generator_hour": (
+                    "caller" if unique_per_generator_hour != 4100.0 else "default, measured once for "
+                    "FLOWR at 87% uniqueness; no device recorded"
+                ),
+            },
         )
