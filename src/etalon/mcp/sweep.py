@@ -426,3 +426,72 @@ def register(mcp: Any) -> None:
             for row in rows
         ]
         return ok(**allocate(profiles))
+
+    @mcp.tool()
+    @tool(Cost.FREE)
+    def etalon_campaign_plan(
+        pool_size: int,
+        batch_size: int = 20000,
+        screen_devices: int = 3,
+        generation_devices: int = 5,
+        minutes_per_batch: float = 95.0,
+        unique_per_generator_hour: float = 4100.0,
+    ) -> str:
+        """FREE. Size a sweep's generation and screening against each other, before starting one.
+
+        The failure this prevents is not a wrong calculation, it is an unbalanced machine. One
+        campaign ran five generation loops against six screen workers and sat generation-limited by
+        14x for its first eighteen hours -- the screeners idle, ``pending`` at zero every check --
+        because nobody had computed the ratio. Moving three GPUs from screening to generation
+        afterwards produced half that campaign's hits.
+
+        Returns molecules per hour on each side, which side binds, and how long the pool takes.
+
+        Args:
+            pool_size: Molecules the campaign intends to screen. Zero for an open-ended sweep.
+            minutes_per_batch: Wall clock for one batch through the cascade. 95 measured on a
+                20,000-molecule batch with two docking engines and a redock tier.
+            unique_per_generator_hour: New-to-the-library molecules one generation loop delivers per
+                hour. 4,100 measured for FLOWR at 87% uniqueness; a model at 30% delivers a third of
+                that from the same GPU-hour, which is why uniqueness and not raw throughput is the
+                input here.
+        """
+
+        if batch_size < 1 or screen_devices < 1 or generation_devices < 0:
+            raise ValueError("batch_size and screen_devices must be positive")
+        if minutes_per_batch <= 0 or unique_per_generator_hour <= 0:
+            raise ValueError("rates must be positive")
+
+        produced = generation_devices * unique_per_generator_hour
+        consumed = screen_devices * (60.0 / minutes_per_batch) * batch_size
+        binding = "generation" if produced < consumed else "screening"
+        ratio = (consumed / produced) if produced else float("inf")
+        hours = (pool_size / min(produced, consumed)) if pool_size and min(produced, consumed) else None
+
+        advice = []
+        if binding == "generation" and ratio > 1.5:
+            movable = max(0, int(screen_devices - max(1, consumed / (ratio * (60.0 / minutes_per_batch) * batch_size))))
+            advice.append(
+                f"Screening has {ratio:.1f}x the capacity generation is feeding it. Move about "
+                f"{movable or 1} device(s) from screening to generation; the screen will still keep up."
+            )
+        elif binding == "screening" and ratio < 0.67:
+            advice.append(
+                f"Generation outruns screening by {1 / ratio:.1f}x. The pool will grow without bound; "
+                "add screen devices or accept that the tail is screened after generation stops."
+            )
+        else:
+            advice.append("The two sides are within a factor of 1.5, which is balanced enough.")
+        if batch_size < 10000:
+            advice.append(
+                f"A {batch_size}-molecule batch is small for a funnel whose end-to-end survival is a "
+                "fraction of a percent: three 5,000-molecule batches measured on one campaign yielded "
+                "6, 2 and 0 hits. Prefer 20,000 except when flushing the tail."
+            )
+        return ok(
+            unique_molecules_per_hour={"generation": round(produced), "screening": round(consumed)},
+            binding_constraint=binding,
+            capacity_ratio=round(ratio, 2) if produced else None,
+            hours_to_screen_pool=None if hours is None else round(hours, 1),
+            advice=advice,
+        )

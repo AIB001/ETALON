@@ -227,12 +227,29 @@ class Calibration:
     def recall(self) -> float | None:
         """Surviving known actives over known actives, or ``None`` when unreadable.
 
-        ``None`` rather than a number whenever any tier could not be read, because a retention
-        product computed over an unreadable tier is optimistic by construction -- the same reason
-        MolCascade's own report nulls its end-to-end figure instead of guessing.
+        ``None`` rather than a number whenever the panel's passage through the gates was not
+        observed, because a retention product computed over what was not read is optimistic by
+        construction -- the same reason MolCascade's own report nulls its end-to-end figure instead
+        of guessing.
+
+        Three ways it is unreadable, and the second was found by pointing this at a real run rather
+        than by a test:
+
+        ``no declared actives``
+            Nothing about the gates was tested.
+        ``no tiers at all``
+            The retention read failed outright, so there is no evidence any tier was passed. Checking
+            only for a tier *marked* unavailable is not enough: when the read raises, there are no
+            tiers to be marked, ``any()`` over the empty list is false, and this returned 1.0 for a
+            configuration nobody measured -- which then authorised. The common cause is a panel
+            screened without an id column, so members are not traceable by name.
+        ``a tier marked unavailable``
+            Part of the funnel could not be read.
         """
 
         if not self.actives:
+            return None
+        if not self.all_tiers:
             return None
         if any(tier.unavailable for tier in self.all_tiers):
             return None
@@ -267,6 +284,13 @@ class Calibration:
         if not self.actives:
             reasons.append(
                 "the panel declares no known actives, so nothing about the gates was tested"
+            )
+        if not self.all_tiers:
+            reasons.append(
+                "no tier retention could be read at all, so the panel's passage through the gates "
+                "was never observed. The usual cause is a panel screened without an id column: "
+                "MolCascade refuses to measure recall on a run that recorded no molecule names. "
+                "Re-screen the panel with --id-column."
             )
         for tier in self.all_tiers:
             if tier.unavailable:

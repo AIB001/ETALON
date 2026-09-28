@@ -518,14 +518,19 @@ class Screen:
         result = self.state(run_id)
         if result is None:
             return {"run_id": run_id, "exists": False}
-        done = [stage for stage in result.stages if stage.status == "SUCCEEDED"]
         running = next((stage.stage_id for stage in result.stages if stage.status == "RUNNING"), None)
+        # How far the run got, which is not the same as how many stages succeeded. A stage that
+        # failed was still reached -- an exhausted run that stopped at pose strain is at stage 34 of
+        # 43, not 33 -- and a run with a stage in flight is *at* that stage. Counting successes and
+        # adding one reported stage 44 of 43 for a completed run, which is the kind of off-by-one a
+        # progress readout must not have: it is read while deciding whether to intervene.
+        reached = sum(1 for stage in result.stages if stage.status in ("SUCCEEDED", "FAILED"))
         return {
             "run_id": run_id,
             "exists": True,
             "status": result.status,
             "outcome": result.outcome,
-            "stage": len(done) + 1,
+            "stage": reached + (1 if running else 0),
             "stages": len(result.stages),
             "current": running,
             "terminal": result.status in ("SUCCEEDED", "FAILED"),

@@ -7,6 +7,7 @@ standard for this file: a test whose failure mode was never observed is a test o
 from __future__ import annotations
 
 import os
+from pathlib import Path
 
 import pytest
 
@@ -222,6 +223,36 @@ def test_unreadable_panel_fails_closed() -> None:
     assert verdict.recall is None
     assert not verdict.admissible
     assert any("could not be read" in reason for reason in verdict.refusals())
+
+
+def test_a_panel_with_no_tiers_at_all_fails_closed(keyed) -> None:
+    """The retention read failing outright must not read as perfect recall.
+
+    Found by pointing :func:`calibrate` at a real panel run rather than by a test. That run was
+    screened without an id column, so ``measure_recall`` refused it, ``tiers`` came back empty, and
+    the guard read ``any(tier.unavailable for tier in ())`` -- which is false. Recall was reported as
+    1.0 and ``authorize_gate`` minted a token for a configuration nobody had measured.
+
+    The earlier test above does not cover this: it constructs a tier that *says* it is unavailable,
+    which is the case where something was read. Here nothing was.
+    """
+
+    verdict = Calibration(
+        revision_id="rev-1",
+        run_id="panel003",
+        outcome="committed",
+        panel_size=len(PANEL),
+        actives=5,
+        registered=0,
+        tiers=(),
+        finalize=(),
+        separation=(),
+    )
+    assert verdict.recall is None, "no tiers means nothing was measured"
+    assert not verdict.admissible
+    assert any("never observed" in reason for reason in verdict.refusals())
+    with pytest.raises(NotAuthorized):
+        authorize_gate(verdict)
 
 
 def test_a_panel_with_no_declared_actives_measures_nothing() -> None:
@@ -612,3 +643,283 @@ def test_allocate_ranks_on_throughput_and_names_who_should_stop() -> None:
 def test_a_chunk_cannot_be_more_unique_than_delivered() -> None:
     with pytest.raises(ValueError, match="new to the library"):
         Chunk(100, 10, 11, 60)
+
+
+# -- the supervisor: the loop that replaces a person checking every five minutes ----------
+
+
+def _campaign(tmp_path, keyed, *, chunk=8, total=24, batch_size=10):
+    """A whole campaign with fake drivers, wired the way a real one is."""
+
+    import json
+
+    from etalon.campaign.generation import ChunkResult, Generator, Pocket
+    from etalon.campaign.supervisor import Supervisor
+    import etalon.campaign.generation as generation_module
+
+    screen = FakeScreen()
+    sweep = Sweep(
+        screen,
+        Ledger(tmp_path / "ledger.jsonl"),
+        tmp_path / "pool.sqlite",
+        batch_size=batch_size,
+        gate=authorize_gate(calibration(), provenance=screen.provenance()),
+    )
+    generator = Generator(
+        tag="flowr_a",
+        model="flowr",
+        pocket=Pocket("A22", "reference", tmp_path / "ref.sdf"),
+        device="cuda:0",
+        protein=tmp_path / "p.pdb",
+        output_root=tmp_path / "gen",
+        generation_config=tmp_path / "g.yaml",
+        chunk=chunk,
+        total=total,
+    )
+
+    produced = {"n": 0}
+
+    def generate(gen, index):
+        path = gen.chunk_path(index)
+        path.mkdir(parents=True, exist_ok=True)
+        produced["n"] += 1
+        smiles = [f"M{produced['n']}_{i}" for i in range(gen.chunk)]
+        (path / "manifest.json").write_text(json.dumps({"candidate_count": gen.chunk}))
+        (path / "_smiles.json").write_text(json.dumps(smiles))
+        return ChunkResult(gen.tag, index, path, gen.chunk, gen.chunk, 1.0, 0)
+
+    def read(path, tag=None):
+        source = path.parent.name
+        payload = path / "_smiles.json"
+        if not payload.is_file():
+            return []
+        return [(s, s, source) for s in json.loads(payload.read_text())]
+
+    generation_module.read_chunk = read
+    generation_module.Ingest.consume = lambda self, chunk: (
+        self.consumed.add(str(chunk)),
+        self.state.parent.mkdir(parents=True, exist_ok=True),
+        self.state.write_text(json.dumps(sorted(self.consumed))),
+        read(chunk),
+    )[-1]
+
+    def screen_batch(batch_id, library, device):
+        result = ScreenResult(
+            batch_id, "rev-1", "SUCCEEDED", (stage("shortlist", "SUCCEEDED", artifact="a"),)
+        )
+        screen.runs[batch_id] = result
+        return result
+
+    supervisor = Supervisor(
+        sweep,
+        revision_id="rev-1",
+        workspace=tmp_path / "ws",
+        generators=[generator],
+        screen_devices=("cuda:5", "cuda:6"),
+        generation=generate,
+        screen=screen_batch,
+    )
+    return supervisor, sweep, screen
+
+
+def _drain(supervisor, limit=40):
+    import time
+
+    for _ in range(limit):
+        supervisor.tick()
+        if supervisor.complete():
+            return True
+        time.sleep(0.05)
+    return supervisor.complete()
+
+
+def test_a_campaign_runs_itself_to_completion(tmp_path, keyed) -> None:
+    """Generation, ingest, emission, screening and recording, with nobody watching."""
+
+    supervisor, sweep, _ = _campaign(tmp_path, keyed)
+    assert _drain(supervisor), "the campaign did not terminate"
+    state = sweep.state()
+    assert state["batches"]["recorded"] == 2
+    assert state["batches"]["outstanding"] == 0
+    assert state["pool"]["unique"] == 24
+    assert supervisor.state()["generators"]["flowr_a"]["stopped"] is True
+
+
+def test_most_passes_are_quiet_and_say_so(tmp_path, keyed) -> None:
+    """The report a supervisor returns when nothing happened must be distinguishable.
+
+    490 of one campaign's 500 readings changed nothing. A loop whose every pass looks eventful
+    trains its reader to stop looking.
+    """
+
+    supervisor, _, _ = _campaign(tmp_path, keyed)
+    _drain(supervisor)
+    assert supervisor.tick().quiet
+
+
+def test_a_supervisor_resumes_from_disk(tmp_path, keyed) -> None:
+    """Kill it mid-campaign and the next one picks up from the pool, the ledger and the manifests."""
+
+    first, sweep, screen = _campaign(tmp_path, keyed)
+    first.tick()  # start generation
+    import time
+
+    time.sleep(0.2)
+    first.tick()  # ingest chunk 1
+    assert sweep.state()["pool"]["unique"] == 8
+
+    second, sweep2, _ = _campaign(tmp_path, keyed)  # a new process, same paths
+    assert sweep2.state()["pool"]["unique"] == 8, "the pool survived"
+    assert _drain(second), "the resumed supervisor did not finish the campaign"
+
+
+def test_an_already_ingested_chunk_is_not_ingested_twice(tmp_path, keyed) -> None:
+    supervisor, sweep, _ = _campaign(tmp_path, keyed)
+    _drain(supervisor)
+    before = sweep.state()["pool"]["unique"]
+    supervisor.tick()
+    assert sweep.state()["pool"]["unique"] == before
+
+
+def test_consecutive_barren_chunks_stop_a_loop_but_one_does_not(tmp_path, keyed) -> None:
+    """One empty chunk is a sampler discarding reconstruction failures; five is the model."""
+
+    import json
+
+    from etalon.campaign.generation import BARREN_LIMIT, ChunkResult, Generator, Pocket
+    from etalon.campaign.supervisor import Supervisor
+    import etalon.campaign.generation as generation_module
+
+    screen = FakeScreen()
+    sweep = Sweep(
+        screen,
+        Ledger(tmp_path / "l.jsonl"),
+        tmp_path / "p.sqlite",
+        batch_size=10,
+        gate=authorize_gate(calibration(), provenance=screen.provenance()),
+    )
+    generator = Generator(
+        tag="empty",
+        model="m",
+        pocket=Pocket("A", "reference", tmp_path / "r.sdf"),
+        device="cuda:0",
+        protein=tmp_path / "p.pdb",
+        output_root=tmp_path / "gen",
+        generation_config=tmp_path / "g.yaml",
+        chunk=5,
+        total=1000,
+    )
+
+    def generate(gen, index):
+        path = gen.chunk_path(index)
+        path.mkdir(parents=True, exist_ok=True)
+        (path / "manifest.json").write_text(json.dumps({"candidate_count": 0}))
+        return ChunkResult(gen.tag, index, path, gen.chunk, 0, 1.0, 0, barren="model returned nothing")
+
+    generation_module.read_chunk = lambda path, tag=None: []
+    generation_module.Ingest.consume = lambda self, chunk: (
+        self.consumed.add(str(chunk)),
+        self.state.parent.mkdir(parents=True, exist_ok=True),
+        self.state.write_text(json.dumps(sorted(self.consumed))),
+        [],
+    )[-1]
+
+    supervisor = Supervisor(
+        sweep,
+        revision_id="rev-1",
+        workspace=tmp_path / "ws",
+        generators=[generator],
+        screen_devices=("cuda:5",),
+        generation=generate,
+        screen=lambda *_: None,
+    )
+    import time
+
+    for index in range(BARREN_LIMIT):
+        supervisor.tick()
+        time.sleep(0.05)
+        supervisor.tick()
+        if index < BARREN_LIMIT - 1:
+            assert "empty" not in supervisor.stopped, f"stopped after {index + 1} barren chunks"
+    for _ in range(3):
+        supervisor.tick()
+        time.sleep(0.05)
+    assert "empty" in supervisor.stopped
+    assert supervisor.state()["generators"]["empty"]["consecutive_barren"] >= BARREN_LIMIT
+
+
+def test_the_screen_driver_refuses_an_edited_cascade() -> None:
+    """A configuration edited mid-campaign is caught before it produces an incomparable batch."""
+
+    from etalon.campaign.drivers import MolCascadeScreening, RevisionChanged
+
+    class Compiles:
+        def plan(self, *_a, **_k):
+            return type("P", (), {"revision_id": "rev-EDITED"})()
+
+    driver = MolCascadeScreening(
+        screen=Compiles(), config_path=Path("cascade.json"), revision_id="rev-1"
+    )
+    with pytest.raises(RevisionChanged, match="not comparable"):
+        driver("batch_0001", Path("batch.csv"), "cuda:0")
+
+
+def test_a_chunk_is_finished_only_when_its_manifest_exists(tmp_path) -> None:
+    """Per-molecule SDFs on disk with no manifest is a chunk mid-consolidation, not a finished one."""
+
+    from etalon.campaign.generation import finished_chunks
+
+    root = tmp_path / "gen"
+    (root / "flowr" / "chunk_001" / "models").mkdir(parents=True)
+    assert finished_chunks(root) == []
+    (root / "flowr" / "chunk_001" / "manifest.json").write_text("{}")
+    assert [p.name for p in finished_chunks(root)] == ["chunk_001"]
+
+
+def test_a_failed_chunk_reads_as_empty_rather_than_raising(tmp_path) -> None:
+    """A manifest beside a zero-byte candidates file took one collector down for twelve hours."""
+
+    from etalon.campaign.generation import read_chunk
+
+    chunk = tmp_path / "flowr" / "chunk_001"
+    chunk.mkdir(parents=True)
+    (chunk / "manifest.json").write_text("{}")
+    (chunk / "candidates.sdf").write_bytes(b"")
+    assert read_chunk(chunk) == []
+
+
+def test_a_generator_resumes_at_the_first_unwritten_chunk(tmp_path) -> None:
+    from etalon.campaign.generation import Generator, Pocket
+
+    generator = Generator(
+        tag="flowr",
+        model="flowr",
+        pocket=Pocket("A", "reference", tmp_path / "r.sdf"),
+        device="cuda:0",
+        protein=tmp_path / "p.pdb",
+        output_root=tmp_path / "gen",
+        generation_config=tmp_path / "g.yaml",
+    )
+    assert generator.next_index() == 1
+    for index in (1, 2):
+        generator.chunk_path(index).mkdir(parents=True)
+    assert generator.next_index() == 3
+
+
+def test_the_generation_command_sets_no_cuda_mask() -> None:
+    """PRISM's wrappers disagree about the mask, so the only correct choice is to set neither."""
+
+    from etalon.campaign.generation import Generator, Pocket
+
+    generator = Generator(
+        tag="flowr",
+        model="flowr",
+        pocket=Pocket("A", "reference", Path("/r.sdf")),
+        device="cuda:3",
+        protein=Path("/p.pdb"),
+        output_root=Path("/gen"),
+        generation_config=Path("/g.yaml"),
+    )
+    command = generator.command(1)
+    assert "--device" in command and command[command.index("--device") + 1] == "cuda:3"
+    assert not any("CUDA_VISIBLE_DEVICES" in part for part in command)

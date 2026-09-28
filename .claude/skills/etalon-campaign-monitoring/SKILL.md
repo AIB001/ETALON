@@ -137,6 +137,19 @@ threshold, the pocket, which generators run, what counts as a hit. Scaling a gen
 four changes the library's composition and belongs there. Restarting a dead worker does not. Decide and
 tell; never decide silently.
 
+## Do not be the loop
+
+If you find yourself checking every five minutes, the supervisor is not running. Start it
+(`etalon-screening-sweep`) and check its report instead: `TickReport.quiet` is true for a pass that
+changed nothing, which is most of them, and a supervisor that has been quiet for an hour is a
+supervisor that is working.
+
+The three false alarms above are the reason this matters. Each one cost an intervention or nearly did,
+and every one of them is a question about a *mechanical* state — is the chunk finished, is the batch
+progressing, is the load mine. The supervisor answers all three from durable records, on every pass,
+without asking. What is left for you is the part it deliberately cannot decide: whether a generator
+has exhausted its space, whether the hit rate justifies continuing, whether a threshold should move.
+
 ## Interval
 
 Five minutes is too often for a campaign whose unit of work is 90 minutes. It produces ~500 readings for

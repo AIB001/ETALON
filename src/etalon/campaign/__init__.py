@@ -9,7 +9,15 @@ a sweep selects nothing: every molecule in the pool is screened.
 """
 
 from etalon.campaign.calibrate import Calibration, PanelMember, Separation, TierVerdict, calibrate
+from etalon.campaign.drivers import MolCascadeScreening, RevisionChanged
 from etalon.campaign.expensive import PrismStage
+from etalon.campaign.generation import (
+    ChunkResult,
+    Generator,
+    Ingest,
+    Pocket,
+    PrismGeneration,
+)
 from etalon.campaign.ledger import Entry, Ledger
 from etalon.campaign.loop import Acquirer, Campaign, ExpensiveStage, Proposer, RoundOutcome
 from etalon.campaign.pipeline import DEFAULT_FUNNEL, Pipeline, Plan
@@ -20,6 +28,7 @@ from etalon.campaign.propose import (
     as_loop_acquirer,
     as_loop_proposer,
 )
+from etalon.campaign.supervisor import Supervisor, TickReport
 from etalon.campaign.sweep import (
     DEFAULT_BATCH_SIZE,
     AdmitReport,
@@ -30,29 +39,38 @@ from etalon.campaign.sweep import (
 )
 
 __all__ = [
-    "DEFAULT_BATCH_SIZE",
-    "DEFAULT_FUNNEL",
     "Acquirer",
     "Acquisition",
     "AdmitReport",
     "Batch",
     "Calibration",
     "Campaign",
+    "ChunkResult",
+    "DEFAULT_BATCH_SIZE",
+    "DEFAULT_FUNNEL",
     "Entry",
     "ExpensiveStage",
+    "Generator",
+    "Ingest",
     "Ledger",
+    "MolCascadeScreening",
     "Panel",
     "PanelMember",
     "ParameterChange",
     "Pipeline",
     "Plan",
+    "Pocket",
+    "PrismGeneration",
     "PrismStage",
     "Proposer",
     "Recovery",
+    "RevisionChanged",
     "RoundOutcome",
     "Separation",
+    "Supervisor",
     "Sweep",
     "SweepError",
+    "TickReport",
     "TierVerdict",
     "as_loop_acquirer",
     "as_loop_proposer",

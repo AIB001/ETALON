@@ -56,6 +56,54 @@ ligands.** On this pocket the score cannot order the known binders, so it is a u
 unusable ranking. `etalon_calibrate_gates` computes this as `rankable_engines`; when it comes back
 empty, the shortlist's score column must be described as a filter and never as potency.
 
+## The shape of the whole thing
+
+You do five things. A supervisor does the other five hundred.
+
+```
+   你(LLM)                              Supervisor（守护循环）
+ ─────────────                        ────────────────────────
+ 1. 建面板                    ┐
+ 2. calibrate_gates           │  科学判断      ingest 完成的 chunk
+ 3. authorize_gates           │  只做一次  →   到水位线就发批
+ 4. campaign_plan（配比）     │                批次交给空闲设备
+ 5. 启动 supervisor           ┘                终态 run 记进 ledger
+                                               崩溃留下的认领自愈
+ ── 之后每隔 15–30 分钟 ──                     生成循环轮转 chunk
+ 读 status，只在科学信号上介入
+```
+
+One campaign was supervised by a person reading a status script every five minutes for 44 hours:
+about 500 readings, **fewer than ten of which needed a decision**. `Supervisor.tick()` is the other
+490. It is a single non-blocking pass — ingest, emit, claim, screen, record, recover, rotate
+generation — and it rebuilds everything from the pool, the ledger and the chunk manifests on every
+call, so killing the process and starting another one loses nothing.
+
+```python
+from etalon.campaign import (
+    Generator, MolCascadeScreening, Pocket, PrismGeneration, Supervisor, Sweep,
+)
+
+supervisor = Supervisor(
+    sweep,                                  # pool + ledger + the gate token
+    revision_id=plan.revision_id,           # from etalon_screen_plan
+    workspace="/abs/campaign/ws",
+    generators=[Generator(tag="flowr_a", model="flowr", pocket=pocket,
+                          device="cuda:0", protein=receptor,
+                          output_root=gen_root, generation_config=cfg,
+                          chunk=5000, total=200_000)],
+    screen_devices=("cuda:5", "cuda:6", "cuda:7"),
+    generation=PrismGeneration(),
+    screen=MolCascadeScreening(screen, cascade, plan.revision_id, target=target),
+    retire=lambda tag: tag in retired_by_productivity,   # your scientific rule
+)
+supervisor.run(interval=60)                 # returns when the campaign is complete
+```
+
+`retire` is the seam where your judgement enters the loop. The supervisor stops a generator on two
+mechanical conditions — its molecule target, and five consecutive barren chunks — and on nothing else.
+Exhaustion is a scientific call; feed it `etalon_generation_productivity`'s verdict.
+
 ## The order
 
 ### 1. Calibrate, before anything else
