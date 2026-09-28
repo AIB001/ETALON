@@ -69,7 +69,24 @@ test = [
 packages = ["src/etalon"]
 
 [tool.hatch.build.targets.wheel.force-include]
+# One document, two consumers: a Claude Code skill reads .claude/skills/<name>/SKILL.md and an MCP
+# client reads etalon://skills/<slug>. The wheel carries a copy because an installed package has no
+# .claude directory, and mcp/server.py::_skill_path falls back to these.
+#
+# Listed one by one rather than globbed, because the destination is the SLUG and the source is the
+# DIRECTORY and the two differ: sweep <- etalon-screening-sweep, monitoring <- etalon-campaign-monitoring.
+# A glob would ship etalon-screening-sweep/SKILL.md under a name nothing looks up.
+#
+# Five of these were missing. Only `campaign` was ever force-included, so a wheel-installed server
+# raised FileNotFoundError for the other five -- including `sweep`, which is the document a
+# screening-only campaign is routed to and the one that carries the gate-calibration argument.
+# tests/test_mcp.py asserts this table against WORKFLOWS so the next one added cannot be forgotten.
 ".claude/skills/etalon-campaign/SKILL.md" = "etalon/mcp/skills/campaign.md"
+".claude/skills/etalon-screening-sweep/SKILL.md" = "etalon/mcp/skills/sweep.md"
+".claude/skills/etalon-gate-calibration/SKILL.md" = "etalon/mcp/skills/gate-calibration.md"
+".claude/skills/etalon-generation-planning/SKILL.md" = "etalon/mcp/skills/generation-planning.md"
+".claude/skills/etalon-campaign-monitoring/SKILL.md" = "etalon/mcp/skills/monitoring.md"
+".claude/skills/etalon-install/SKILL.md" = "etalon/mcp/skills/install.md"
 "asset" = "etalon/_assets"
 
 [tool.hatch.build]

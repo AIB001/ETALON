@@ -734,3 +734,40 @@ def test_a_code_outside_the_taxonomy_is_refused_by_the_council_tool() -> None:
     )
     assert result["ok"] is False
     assert "not in the fault taxonomy" in result["error"]["message"]
+
+
+def test_every_workflow_document_is_carried_into_the_wheel() -> None:
+    """An installed package has no .claude directory, so the wheel has to carry these.
+
+    Only `campaign` was ever force-included. A wheel-installed server therefore raised
+    FileNotFoundError for the other five -- including `sweep`, the document a screening-only
+    campaign is routed to and the one carrying the panel that justifies its gate. Verified by
+    building the wheel: one file under mcp/skills where WORKFLOWS names six.
+
+    The table cannot be globbed -- the destination is the slug and the source is the directory, and
+    `sweep` comes from `etalon-screening-sweep` -- so it is written out, and written-out tables
+    drift. This is the check that stops the next one being forgotten rather than the fix for the
+    five that were.
+    """
+
+    import tomllib
+
+    from etalon.mcp.server import WORKFLOWS, _skill_path
+
+    root = Path(__file__).resolve().parent.parent
+    with (root / "pyproject.toml").open("rb") as handle:
+        config = tomllib.load(handle)
+    included = config["tool"]["hatch"]["build"]["targets"]["wheel"]["force-include"]
+
+    for slug, name in WORKFLOWS.items():
+        source = f".claude/skills/{name}/SKILL.md"
+        assert source in included, (
+            f"workflow {slug!r} is served by the server but {source} is not force-included, so a "
+            "wheel-installed client cannot read it"
+        )
+        assert included[source] == f"etalon/mcp/skills/{slug}.md", (
+            f"{slug!r} must land at the slug _skill_path falls back to, not at {included[source]!r}"
+        )
+        # The source has to exist, or the wheel ships a mapping to nothing.
+        assert (root / source).is_file(), f"{source} is force-included but absent"
+        assert _skill_path(slug).is_file(), slug
