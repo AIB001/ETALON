@@ -1,0 +1,40 @@
+{
+  "mcpServers": {
+    "etalon": {
+      "type": "stdio",
+      "command": "bash",
+      "args": [
+        "-lc",
+        "source /opt/miniforge3/etc/profile.d/conda.sh && conda activate ETALON && exec python -m etalon.mcp"
+      ],
+      "env": {}
+    },
+    "molquarry": {
+      "type": "stdio",
+      "command": "bash",
+      "args": [
+        "-lc",
+        "source /opt/miniforge3/etc/profile.d/conda.sh && conda activate ETALON && exec python -m molquarry.mcp_server"
+      ],
+      "env": {}
+    },
+    "molcascade": {
+      "type": "stdio",
+      "command": "bash",
+      "args": [
+        "-lc",
+        "source /opt/miniforge3/etc/profile.d/conda.sh && conda activate ETALON && exec python -m molcascade.mcp_server"
+      ],
+      "env": {}
+    },
+    "prism": {
+      "type": "stdio",
+      "command": "bash",
+      "args": [
+        "-lc",
+        "source /opt/miniforge3/etc/profile.d/conda.sh && conda activate ETALON && exec python -m prism.mcp_server"
+      ],
+      "env": {}
+    }
+  }
+}

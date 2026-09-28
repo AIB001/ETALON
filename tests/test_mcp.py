@@ -499,6 +499,57 @@ def test_the_skill_is_one_file_serving_both_consumers() -> None:
         assert number in text, number
 
 
+def test_every_workflow_document_resolves_and_is_a_skill() -> None:
+    """Six documents, one per regime or decision, each serving a skill and a resource."""
+
+    from etalon.mcp.server import WORKFLOWS, _skill_path
+
+    for slug, name in WORKFLOWS.items():
+        text = _skill_path(slug).read_text(encoding="utf-8")
+        assert text.startswith("---"), f"{slug} needs frontmatter"
+        assert f"name: {name}" in text, slug
+        # A description is what a model routes on; an undescribed skill is one nobody reaches.
+        assert "description:" in text.split("---")[1], slug
+
+
+def test_an_unknown_workflow_slug_is_refused() -> None:
+    from etalon.mcp.server import _skill_path
+
+    with pytest.raises(KeyError, match="no such workflow"):
+        _skill_path("no-such-regime")
+
+
+def test_the_campaign_document_routes_to_the_other_regime() -> None:
+    """A screening-only campaign takes none of the paths the campaign document guards.
+
+    Measured: one 1,056,280-molecule campaign ran to completion calling no handoff or spend tool. If
+    the campaign document does not say where such a campaign should go, nothing does.
+    """
+
+    from etalon.mcp.server import _skill_path
+
+    text = _skill_path("campaign").read_text(encoding="utf-8")
+    assert "etalon-screening-sweep" in text
+    assert "etalon_authorize_gates" in text
+
+
+def test_the_sweep_document_carries_the_panel_that_justifies_its_guard() -> None:
+    """The gate check is the sweep's one rule, and its argument is a table of measurements."""
+
+    from etalon.mcp.server import _skill_path
+
+    text = _skill_path("sweep").read_text(encoding="utf-8")
+    for number in (
+        "-8.5",  # the shipped threshold, as a literal config value: ASCII, inside inline code
+        "−5.90",  # a measured score, as a numeral in prose: U+2212
+        "−7.78",
+        "570 nM",  # the 570 nM binder the default gate rejects
+        "7,545",  # scores an exhausted batch still committed
+        "0.028%",  # end-to-end survival, which is why a short batch yields nothing
+    ):
+        assert number in text, number
+
+
 # --------------------------------------------------------------------------------------
 # The tools added after ADR 0006's class of bug was traced past its instance: a gate whose
 # output the next step requires, and a council that must qualify before it counts.

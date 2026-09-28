@@ -15,3 +15,10 @@ __pycache__/
 # architectural decisions report their absence when these directories are not present.
 /findings/
 /docs/
+
+# Chinese-language notes for this machine's install and the SND1 campaign. Same reason as
+# /docs/: a record of one run, carrying absolute paths, that would drift from the code.
+/docs-zh/
+
+# Stray generation logs written beside the repository by campaign scripts.
+/gen_*.log

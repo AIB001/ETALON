@@ -35,12 +35,29 @@ expensive one, and it is where a campaign can refuse a molecule for free.
 
 from __future__ import annotations
 
+import re
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
 from etalon.boundary.infra import Infra, load
+
+#: A run in which no molecule survived the gates, recognised as a family rather than as a list.
+#:
+#: MolCascade reports this by raising from whichever stage first finds nothing left to work on, and
+#: which stage that is depends on the cascade: the evidence gate when a policy tier empties, a
+#: feature stage when the gate above it emptied, pose strain when docking admitted nobody. Measured
+#: over 56 batches of one campaign, three different codes appeared --
+#: ``EVIDENCE_GATE_EMPTY_PARENT_INPUT``, ``FEATURE_EMPTY_INPUT`` and
+#: ``POSE_STRAIN_EMPTY_PARENT_INPUT`` -- and a caller enumerating the ones it had already seen
+#: misfiled two batches as failures before the pattern was generalised. Enumerating members of this
+#: family has now been wrong twice, so the family is matched.
+#:
+#: The distinction this draws is not cosmetic. A failed run is a defect to fix; an exhausted run is
+#: a measurement -- every docking score it computed is committed in the artifact store, and the
+#: campaign's next decision depends on reading them rather than on retrying anything.
+_EXHAUSTION = re.compile(r"\A[A-Z0-9_]*EMPTY_(PARENT_)?INPUT\Z")
 
 
 def _within(candidate: Path, root: Path) -> bool:
@@ -130,11 +147,46 @@ class ScreenResult:
 
         return tuple(stage for stage in self.stages if stage.committed)
 
+    @property
+    def exhaustion(self) -> StageOutcome | None:
+        """The stage that found nothing left, when that is why the run stopped.
+
+        ``None`` for a run that finished, and for one that failed for any other reason.
+        """
+
+        for stage in self.failed:
+            code = str((stage.error or {}).get("code", ""))
+            if _EXHAUSTION.match(code):
+                return stage
+        return None
+
+    @property
+    def exhausted(self) -> bool:
+        """Whether every molecule was gated out. Not a failure; see :data:`_EXHAUSTION`."""
+
+        return self.exhaustion is not None
+
+    @property
+    def outcome(self) -> str:
+        """``"committed"``, ``"exhausted"`` or ``"failed"`` -- the three-way answer a caller needs.
+
+        Callers want one question answered: do I read results, record a zero, or fix something. A
+        boolean cannot carry that, and ``status`` alone cannot either, because MolCascade reports an
+        exhausted run as FAILED with a non-zero exit -- correctly, since a stage did raise. The
+        classification belongs here so that no caller has to know which codes mean which.
+        """
+
+        if self.exhausted:
+            return "exhausted"
+        return "failed" if self.failed else "committed"
+
     def as_dict(self) -> dict[str, object]:
         return {
             "run_id": self.run_id,
             "revision_id": self.revision_id,
             "status": self.status,
+            "outcome": self.outcome,
+            "exhausted_at": None if self.exhaustion is None else self.exhaustion.stage_id,
             "stages": [
                 {
                     "stage_id": stage.stage_id,
@@ -415,6 +467,113 @@ class Screen:
 
     # -- read ---------------------------------------------------------------
 
+    def state(self, run_id: str) -> ScreenResult | None:
+        """A run's durable state, without running anything. ``None`` when there is no such run.
+
+        Works on a run still executing, in another process, or left by a crash -- MolCascade writes
+        run state as each stage commits, so this is the authoritative answer to "what happened to
+        that batch" and the only one that survives the process table.
+
+        That property is why recovery is built on it. A supervisor deciding whether a batch was
+        abandoned by looking for a live process is reading something that is neither durable nor
+        specific: measured, ``pgrep`` on a run id matched the supervisor's own shell, and a worker
+        whose shell had died left a child still committing stages for another hour. The run record
+        was right in both cases.
+        """
+
+        from molcascade.plugins import create_builtin_registry
+        from molcascade.runtime import LocalRunner
+
+        runner = LocalRunner(self.workspace, plugins=create_builtin_registry())
+        try:
+            state = runner.load_run(run_id)
+        except Exception:  # noqa: BLE001 -- RUN_NOT_FOUND and an unreadable state are both "no answer"
+            return None
+        return ScreenResult(
+            run_id=run_id,
+            revision_id=str(state.revision_id),
+            status=str(state.status),
+            stages=tuple(
+                StageOutcome(
+                    stage_id=stage.stage_id,
+                    plugin=stage.plugin_key,
+                    status=stage.status.value,
+                    attempts=stage.attempts,
+                    artifact_id=(None if stage.output_ref is None else stage.output_ref.artifact_id),
+                    error=(None if stage.error is None else stage.error.model_dump(mode="json")),
+                )
+                for stage in state.stages
+            ),
+        )
+
+    def progress(self, run_id: str) -> dict[str, Any]:
+        """Which stage a run is on, out of how many.
+
+        The answer to a question that looks answerable from resource usage and is not. Both docking
+        engines in a default cascade allocate about 25 GB and release it, so a batch at stage 6 of 43
+        and one at stage 29 present identically on the GPU -- and a campaign log recording "nearly
+        finished" for a batch at stage 27 was wrong twice in one night from exactly that read.
+        """
+
+        result = self.state(run_id)
+        if result is None:
+            return {"run_id": run_id, "exists": False}
+        done = [stage for stage in result.stages if stage.status == "SUCCEEDED"]
+        running = next((stage.stage_id for stage in result.stages if stage.status == "RUNNING"), None)
+        return {
+            "run_id": run_id,
+            "exists": True,
+            "status": result.status,
+            "outcome": result.outcome,
+            "stage": len(done) + 1,
+            "stages": len(result.stages),
+            "current": running,
+            "terminal": result.status in ("SUCCEEDED", "FAILED"),
+        }
+
+    def recall(self, run_id: str, *, panel_size: int | None = None) -> dict[str, Any]:
+        """Per-tier retention for a run whose library was a panel of known molecules.
+
+        Delegates to MolCascade's ``measure_recall``, which recovers the tier structure from the
+        revision's own pipeline metadata and so cannot be pointed at the wrong configuration. This
+        adapter adds nothing to the measurement; :mod:`etalon.campaign.calibrate` is where the
+        judgement about it lives.
+
+        The separation is the point. MolCascade can say which molecules a tier lost. Only the
+        campaign knows which of them were known to bind, and therefore only the campaign can say
+        whether the configuration is fit to apply to a million molecules.
+        """
+
+        from molcascade.plugins import create_builtin_registry
+        from molcascade.recall import measure_recall
+        from molcascade.runtime import LocalRunner
+
+        report = measure_recall(
+            LocalRunner(self.workspace, plugins=create_builtin_registry()),
+            run_id,
+            panel_size=panel_size,
+        )
+        as_tier = lambda tier: {  # noqa: E731 -- one shape, used twice, named where it is used
+            "tier_id": tier.tier_id,
+            "title": tier.title,
+            "mode": tier.mode,
+            "entering": tier.entering,
+            "surviving": tier.surviving,
+            "lost": list(tier.lost),
+            "unavailable": tier.unavailable,
+        }
+        return {
+            "run_id": report.run_id,
+            "status": report.status,
+            "panel_size": report.panel_size,
+            "registered": report.registered,
+            "tiers": [as_tier(tier) for tier in report.tiers],
+            "finalize": [as_tier(tier) for tier in report.finalize],
+            "unaccounted": list(report.unaccounted),
+            "notes": list(report.notes),
+            "infrastructure": self.infra.provenance(),
+        }
+
     def export_shortlist(self, run_id: str, output: str | Path) -> dict[str, Any]:
         """Materialize a completed screen's verified final export for MolQuarry or another consumer.
 
@@ -492,15 +651,32 @@ class Screen:
         that follows verifies the one artifact it actually uses.
         """
 
+        found = self.artifacts_carrying(result, contract_id)
+        return found[-1] if found else None
+
+    def artifacts_carrying(self, result: ScreenResult, contract_id: str) -> tuple[str, ...]:
+        """Every committed artifact with a port on this contract, in stage order.
+
+        :meth:`artifact_carrying` answers "where is the handoff", which has one producer. This
+        answers "where are the docking scores", which does not: a cascade running two engines
+        commits two artifacts on ``docking_score/v1``, and a caller comparing engines that took only
+        the last one would silently compare one engine with itself.
+
+        Committed stages only -- which is what makes this readable on a run that gated everything
+        out. Measured: a batch whose pose-strain stage raised on an empty input had already committed
+        7,545 docking scores from two engines, and those scores are the entire product of that batch.
+        """
+
         from molcascade.artifacts.store import LocalArtifactStore
 
         store = LocalArtifactStore(self.workspace)
-        for stage in reversed(result.committed):
+        carrying: list[str] = []
+        for stage in result.committed:
             assert stage.artifact_id is not None
             manifest = store.get_manifest(stage.artifact_id)
             if any(output.contract_id == contract_id for output in manifest.outputs):
-                return stage.artifact_id
-        return None
+                carrying.append(stage.artifact_id)
+        return tuple(carrying)
 
     def handoff(self, result: ScreenResult) -> list[dict[str, Any]]:
         """The ``md_system_input/v1`` rows this run produced, or an empty list.

@@ -29,32 +29,48 @@ SKILL_RESOURCE = "etalon://skills/campaign"
 RUNTIME_RESOURCE = "etalon://runtime"
 
 
-def _skill_path() -> Path:
-    """Where the campaign workflow lives, preferring the repository copy when running from it.
+#: Every workflow document this server exposes, by the slug in its resource URI.
+#:
+#: One document, two consumers: a Claude Code skill reads ``.claude/skills/<name>/SKILL.md`` and an MCP
+#: client reads ``etalon://skills/<slug>``. A second copy would drift, so both read the same file.
+#:
+#: ``campaign`` is the expensive-stage regime. ``sweep`` is the throughput regime, and it exists as a
+#: separate document rather than a section because the two share almost no tools: a campaign with no
+#: simulation stage takes none of the paths ``campaign`` guards, and a reader given both at once has to
+#: work out which half applies before doing anything.
+WORKFLOWS: dict[str, str] = {
+    "campaign": "etalon-campaign",
+    "sweep": "etalon-screening-sweep",
+    "gate-calibration": "etalon-gate-calibration",
+    "generation-planning": "etalon-generation-planning",
+    "monitoring": "etalon-campaign-monitoring",
+    "install": "etalon-install",
+}
 
-    One document, two consumers: a Claude Code skill reads ``.claude/skills/etalon-campaign/SKILL.md``
-    and an MCP client reads this resource. A second copy would drift, so the package looks for the
-    repository file first and falls back to a copy installed beside the code.
-    """
 
+def _skill_path(slug: str = "campaign") -> Path:
+    """Where a workflow document lives, preferring the repository copy when running from it."""
+
+    if slug not in WORKFLOWS:
+        raise KeyError(f"no such workflow {slug!r}; known: {sorted(WORKFLOWS)}")
+    name = WORKFLOWS[slug]
     here = Path(__file__).resolve()
-    repository = here.parents[3] / ".claude" / "skills" / "etalon-campaign" / "SKILL.md"
+    repository = here.parents[3] / ".claude" / "skills" / name / "SKILL.md"
     if repository.is_file():
         return repository
-    installed = here.parent / "skills" / "campaign.md"
+    installed = here.parent / "skills" / f"{slug}.md"
     if installed.is_file():
         return installed
     raise FileNotFoundError(
-        "no campaign workflow document found. It should be at "
-        ".claude/skills/etalon-campaign/SKILL.md in the repository, or packaged at "
-        "etalon/mcp/skills/campaign.md."
+        f"no workflow document for {slug!r}. It should be at .claude/skills/{name}/SKILL.md in the "
+        f"repository, or packaged at etalon/mcp/skills/{slug}.md."
     )
 
 
 def build() -> Any:
     """Construct the server with every tool and resource registered."""
 
-    from etalon.mcp import active, data, execution, governance, planning, runtime
+    from etalon.mcp import active, data, execution, governance, planning, runtime, sweep
 
     server_class = require_mcp()
     mcp = server_class("etalon")
@@ -65,6 +81,7 @@ def build() -> Any:
     execution.register(mcp)
     data.register(mcp)
     runtime.register(mcp)
+    sweep.register(mcp)
 
     @mcp.resource("etalon://skills/molquarry")
     def molquarry_workflows() -> str:
@@ -117,9 +134,43 @@ def build() -> Any:
         which steps are free and which spend GPU-days, and carries the measurements its decisions rest
         on -- because a workflow recalled without its numbers is a workflow whose refusals look
         arbitrary.
+
+        **If the campaign has no MD, MM-PBSA or FEP stage, read ``etalon://skills/sweep`` instead.**
+        Almost everything this document guards is guarding the expensive stage, and a screening-only
+        campaign takes none of those paths -- measured, one 1,056,280-molecule campaign ran to
+        completion calling none of the handoff or spend tools. The risk there is a miscalibrated gate
+        applied a million times, and ``sweep`` is the document about that.
         """
 
-        return _skill_path().read_text(encoding="utf-8")
+        return _skill_path("campaign").read_text(encoding="utf-8")
+
+    @mcp.resource("etalon://skills")
+    def workflows() -> str:
+        """Every workflow document on this server, and when each one applies."""
+
+        return json.dumps(
+            {
+                "workflows": [
+                    {"uri": f"etalon://skills/{slug}", "skill": name, "regime": regime}
+                    for slug, name, regime in (
+                        ("campaign", "etalon-campaign", "an expensive stage exists (MD/MM-PBSA/FEP)"),
+                        ("sweep", "etalon-screening-sweep", "screening only, throughput-limited"),
+                        ("gate-calibration", "etalon-gate-calibration", "setting or changing any gate"),
+                        ("generation-planning", "etalon-generation-planning", "choosing generators"),
+                        ("monitoring", "etalon-campaign-monitoring", "supervising a long run"),
+                        ("install", "etalon-install", "setting up a machine"),
+                    )
+                ],
+                "start_with": "campaign if a simulation stage exists, sweep if not",
+            },
+            ensure_ascii=False,
+        )
+
+    @mcp.resource("etalon://skills/{slug}")
+    def workflow(slug: str) -> str:
+        """One workflow document; discover the slugs at ``etalon://skills``."""
+
+        return _skill_path(slug).read_text(encoding="utf-8")
 
     @mcp.resource(RUNTIME_RESOURCE)
     def runtime_workflow() -> str:

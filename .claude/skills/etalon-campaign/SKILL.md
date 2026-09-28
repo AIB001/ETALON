@@ -15,6 +15,31 @@ per-action confirmation: you confirm the *plan* once, and then the refusals are 
 them. Existing user authorization for the concrete scope and budget remains valid; do not ask for it
 again at each stage.
 
+## First: is there an expensive stage at all?
+
+Everything below assumes there is — that the campaign will run MD, MM-PBSA or FEP, and that the guards
+exist to stop a GPU-hour being spent on a molecule whose geometry is a drawing.
+
+**If the campaign is screening only, stop here and read `etalon-screening-sweep`.** That is not a
+smaller version of this one. Remove the expensive stage and every guard in this document sits on a path
+nothing takes: `etalon_check_handoff`, `etalon_authorize_spend` and `etalon_rule_admissible` are all
+about protecting a force-field build. Measured — one 1,056,280-molecule screening campaign ran to
+completion calling none of them.
+
+The risk does not disappear, it moves. There the irreversible act is a miscalibrated gate deleting the
+interesting chemistry silently, a million times over, and the guard is `etalon_authorize_gates`.
+MolCascade's shipped docking thresholds reject all eight molecules of a real SND1 panel including both
+co-crystal ligands, so a campaign that skipped that check produced an empty shortlist with every log
+line reading SUCCEEDED.
+
+| you have | read | the guard that matters |
+|---|---|---|
+| MD / MM-PBSA / FEP | this document | `etalon_authorize_spend` |
+| screening only, 10^5–10^7 molecules | `etalon-screening-sweep` | `etalon_authorize_gates` |
+| either, and you are setting a threshold | `etalon-gate-calibration` | the known-active panel |
+| either, and you are choosing generators | `etalon-generation-planning` | viability and uniqueness |
+| either, and it runs for hours | `etalon-campaign-monitoring` | knowing what normal looks like |
+
 ## The one rule
 
 **Call the free tools before the expensive ones, and read what they refuse.** A refusal always names
