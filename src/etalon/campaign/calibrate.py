@@ -55,6 +55,33 @@ from etalon.boundary.screen import Screen, ScreenResult
 #: The contract every docking engine's score port carries.
 DOCKING_SCORE = "docking_score/v1"
 
+#: A score where a smaller number is the stronger binder -- every Vina-family engine.
+LOWER_STRONGER = "LOWER_STRONGER"
+#: A score where a larger number is the stronger binder -- KarmaDock's MDN, gnina's CNN scales.
+HIGHER_STRONGER = "HIGHER_STRONGER"
+#: One engine's rows disagreed about which way its own score runs. Fails closed: a separation
+#: computed over rows that do not share a convention is not a measurement of anything.
+MIXED = "MIXED"
+
+#: Fallback when a row omits ``direction``. The contract declares that field non-nullable, so a row
+#: without it is already irregular; deriving from ``score_kind`` is strictly better than assuming,
+#: and assuming is what this module did until an ALK2 panel made the cost visible.
+_DIRECTION_BY_KIND = {
+    "VINA_KCAL_MOL": LOWER_STRONGER,
+    "VINARDO_KCAL_MOL": LOWER_STRONGER,
+    "AD4_KCAL_MOL": LOWER_STRONGER,
+    "CNN_SCORE": HIGHER_STRONGER,
+    "CNN_AFFINITY": HIGHER_STRONGER,
+    "KARMADOCK_MDN": HIGHER_STRONGER,
+}
+
+
+def _direction(row: Mapping[str, Any]) -> str:
+    declared = str(row.get("direction") or "").strip().upper()
+    if declared in (LOWER_STRONGER, HIGHER_STRONGER):
+        return declared
+    return _DIRECTION_BY_KIND.get(str(row.get("score_kind") or "").strip().upper(), LOWER_STRONGER)
+
 #: Fraction of the panel's known actives that must survive the funnel for the configuration to be
 #: admissible. One, and the default is not a round number chosen for neatness.
 #:
@@ -133,6 +160,10 @@ class Separation:
     """
 
     engine_id: str
+    #: ``LOWER_STRONGER``, ``HIGHER_STRONGER``, or ``MIXED`` when one engine's rows disagree.
+    #: Every extreme reported below is in the engine's own units and is chosen under *this*
+    #: convention, so a reader who ignores this field can still read ``best_active`` correctly.
+    direction: str
     actives: int
     inactives: int
     best_active: float | None
@@ -162,11 +193,14 @@ class Separation:
 
         if not self.actives or not self.inactives:
             return None
+        if self.direction == MIXED:
+            return None
         return self.actives_below_best_inactive == 0
 
     def as_dict(self) -> dict[str, Any]:
         return {
             "engine_id": self.engine_id,
+            "direction": self.direction,
             "actives": self.actives,
             "inactives": self.inactives,
             "best_active": self.best_active,
@@ -346,28 +380,44 @@ def separation(
 ) -> tuple[Separation, ...]:
     """Per-engine separation of the panel's actives from its inactives.
 
-    Scores are Vina-like: **lower is better**. Every comparison here is written in those terms
-    rather than in terms of magnitude, because an engine whose convention is the other way round
-    would produce a report that looks computed and is inverted.
+    **Each engine is read under its own convention.** Vina-family scores run down and KarmaDock's
+    MDN runs up, and the first version of this function hardcoded "lower is better" for both -- while
+    this module's own docstring warned that "an engine whose convention is the other way round would
+    produce a report that looks computed and is inverted". It did. On an ALK2 panel it reported
+    KarmaDock's ``best_active`` as 3.247, which was the *worst* of the four actives; the strongest
+    was 11.084. ``docking_score/v1`` carries ``direction`` as a non-nullable field for exactly this
+    reason and nothing was reading it.
+
+    Comparisons are done on a canonical form where smaller is always stronger; every number
+    *reported* stays in the engine's own units, so ``best_active`` is a value a reader can look up in
+    the run's own artifacts.
     """
 
     actives = {member.parent_id for member in panel if member.known_active}
     inactives = {member.parent_id for member in panel if not member.known_active}
     by_engine: dict[str, dict[str, float]] = {}
+    directions: dict[str, set[str]] = {}
     for row in scores:
         engine = str(row.get("engine_id", "")) or "unknown"
         parent = str(row.get("parent_id", ""))
         value = row.get("score")
         if parent not in actives and parent not in inactives:
             continue
-        if not isinstance(value, (int, float)):
+        if not isinstance(value, (int, float)) or isinstance(value, bool):
             continue
+        heading = _direction(row)
+        directions.setdefault(engine, set()).add(heading)
+        canonical = float(value) if heading == LOWER_STRONGER else -float(value)
         kept = by_engine.setdefault(engine, {})
-        # Best pose per molecule: a molecule docked in several poses has one score here.
-        kept[parent] = min(float(value), kept.get(parent, float("inf")))
+        # Best pose per molecule, under this engine's own convention.
+        kept[parent] = min(canonical, kept.get(parent, float("inf")))
 
     rows: list[Separation] = []
     for engine in sorted(by_engine):
+        seen = directions[engine]
+        heading = seen.pop() if len(seen) == 1 else MIXED
+        # Undo the canonical form for reporting, so every extreme is in the engine's own units.
+        shown = (lambda v: v) if heading != HIGHER_STRONGER else (lambda v: -v)
         measured = by_engine[engine]
         active_values = sorted(v for p, v in measured.items() if p in actives)
         inactive_values = sorted(v for p, v in measured.items() if p in inactives)
@@ -376,12 +426,15 @@ def separation(
         rows.append(
             Separation(
                 engine_id=engine,
+                direction=heading,
                 actives=len(active_values),
                 inactives=len(inactive_values),
-                best_active=best_active,
-                median_active=statistics.median(active_values) if active_values else None,
-                worst_active=active_values[-1] if active_values else None,
-                best_inactive=best_inactive,
+                best_active=None if best_active is None else shown(best_active),
+                median_active=(
+                    shown(statistics.median(active_values)) if active_values else None
+                ),
+                worst_active=None if not active_values else shown(active_values[-1]),
+                best_inactive=None if best_inactive is None else shown(best_inactive),
                 inactives_above_best_active=(
                     0 if best_active is None else sum(1 for v in inactive_values if v <= best_active)
                 ),
@@ -448,7 +501,18 @@ def calibrate(
             "from a cascade rather than a flat pipeline."
         )
 
+    # Score rows key on a digest of the standardised molecule; the panel declares the library's own
+    # identifiers. Without this join nothing matches and the separation comes back empty, which
+    # reads as "the score was not shown to rank" rather than "nobody looked" -- see
+    # :meth:`~etalon.boundary.screen.Screen.parent_names`.
+    try:
+        named = screen.parent_names(result)
+    except Exception as error:  # noqa: BLE001 -- an unjoinable run is a result, reported as one
+        named = {}
+        notes.append(f"parent ids could not be joined to library names ({error})")
+
     scores: list[dict[str, Any]] = []
+    unmatched = 0
     for artifact in screen.artifacts_carrying(result, DOCKING_SCORE):
         try:
             rows = screen.read(artifact, contract_id=DOCKING_SCORE)
@@ -456,18 +520,31 @@ def calibrate(
             notes.append(f"docking scores in {artifact[:19]} unreadable: {error}")
             continue
         for row in rows:
-            if str(row.get("parent_id", "")) in seen:
-                scores.append(
-                    {
-                        "parent_id": row.get("parent_id"),
-                        "engine_id": row.get("engine_id"),
-                        "score": row.get("score"),
-                    }
-                )
+            raw = str(row.get("parent_id", ""))
+            # Fall back to the raw id: a flat pipeline may already key on the library's names.
+            member = named.get(raw, raw)
+            if member not in seen:
+                unmatched += 1
+                continue
+            scores.append(
+                {
+                    "parent_id": member,
+                    "engine_id": row.get("engine_id"),
+                    "score": row.get("score"),
+                    "score_kind": row.get("score_kind"),
+                    "direction": row.get("direction"),
+                }
+            )
     if not scores:
         notes.append(
             "no docking scores were readable for the panel, so score separation is unevaluable. "
             "Recall alone cannot say whether the number the gate compares against is a ranking."
+            + (
+                " Scores exist but none belong to a declared panel member, and no parent-to-name "
+                "mapping could be built -- the usual cause is a run screened without an id column."
+                if unmatched and not named
+                else ""
+            )
         )
 
     return Calibration(
@@ -488,6 +565,9 @@ def calibrate(
 
 __all__ = [
     "DOCKING_SCORE",
+    "HIGHER_STRONGER",
+    "LOWER_STRONGER",
+    "MIXED",
     "REQUIRED_RECALL",
     "Calibration",
     "PanelMember",

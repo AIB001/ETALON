@@ -683,6 +683,57 @@ class Screen:
                 carrying.append(stage.artifact_id)
         return tuple(carrying)
 
+    def parent_names(self, result: ScreenResult) -> dict[str, str]:
+        """Map MolCascade's content-addressed parent ids back to the library's own identifiers.
+
+        Every downstream contract keys on ``parent_id``, which is a digest of the standardised
+        molecule -- ``parent:sha256:1ab8dd...``. The name a campaign knows a molecule by lives only
+        in the library record, as ``source_candidate_id``. Nothing joins them for you, and the join
+        is not guessable: the digest is of the standardised structure, so it cannot be recomputed
+        from the name without repeating the standardisation policy exactly.
+
+        This was found by pointing :func:`~etalon.campaign.calibrate.calibrate` at a real panel run.
+        It filtered docking scores by testing ``row["parent_id"] in <the declared panel>``, the panel
+        declaring library ids and the rows carrying digests, so **nothing ever matched**. The
+        calibration then reported ``separation`` as empty -- which reads as *the score was not shown
+        to rank the panel*, an unevaluable verdict, when in fact 22 scores from two engines were
+        sitting in the store. A measurement that silently becomes "unevaluable" is worse than one
+        that fails, because a campaign acts on it.
+
+        Two contracts carry the halves and both are read by contract rather than by stage name:
+        ``raw_molecule/v1`` holds ``source_record_id -> source_candidate_id``, and
+        ``parent_source_map/v1`` holds ``source_record_id -> parent_id``.
+
+        Only ``PRIMARY`` relations are mapped. A multi-component record -- a salt, a mixture --
+        contributes several parents and one of them is the molecule the run went on to screen; the
+        discarded components are real rows with real ids and naming them after the record would
+        attribute a score to a counter-ion.
+
+        Returns an empty mapping when either contract is absent, which is the honest answer for a
+        flat pipeline that never standardised anything. The caller must treat empty as *unknown*,
+        not as *no molecules*.
+        """
+
+        names: dict[str, str] = {}
+        by_record: dict[str, str] = {}
+        for artifact in self.artifacts_carrying(result, "raw_molecule/v1"):
+            for row in self.read(artifact, contract_id="raw_molecule/v1"):
+                record = str(row.get("source_record_id") or "")
+                candidate = str(row.get("source_candidate_id") or "")
+                if record and candidate and candidate != "None":
+                    by_record[record] = candidate
+        if not by_record:
+            return names
+        for artifact in self.artifacts_carrying(result, "parent_source_map/v1"):
+            for row in self.read(artifact, contract_id="parent_source_map/v1"):
+                if str(row.get("relation") or "") != "PRIMARY":
+                    continue
+                parent = str(row.get("parent_id") or "")
+                named = by_record.get(str(row.get("source_record_id") or ""))
+                if parent and named:
+                    names[parent] = named
+        return names
+
     def handoff(self, result: ScreenResult) -> list[dict[str, Any]]:
         """The ``md_system_input/v1`` rows this run produced, or an empty list.
 

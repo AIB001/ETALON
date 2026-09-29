@@ -22,6 +22,9 @@ from etalon.authority.grant import NotAuthorized
 from etalon.boundary.screen import ScreenResult, StageOutcome
 from etalon.campaign.calibrate import (
     Calibration,
+    calibrate,
+    HIGHER_STRONGER,
+    MIXED,
     PanelMember,
     Separation,
     TierVerdict,
@@ -323,6 +326,134 @@ def test_best_pose_per_molecule_is_used() -> None:
         {"parent_id": "i1", "engine_id": "e", "score": -6.0},
     )
     assert separation(many, panel)[0].best_active == -9.0
+
+
+# -- separation: each engine read under its own convention -------------------
+#
+# The ALK2 panel, measured 2026-09-29. KarmaDock's MDN runs UP -- its gate is ``>= 40`` -- and this
+# function used to compare it as if it ran down, which inverted every extreme it reported. The
+# strongest active here is 67.329 and the weakest is 33.020; read upside down, ``best_active`` came
+# back 33.020 and a reader comparing it against a threshold would have had the panel backwards.
+KARMADOCK_ALK2 = tuple(
+    {
+        "parent_id": parent,
+        "engine_id": "karmadock",
+        "score": score,
+        "score_kind": "KARMADOCK_MDN",
+        "direction": "HIGHER_STRONGER",
+    }
+    for parent, score in (
+        ("act_SARACATINIB", 67.329),
+        ("act_PD-0166285", 61.530),
+        ("act_CHEMBL3818173", 56.560),
+        ("neg_AEE-788", 53.833),
+        ("LDN-193189", 50.820),
+        ("act_CHEMBL1241674", 44.700),
+        ("act_CHEMBL4526828", 33.020),
+        ("neg_aspirin", 17.280),
+    )
+)
+ALK2_PANEL = (
+    PanelMember("LDN-193189", True, "co-crystal 3Q4U"),
+    PanelMember("act_SARACATINIB", True, "AZD0530"),
+    PanelMember("act_PD-0166285", True, "Ki pChEMBL 8.80"),
+    PanelMember("act_CHEMBL3818173", True, "IC50 pChEMBL 8.92"),
+    PanelMember("act_CHEMBL1241674", True, "ChEMBL exact"),
+    PanelMember("act_CHEMBL4526828", True, "ChEMBL exact"),
+    PanelMember("neg_AEE-788", False, "EGFR/VEGFR inhibitor, selectivity control"),
+    PanelMember("neg_aspirin", False, "not a kinase binder"),
+)
+
+
+def test_a_higher_is_better_engine_is_not_read_upside_down() -> None:
+    row = separation(KARMADOCK_ALK2, ALK2_PANEL)[0]
+    assert row.direction == HIGHER_STRONGER
+    # In the engine's own units, and the way round a reader expects.
+    assert row.best_active == 67.329
+    assert row.worst_active == 33.020
+    assert row.best_inactive == 53.833
+    # Three actives score below AEE-788, so the score does not order this panel.
+    assert row.actives_below_best_inactive == 3
+    assert row.separates is False
+
+
+def test_direction_falls_back_to_score_kind_when_the_row_omits_it() -> None:
+    rows = tuple({k: v for k, v in row.items() if k != "direction"} for row in KARMADOCK_ALK2)
+    assert separation(rows, ALK2_PANEL)[0].best_active == 67.329
+
+
+def test_one_engine_with_two_conventions_is_unevaluable() -> None:
+    confused = (
+        {"parent_id": "LDN-193189", "engine_id": "e", "score": 50.8, "direction": "HIGHER_STRONGER"},
+        {"parent_id": "neg_aspirin", "engine_id": "e", "score": -5.0, "direction": "LOWER_STRONGER"},
+    )
+    row = separation(confused, ALK2_PANEL)[0]
+    assert row.direction == MIXED
+    # Fails closed: a comparison across two conventions is not a measurement of anything.
+    assert row.separates is None
+
+
+# -- calibrate: the digest-to-name join --------------------------------------
+
+
+class ScoredScreen(FakeScreen):
+    """A screen carrying one engine's scores, keyed the way MolCascade really keys them.
+
+    Every downstream contract keys on a digest of the standardised molecule. The panel declares the
+    library's own identifiers. ``calibrate`` used to test one against the other directly, so nothing
+    matched and ``separation`` came back empty -- which reads as *the score was not shown to rank*
+    rather than *nobody looked*.
+    """
+
+    def __init__(self, *, joinable: bool = True) -> None:
+        super().__init__()
+        self.digest = {m.parent_id: f"parent:sha256:{i:064x}" for i, m in enumerate(ALK2_PANEL)}
+        self.joinable = joinable
+
+    def recall(self, run_id: str, *, panel_size: int | None = None) -> dict[str, object]:
+        return {
+            "registered": len(ALK2_PANEL),
+            "tiers": [
+                {"tier_id": "t9_docking", "title": "Docking", "entering": 8, "surviving": 8, "lost": []}
+            ],
+            "finalize": [],
+            "notes": [],
+        }
+
+    def parent_names(self, result) -> dict[str, str]:  # noqa: ANN001, ARG002
+        return {} if not self.joinable else {v: k for k, v in self.digest.items()}
+
+    def artifacts_carrying(self, result, contract_id: str) -> tuple[str, ...]:  # noqa: ANN001, ARG002
+        return ("artifact:sha256:aa",)
+
+    def read(self, artifact_id: str, *, contract_id: str | None = None) -> list[dict[str, object]]:  # noqa: ARG002
+        return [dict(row, parent_id=self.digest[row["parent_id"]]) for row in KARMADOCK_ALK2]
+
+
+def _alk2_result() -> ScreenResult:
+    return ScreenResult(
+        run_id="panel",
+        revision_id="rev-alk2",
+        status="SUCCEEDED",
+        stages=(stage("docking_score_2", "SUCCEEDED", artifact="artifact:sha256:aa"),),
+    )
+
+
+def test_calibrate_joins_content_addressed_parents_to_panel_names() -> None:
+    screen = ScoredScreen()
+    measured = calibrate(screen, _alk2_result(), ALK2_PANEL)
+    assert measured.separation, "the join failed and the scores were dropped"
+    row = measured.separation[0]
+    assert row.actives == 6 and row.inactives == 2
+    assert row.best_active == 67.329
+    assert measured.rankable == ()
+
+
+def test_calibrate_says_so_when_the_scores_could_not_be_joined() -> None:
+    measured = calibrate(ScoredScreen(joinable=False), _alk2_result(), ALK2_PANEL)
+    assert measured.separation == ()
+    # The note must name the cause, because "unevaluable" and "nobody looked" read alike otherwise.
+    assert any("none belong to a declared panel member" in note for note in measured.notes)
 
 
 # -- gate authorization ------------------------------------------------------
