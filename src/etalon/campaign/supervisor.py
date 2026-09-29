@@ -180,6 +180,22 @@ class Supervisor:
         self.stopped: set[str] = set()
         self.chunks: dict[str, list[ChunkResult]] = {}
         self.unique: dict[str, list[int]] = {}
+        # Every generator must share one output root, because only one Ingest is kept (see below)
+        # and it discovers chunks by path. Refused rather than tolerated: with per-generator roots
+        # the campaign runs, every loop generates, every chunk lands on disk with its manifest --
+        # and the pool only ever grows by whichever generator happened to sort first. Measured on
+        # ALK2: five of six loops produced nothing the sweep could see, and the symptom was a pool
+        # that looked merely slow. A Generator's own directory is ``output_root / tag``, so sharing
+        # the root does not make two loops collide.
+        roots = {str(generator.output_root) for generator in self.generators.values()}
+        if len(roots) > 1:
+            raise ValueError(
+                "every Generator must share one output_root; got "
+                + ", ".join(sorted(roots))
+                + ". Each generator already gets its own directory at output_root/tag, and only "
+                "one Ingest is kept for the campaign -- so distinct roots mean every generator but "
+                "one is silently never ingested."
+            )
         self.ingest = {
             tag: Ingest(
                 root=generator.output_root,

@@ -7,6 +7,7 @@ standard for this file: a test whose failure mode was never observed is a test o
 from __future__ import annotations
 
 import os
+from dataclasses import replace
 from pathlib import Path
 
 import pytest
@@ -879,6 +880,35 @@ def _drain(supervisor, limit=40):
             return True
         time.sleep(0.05)
     return supervisor.complete()
+
+
+def test_generators_with_separate_output_roots_are_refused(tmp_path, keyed) -> None:
+    """Per-generator roots ingest one generator and silently drop the rest.
+
+    Only one Ingest is kept for the campaign and it discovers chunks by path, so distinct roots
+    mean every loop but one contributes nothing to the pool. Measured on an ALK2 campaign: six
+    loops generating, five of them invisible to the sweep, and the only symptom was a pool that
+    looked slow. Refused at construction rather than diagnosed sixteen hours in.
+    """
+
+
+    from etalon.campaign.supervisor import Supervisor
+
+    supervisor, sweep, _ = _campaign(tmp_path, keyed, generator_devices=("cuda:0", "cuda:1"))
+    generators = list(supervisor.generators.values())
+    assert len(generators) == 2, "one generator cannot exhibit a disagreement about roots"
+    split = [
+        replace(generator, output_root=tmp_path / "gen" / generator.tag)
+        for generator in generators
+    ]
+    with pytest.raises(ValueError, match="share one output_root"):
+        Supervisor(
+            sweep,
+            revision_id="rev-1",
+            workspace=tmp_path / "ws2",
+            generators=split,
+            screen_devices=("cuda:5",),
+        )
 
 
 def test_a_campaign_runs_itself_to_completion(tmp_path, keyed) -> None:
