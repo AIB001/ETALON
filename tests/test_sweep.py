@@ -1358,3 +1358,57 @@ def test_one_device_is_reported_as_unsplittable_rather_than_split() -> None:
     assert plan["ok"]
     assert plan["recommended_split"]["total_devices"] == 1
     assert "cannot be split" in plan["recommended_split"]["note"]
+
+
+def test_a_batch_is_not_resumed_before_it_exists(tmp_path) -> None:
+    """``--resume`` on a run that never started is MolCascade's RUN_NOT_FOUND, not a no-op.
+
+    Both screen drivers had this, and it is the same one line in each: the committed-stage cache is
+    always safe to reuse, but the run record it is keyed on has to exist first. Measured on ALK2:
+    every batch of a fresh campaign failed on its first line, twice -- once through the in-process
+    driver and once again through the CLI after the first fix, because the flag was hardcoded.
+    """
+
+    from etalon.campaign.drivers import MolCascadeProcessScreening
+
+    class Records:
+        def __init__(self, known: set[str]) -> None:
+            self.known = known
+
+        def state(self, run_id: str):
+            return object() if run_id in self.known else None
+
+    driver = MolCascadeProcessScreening(
+        screen=Records({"batch_old"}),
+        config_path=tmp_path / "c.json",
+        workspace=tmp_path / "ws",
+        revision_id="rev-1",
+        target_args=("--receptor", str(tmp_path / "r.pdb")),
+        reference_library=tmp_path / "panel.csv",
+    )
+    assert "--resume" not in driver._argv(tmp_path / "b.csv", "batch_new", dry_run=False)
+    assert "--resume" in driver._argv(tmp_path / "b.csv", "batch_old", dry_run=False)
+    # A dry run never resumes: it compiles and stops before any run record is consulted.
+    assert "--resume" not in driver._argv(tmp_path / "panel.csv", "batch_old", dry_run=True)
+
+
+def test_the_identity_probe_compiles_the_reference_library(tmp_path) -> None:
+    """The revision check must compile the library the campaign's revision was computed from.
+
+    A compiled revision covers the library, so probing with the batch's own library asks a question
+    whose answer is different for every batch and equal to the campaign's for none of them.
+    """
+
+    from etalon.campaign.drivers import MolCascadeProcessScreening
+
+    driver = MolCascadeProcessScreening(
+        screen=None,
+        config_path=tmp_path / "c.json",
+        workspace=tmp_path / "ws",
+        revision_id="rev-1",
+        target_args=(),
+        reference_library=tmp_path / "panel.csv",
+    )
+    probe = driver._argv(driver.reference_library, "batch_0001__identity", dry_run=True)
+    assert str(tmp_path / "panel.csv") in probe
+    assert "--dry-run" in probe and "--json" in probe

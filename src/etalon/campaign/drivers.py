@@ -100,4 +100,125 @@ class MolCascadeScreening:
         return replace(result, revision_id=self.revision_id)
 
 
-__all__ = ["MolCascadeScreening", "RevisionChanged"]
+@dataclass
+class MolCascadeProcessScreening:
+    """Screen one batch in its own process, so concurrent batches do not share one GIL.
+
+    :class:`MolCascadeScreening` runs the cascade in the caller's process and the supervisor runs
+    each screen on a thread. ``_Call`` justifies the thread by saying "the work is already in a
+    subprocess -- PRISM and MolCascade are external programs". That is true of PRISM, which is
+    driven as ``prism generate``, and **false of MolCascade**, which the ``Screen`` adapter imports
+    and runs in-process.
+
+    Measured on ALK2: five batches concurrent, all five threads inside RDKit's Python API in the
+    ``standardize`` stage, **105% CPU total on a 96-core machine**, and the artifact store growing
+    by zero bytes in a minute. A cascade's cheap tiers are a Python loop over molecules, so
+    concurrency there buys nothing at all; only the docking engines, which are separate binaries,
+    overlap. Five batches therefore cost five times one batch's wall clock through every tier above
+    the docking one.
+
+    This driver hands each batch to the ``molcascade`` CLI instead, which is how the first SND1
+    campaign ran them -- by hand, from bash, one process per batch -- and why that campaign never
+    saw this.
+
+    Args:
+        screen: Used to read the run record when the subprocess finishes, and for nothing else.
+        target_args: The CLI flags naming the receptor and the binding site, e.g.
+            ``("--receptor", "...pdb", "--reference-ligand", "...mol2")``. Exactly one site
+            definition; MolCascade refuses two that could disagree.
+        reference_library: The library the campaign's ``revision_id`` was computed against. The
+            identity check compiles it with ``--dry-run``, which is the same code path the run
+            takes rather than a reimplementation of it.
+        executable: argv prefix for the CLI. A list so a wrapper that activates an environment can
+            be put in front of it.
+        env: Extra environment for the child. ``CUDA_VISIBLE_DEVICES`` is set from ``device``.
+    """
+
+    screen: Screen
+    config_path: Path
+    workspace: Path
+    revision_id: str
+    target_args: tuple[str, ...]
+    reference_library: Path
+    executable: tuple[str, ...] = ("molcascade",)
+    workers: int = 10
+    env: dict[str, str] | None = None
+    timeout: float | None = None
+
+    def _argv(self, library: Path, run_id: str, *, dry_run: bool) -> list[str]:
+        argv = [
+            *self.executable,
+            "screen",
+            "--config",
+            str(self.config_path),
+            "--library",
+            str(library),
+            "--workspace",
+            str(self.workspace),
+            "--run-id",
+            run_id,
+            *self.target_args,
+        ]
+        if dry_run:
+            argv += ["--dry-run", "--json"]
+        else:
+            argv += ["--workers", str(self.workers)]
+            # Only resume a run that exists: MolCascade raises RUN_NOT_FOUND otherwise, which is
+            # every batch's first attempt. The in-process driver had the same fault and it is the
+            # same one line -- worth saying twice, because "resume is always safe" is true of the
+            # committed-stage cache and false of the run record it is keyed on.
+            if self.screen.state(run_id) is not None:
+                argv += ["--resume"]
+        return argv
+
+    def __call__(self, batch_id: str, library: Path, device: str) -> ScreenResult:
+        import json
+        import os
+        import subprocess
+
+        environment = dict(os.environ)
+        environment.update(self.env or {})
+        # One visible card per batch. MolCascade's own --device names a lane within what it can see,
+        # and two batches naming cuda:0 of different physical cards is the confusion this avoids.
+        if device.startswith("cuda:"):
+            environment["CUDA_VISIBLE_DEVICES"] = device.split(":", 1)[1]
+
+        probe = subprocess.run(  # noqa: S603 -- argv built from validated campaign configuration
+            self._argv(self.reference_library, f"{batch_id}__identity", dry_run=True),
+            capture_output=True,
+            text=True,
+            env=environment,
+            timeout=self.timeout,
+        )
+        if probe.returncode != 0:
+            raise RevisionChanged(
+                f"the cascade would not compile for {batch_id}: {probe.stderr.strip()[-400:]}"
+            )
+        compiled = str(json.loads(probe.stdout).get("revision_id", ""))
+        if compiled != self.revision_id:
+            raise RevisionChanged(
+                f"{self.config_path} now compiles to {compiled[:12]}, but this campaign's batches "
+                f"were carved under {self.revision_id[:12]}. Screening {batch_id} would produce a "
+                "result not comparable with the others. Start a new campaign, or restore the "
+                "configuration."
+            )
+
+        done = subprocess.run(  # noqa: S603 -- same argv, with the batch's own library
+            self._argv(library, batch_id, dry_run=False),
+            capture_output=True,
+            text=True,
+            env=environment,
+            timeout=self.timeout,
+        )
+        result = self.screen.state(batch_id)
+        if result is None:
+            raise RuntimeError(
+                f"{batch_id}: molcascade exited {done.returncode} and left no run record. "
+                f"stderr: {done.stderr.strip()[-600:]}"
+            )
+        # The run record is the authority on the outcome, not the exit code: a batch whose every
+        # molecule was gated out exits non-zero and is a measurement, not a failure.
+        return replace(result, revision_id=self.revision_id)
+
+
+__all__ = ["MolCascadeProcessScreening", "MolCascadeScreening", "RevisionChanged"]

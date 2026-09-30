@@ -9,7 +9,7 @@ a sweep selects nothing: every molecule in the pool is screened.
 """
 
 from etalon.campaign.calibrate import Calibration, PanelMember, Separation, TierVerdict, calibrate
-from etalon.campaign.drivers import MolCascadeScreening, RevisionChanged
+from etalon.campaign.drivers import MolCascadeProcessScreening, MolCascadeScreening, RevisionChanged
 from etalon.campaign.expensive import PrismStage
 from etalon.campaign.generation import (
     ChunkResult,
@@ -53,6 +53,7 @@ __all__ = [
     "Generator",
     "Ingest",
     "Ledger",
+    "MolCascadeProcessScreening",
     "MolCascadeScreening",
     "Panel",
     "PanelMember",
