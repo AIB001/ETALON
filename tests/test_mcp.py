@@ -771,3 +771,63 @@ def test_every_workflow_document_is_carried_into_the_wheel() -> None:
         # The source has to exist, or the wheel ships a mapping to nothing.
         assert (root / source).is_file(), f"{source} is force-included but absent"
         assert _skill_path(slug).is_file(), slug
+
+
+def _sweep_tools() -> dict[str, object]:
+    from etalon.mcp import sweep
+
+    collector = Collector()
+    sweep.register(collector)
+    return collector.tools
+
+
+def test_a_drained_pool_is_a_phase_not_a_generation_shortage() -> None:
+    """With generation stopped the pool is fixed, and the only question is how long to screen it.
+
+    The concurrent model answered that question with null, because ``min(0, screening)`` is zero,
+    and advised moving cards back to generation. Measured on ALK2: generation was deliberately
+    retired with the pool fully carved into batches, and the plan declined to say how long the
+    remaining batches would take while recommending the campaign undo the decision it had just made.
+    """
+
+    plan = json.loads(
+        _sweep_tools()["etalon_campaign_plan"](
+            pool_size=220_000,
+            batch_size=20_000,
+            screen_devices=8,
+            generation_devices=0,
+            batches_per_device=2,
+            minutes_per_batch=261.0,
+        )
+    )
+    assert plan["ok"] is True
+    assert plan["binding_constraint"] == "screening"
+    assert plan["capacity_ratio"] is None
+    # 8 cards x 2 batches x 20,000 / 261 min = 73,563 an hour; 220,000 of them is three hours.
+    assert plan["unique_molecules_per_hour"]["screening"] == 73_563
+    assert plan["hours_to_screen_pool"] == 3.0
+    assert any("pool is fixed" in line for line in plan["advice"])
+    assert not any("Move" in line for line in plan["advice"])
+
+
+def test_screening_capacity_counts_batches_not_cards() -> None:
+    """``batches_per_device`` doubles throughput without asking for cards that do not exist."""
+
+    tools = _sweep_tools()
+    one = json.loads(
+        tools["etalon_campaign_plan"](pool_size=0, screen_devices=8, generation_devices=0)
+    )
+    two = json.loads(
+        tools["etalon_campaign_plan"](
+            pool_size=0, screen_devices=8, generation_devices=0, batches_per_device=2
+        )
+    )
+    # Within one, because the payload rounds and round(2x) is not always 2 * round(x).
+    assert (
+        abs(
+            two["unique_molecules_per_hour"]["screening"]
+            - 2 * one["unique_molecules_per_hour"]["screening"]
+        )
+        <= 1
+    )
+    assert two["batches_per_device"] == 2

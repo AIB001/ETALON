@@ -569,9 +569,24 @@ def register(mcp: Any) -> None:
         # could only describe one-per-card refused to size the configuration the campaign
         # was actually running.
         consumed = screen_devices * batches_per_device * per_screen_device
-        binding = "generation" if produced < consumed else "screening"
-        ratio = (consumed / produced) if produced else float("inf")
-        hours = (pool_size / min(produced, consumed)) if pool_size and min(produced, consumed) else None
+        # Generation stopped is a phase, not a shortage. A sweep that has finished generating and is
+        # draining a fixed pool has one question -- how long to screen it -- and the concurrent model
+        # answered it with null, because min(0, screening) is zero. Measured on ALK2: generation was
+        # deliberately retired with the pool fully carved, and the plan advised moving four cards
+        # back to generation and declined to say how long the remaining batches would take.
+        draining = generation_devices == 0
+        if draining:
+            binding = "screening"
+            ratio = None
+            hours = (pool_size / consumed) if pool_size and consumed else None
+        else:
+            binding = "generation" if produced < consumed else "screening"
+            ratio = (consumed / produced) if produced else float("inf")
+            hours = (
+                (pool_size / min(produced, consumed))
+                if pool_size and min(produced, consumed)
+                else None
+            )
 
         # The balance point, closed form: generation and screening match when
         # g * r_gen == s * r_screen with g + s fixed, so g = total * r_screen / (r_gen + r_screen).
@@ -596,7 +611,14 @@ def register(mcp: Any) -> None:
             }
 
         advice = []
-        if binding == "generation" and ratio > 1.5:
+        if draining:
+            advice.append(
+                f"Generation is stopped, so the pool is fixed at {pool_size:,} molecules and "
+                f"hours_to_screen_pool is the whole answer. Nothing here argues for restarting "
+                "generation; a pool already carved into batches gains nothing from more molecules "
+                "queued behind them."
+            )
+        elif binding == "generation" and ratio > 1.5:
             # The move comes from `recommended_split` rather than from a second calculation here. The
             # earlier one asked how many screeners the *current* generation rate does not need, which
             # ignores that a moved card then generates: on the 5-generation/6-screening campaign it
