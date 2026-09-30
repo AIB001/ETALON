@@ -524,7 +524,18 @@ class Screen:
         # 43, not 33 -- and a run with a stage in flight is *at* that stage. Counting successes and
         # adding one reported stage 44 of 43 for a completed run, which is the kind of off-by-one a
         # progress readout must not have: it is read while deciding whether to intervene.
-        reached = sum(1 for stage in result.stages if stage.status in ("SUCCEEDED", "FAILED"))
+        #
+        # ``CACHED`` belongs in that set and was missing from it. A stage whose work was already
+        # committed under the same cache key is as reached as one that recomputed -- more so, in the
+        # sense that the campaign already has its artifact. Measured on ALK2: five batches resumed
+        # after an out-of-memory failure came back with eighteen stages CACHED, and this reported
+        # them as stage 8 of 41 while every one of them was actually running stage 26. Ten minutes
+        # later it still said 8, and a reader comparing two readings would have concluded the batches
+        # were wedged -- which is precisely the judgement this method exists to inform, and the
+        # opposite of the truth.
+        reached = sum(
+            1 for stage in result.stages if stage.status in ("SUCCEEDED", "FAILED", "CACHED")
+        )
         return {
             "run_id": run_id,
             "exists": True,

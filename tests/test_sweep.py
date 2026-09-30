@@ -1467,3 +1467,42 @@ def test_the_identity_probe_compiles_the_reference_library(tmp_path) -> None:
     probe = driver._argv(driver.reference_library, "batch_0001__identity", dry_run=True)
     assert str(tmp_path / "panel.csv") in probe
     assert "--dry-run" in probe and "--json" in probe
+
+
+def test_progress_counts_a_cached_stage_as_reached(tmp_path) -> None:
+    """A resumed batch must not read as wedged at the first stage it recomputed.
+
+    ``CACHED`` is as terminal as ``SUCCEEDED`` -- more so, in the sense that the campaign already
+    holds the artifact. Measured on ALK2: five batches resumed after an out-of-memory failure came
+    back with eighteen stages CACHED, and ``progress`` called them stage 8 of 41 while every one was
+    running stage 26. Two readings ten minutes apart both said 8, which is what an operator reads
+    when deciding whether to intervene -- and the opposite of the truth.
+    """
+
+    from etalon.boundary.screen import Screen
+
+    result = ScreenResult(
+        run_id="batch_0001",
+        revision_id="rev-1",
+        status="RUNNING",
+        stages=(
+            stage("library", "SUCCEEDED", artifact="a"),
+            *(stage(f"cheap_{i}", "CACHED", artifact=f"c{i}") for i in range(18)),
+            stage("admet", "SUCCEEDED", artifact="b"),
+            stage("conformers", "RUNNING"),
+            stage("docking", "PENDING"),
+        ),
+    )
+
+    class OneRun(Screen):
+        def __init__(self) -> None:  # noqa: D107 -- no workspace is touched
+            pass
+
+        def state(self, run_id: str):  # noqa: ARG002
+            return result
+
+    reading = OneRun().progress("batch_0001")
+    # 1 library + 18 cached + 1 admet, and the one in flight.
+    assert reading["stage"] == 21
+    assert reading["stages"] == 22
+    assert reading["current"] == "conformers"
