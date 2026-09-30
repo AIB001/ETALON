@@ -54,6 +54,28 @@ A related non-signal: a *single* GPU-utilisation sample of 0% during a multi-min
 One engine re-initialises its model per shard, so instantaneous samples land in the gaps; counting
 initialisations in the log is a better progress proxy than utilisation.
 
+**And the inverse, which looks much more alarming than it is: a batch reported at the docking stage
+may leave its GPU at 0% for ten minutes or more.** The stage has a long CPU prologue — every surviving
+molecule is written to PDBQT before the engine is invoked once. Measured on ALK2: five batches all at
+`docking_score`, four of their cards at 0% and 0 MiB for ten minutes while the fifth held 78.8 GB at
+99%. Nothing was wrong; the four were still preparing ligands, at about 1.2 cores each.
+
+Before concluding that batches are serialising on one card, check that each screen really holds a
+distinct device — that is the failure this resembles, and it is one `ps` away:
+
+```
+for p in $(pgrep -f 'molcascade screen'); do
+  tr '\0' '\n' < /proc/$p/environ | grep ^CUDA_VISIBLE_DEVICES=
+done
+```
+
+Eight distinct values means eight cards, and the idle ones are working.
+
+Two stages have long CPU prologues on a 20,000-molecule batch and are the usual cause of a long quiet
+spell: `ligand_conformers` (measured: 10–30 minutes, single-threaded per batch, and `--workers` does
+not shard it because MolCascade's shard count follows the visible GPU lanes — one per batch here) and
+the PDBQT preparation inside `docking_score`. Neither is stuck.
+
 ## False alarm 3: load average is not your load
 
 Before lowering any worker's CPU share, attribute the load:
