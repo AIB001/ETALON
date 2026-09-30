@@ -1538,3 +1538,56 @@ def test_the_device_goes_in_the_argv_not_the_environment(tmp_path) -> None:
     assert "--device" not in driver._argv(
         driver.reference_library, "batch_0004__identity", dry_run=True
     )
+
+
+def test_one_batch_per_device_unless_told_otherwise(tmp_path, keyed) -> None:
+    """The default rations devices; ``batches_per_device`` says when that is the wrong resource.
+
+    Measured on ALK2: the docking tier's wall clock went to PoseBusters in Python rather than to the
+    engine, so eight batches on eight cards held 1.3 cores each of a 96-core machine and 25 GB of
+    each 96 GB card. One per device was rationing the resource that was spare.
+    """
+
+    from etalon.campaign.supervisor import Supervisor
+
+    supervisor, sweep, _ = _campaign(tmp_path, keyed)
+    devices = ("cuda:5", "cuda:6")
+
+    def build(per_device: int) -> Supervisor:
+        return Supervisor(
+            sweep,
+            revision_id="rev-1",
+            workspace=tmp_path / f"ws{per_device}",
+            screen_devices=devices,
+            batches_per_device=per_device,
+        )
+
+    assert build(1)._free_slots() == ["cuda:5", "cuda:6"]
+    assert build(3)._free_slots() == ["cuda:5"] * 3 + ["cuda:6"] * 3
+    assert build(2).state()["batches_per_device"] == 2
+    with pytest.raises(ValueError, match="at least 1"):
+        build(0)
+
+
+def test_a_device_with_a_batch_on_it_offers_one_fewer_slot(tmp_path, keyed) -> None:
+    """Occupancy is counted per device, not treated as a boolean."""
+
+    from etalon.campaign.supervisor import Supervisor, _Job
+
+    supervisor, sweep, _ = _campaign(tmp_path, keyed)
+    two = Supervisor(
+        sweep,
+        revision_id="rev-1",
+        workspace=tmp_path / "ws2",
+        screen_devices=("cuda:5", "cuda:6"),
+        batches_per_device=2,
+    )
+
+    class Forever:
+        def poll(self):
+            return None
+
+    two.jobs.append(_Job(kind="screen", name="b1", device="cuda:5", process=Forever(), started=0.0))
+    assert two._free_slots() == ["cuda:5", "cuda:6", "cuda:6"]
+    two.jobs.append(_Job(kind="screen", name="b2", device="cuda:5", process=Forever(), started=0.0))
+    assert two._free_slots() == ["cuda:6", "cuda:6"]

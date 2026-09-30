@@ -131,8 +131,15 @@ class Supervisor:
         workspace: Where batch libraries are written.
         generators: The loops filling the pool. Empty is legitimate -- a campaign screening a library
             it already has needs no generation.
-        screen_devices: Devices available for screening. One batch per device at a time. Grows when
-            ``migrate_retired_devices`` is set and a generator's card falls idle.
+        screen_devices: Devices available for screening. Grows when ``migrate_retired_devices`` is
+            set and a generator's card falls idle.
+        batches_per_device: Batches allowed on one device at once. One by default, which is right
+            when the screen is GPU-bound. Raise it when it is not: measured on ALK2, the docking
+            tier's wall clock went to PoseBusters in Python rather than to the engine, so eight
+            batches on eight cards held 1.3 cores each of a 96-core machine and 25 GB of each
+            96 GB card, and the one-per-device limit was rationing the resource that was spare.
+            Bound it by memory: ``batches_per_device * <engine's footprint>`` must fit a card,
+            and Uni-Dock's footprint measured 22-26 GB.
         generation: Runs one chunk. Injected; see :data:`GenerationDriver`.
         screen: Screens one batch. Injected; see :data:`ScreenDriver`.
         retire: Given a generator's tag, whether to stop it. Injected because the decision is
@@ -158,6 +165,7 @@ class Supervisor:
         screen: ScreenDriver | None = None,
         retire: Callable[[str], bool] | None = None,
         migrate_retired_devices: bool = False,
+        batches_per_device: int = 1,
     ) -> None:
         if not revision_id.strip():
             raise ValueError("a supervisor needs the compiled revision its batches belong to")
@@ -174,6 +182,9 @@ class Supervisor:
         self.screen = screen
         self.retire = retire or (lambda _tag: False)
         self.migrate_retired_devices = bool(migrate_retired_devices)
+        if int(batches_per_device) < 1:
+            raise ValueError("batches_per_device must be at least 1")
+        self.batches_per_device = int(batches_per_device)
         self._noted_idle: set[str] = set()
         self.jobs: list[_Job] = []
         self.barren: dict[str, int] = {}
@@ -358,11 +369,29 @@ class Supervisor:
     def _busy_devices(self) -> set[str]:
         return {job.device for job in self.jobs if job.kind == "screen"}
 
+    def _free_slots(self) -> list[str]:
+        """Screening slots available now, a device repeated once per free slot on it.
+
+        One batch per device is the right default and was the only option until a measurement
+        contradicted the assumption under it. On ALK2 the docking tier turned out to be CPU-bound --
+        Uni-Dock runs in bursts and the wall clock goes to pose validation in Python -- so eight
+        batches on eight cards held 1.3 cores each of a 96-core machine and 25 GB of each 96 GB
+        card. The limit being enforced was the one resource that was not scarce.
+        """
+
+        from collections import Counter
+
+        busy = Counter(job.device for job in self.jobs if job.kind == "screen")
+        slots: list[str] = []
+        for device in self.screen_devices:
+            slots.extend([device] * max(0, self.batches_per_device - busy[device]))
+        return slots
+
     def _start_screens(self, notes: list[str]) -> tuple[str, ...]:
         if self.screen is None:
             return ()
         started: list[str] = []
-        free = [d for d in self.screen_devices if d not in self._busy_devices()]
+        free = self._free_slots()
         for device in free:
             pending = self.sweep.pending()
             if not pending:
@@ -499,6 +528,7 @@ class Supervisor:
             # moved from generation to screening, not infer it from a note that scrolled past.
             "screen_devices": list(self.screen_devices),
             "migrate_retired_devices": self.migrate_retired_devices,
+            "batches_per_device": self.batches_per_device,
             "running": [
                 {
                     "kind": job.kind,
