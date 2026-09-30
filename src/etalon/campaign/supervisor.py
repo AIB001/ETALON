@@ -232,7 +232,17 @@ class Supervisor:
         # finished" branch would be the same query answered twice, and the two would eventually
         # disagree about a batch whose screen outlived the process that launched it -- which is the
         # exact case recovery exists for.
-        recovered = self.sweep.recover()
+        try:
+            recovered = self.sweep.recover()
+        except Exception as error:  # noqa: BLE001 -- one batch must not end the campaign
+            # A supervisor exists so that a 44-hour campaign survives things going wrong in it. One
+            # batch that cannot be recorded is a thing going wrong in it. Measured on ALK2: a
+            # revision check inside ``recover`` raised on a single batch, the exception left
+            # ``tick``, and the process driving 470,651 molecules through 23 batches exited --
+            # leaving every GPU idle until somebody looked. Loud and fatal is not better than
+            # silent; the note is the loud part, and continuing is the supervisor's whole job.
+            recovered = ()
+            notes.append(f"recovery raised and was contained: {error!r}")
         emitted = self._emit()
         migrated = self._migrate(notes)
         started_screens = self._start_screens(notes)

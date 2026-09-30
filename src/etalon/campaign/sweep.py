@@ -362,26 +362,41 @@ class Sweep:
                 f"{batch_id} is already recorded as {recorded.outcome!r}. An outcome is append-only; "
                 "screen a new batch rather than overwriting a measurement."
             )
-        if recorded.revision_id and result.revision_id != recorded.revision_id:
-            raise SweepError(
-                f"{batch_id} was emitted for revision {recorded.revision_id[:12]} but was screened "
-                f"with {result.revision_id[:12]}. The configuration changed after the batch was "
-                "carved, so this result is not comparable with the campaign's other batches."
-            )
+        # The batch keeps the revision it was emitted under, and a differing run digest is
+        # provenance rather than a violation.
+        #
+        # This used to raise on any difference, and the difference is unavoidable: a compiled
+        # revision covers the library as well as the funnel, so a run's own digest is a function of
+        # which molecules were in it. Measured on ALK2, five batches of one campaign compiled to
+        # five digests from one unchanged config file, and this check refused all five -- from
+        # inside ``recover``, so the exception left the supervisor's tick and killed the process
+        # that was driving the campaign.
+        #
+        # The guard it was trying to be is still in place and is the only one that can actually be
+        # performed: a screen driver compiles the current config against a fixed reference library
+        # before every batch and refuses to run one whose funnel is not the campaign's. A
+        # configuration changed mid-campaign therefore never produces a result for this method to
+        # judge. What ``revision_id`` means in the ledger -- and what ``comparable`` reads -- is the
+        # funnel, which is the question a campaign asks of it.
+        revision = recorded.revision_id or result.revision_id
         at = _now()
         with closing(self._connect()) as db:
             db.execute("BEGIN IMMEDIATE")
             db.execute(
                 "UPDATE batch SET run_id = ?, revision_id = ?, outcome = ?, recorded_at = ? "
                 "WHERE batch_id = ?",
-                (result.run_id, result.revision_id, result.outcome, at, batch_id),
+                (result.run_id, revision, result.outcome, at, batch_id),
             )
             db.execute("COMMIT")
         self.ledger.append(
             "batch",
             batch_id,
             run_id=result.run_id,
-            revision_id=result.revision_id,
+            revision_id=revision,
+            # The run's own digest, which covers the library as well as the funnel. Kept beside the
+            # funnel revision rather than in place of it: one identifies the screen, the other
+            # identifies this batch's molecules going through it.
+            run_revision_id=result.revision_id,
             outcome=result.outcome,
             size=recorded.size,
             exhausted_at=None if result.exhaustion is None else result.exhaustion.stage_id,

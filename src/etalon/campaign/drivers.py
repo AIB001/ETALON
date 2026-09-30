@@ -132,6 +132,13 @@ class MolCascadeProcessScreening:
         executable: argv prefix for the CLI. A list so a wrapper that activates an environment can
             be put in front of it.
         env: Extra environment for the child. ``CUDA_VISIBLE_DEVICES`` is set from ``device``.
+        workers: Shards run at once *within* one batch. This is CPU parallelism for the cheap tiers
+            and **GPU concurrency for the docking ones**, and the second is the one that bites: each
+            batch sees exactly one card here, and each Uni-Dock shard allocates on the order of
+            25 GB. Measured on ALK2, twelve shards against one 96 GB card gave
+            ``cudaErrorMemoryAllocation`` at ``monte_carlo.cu:2490``, and the pose-strain stage then
+            failed downstream with "shard N was given no files for side input 'poses'" -- a
+            consequence, not a second fault. Keep ``workers * 25 GB`` inside one card's memory.
     """
 
     screen: Screen

@@ -7,6 +7,7 @@ standard for this file: a test whose failure mode was never observed is a test o
 from __future__ import annotations
 
 import os
+from types import SimpleNamespace
 from dataclasses import replace
 from pathlib import Path
 
@@ -573,16 +574,60 @@ def test_an_outcome_is_append_only(sweep: Sweep) -> None:
         sweep.record("batch_0001", done)
 
 
-def test_recording_under_a_different_revision_is_refused(sweep: Sweep) -> None:
-    # The provenance hole 56 hand-recorded batches had.
+def test_a_batch_keeps_the_revision_it_was_emitted_under(sweep: Sweep) -> None:
+    """The ledger's ``revision_id`` is the funnel, and a differing run digest is provenance.
+
+    This used to raise on any difference, guarding the provenance hole 56 hand-recorded batches
+    had. The guard was unusable where it stood: a compiled revision covers the library as well as
+    the funnel, so a run's own digest is a function of which molecules were in it, and five batches
+    of one ALK2 campaign compiled to five digests from one unchanged config file. The check refused
+    all five -- from inside ``recover``, so the exception left the supervisor's tick and killed the
+    process driving the campaign.
+
+    The guard did not go away; it moved to the only place it can be performed. A screen driver
+    compiles the current config against a fixed reference library before every batch and refuses to
+    run one whose funnel is not the campaign's, so a configuration changed mid-campaign never
+    produces a result for ``record`` to judge. See
+    ``test_a_drifted_configuration_is_refused_before_the_batch_runs``.
+    """
+
     sweep.admit([(f"K{i}", "C", "f") for i in range(5)])
     sweep.emit(revision_id="rev-1")
     sweep.claim("batch_0001", by="gpu5")
-    with pytest.raises(SweepError, match="not comparable"):
-        sweep.record(
-            "batch_0001",
-            ScreenResult("batch_0001", "rev-EDITED", "SUCCEEDED", (stage("s", "SUCCEEDED", artifact="a"),)),
-        )
+    recorded = sweep.record(
+        "batch_0001",
+        ScreenResult(
+            "batch_0001", "rev-per-library", "SUCCEEDED", (stage("s", "SUCCEEDED", artifact="a"),)
+        ),
+    )
+    # The funnel, not the funnel-and-these-molecules digest -- which is what `comparable` reads.
+    assert recorded.revision_id == "rev-1"
+    assert sweep.state()["comparable"] is True
+
+
+def test_a_drifted_configuration_is_refused_before_the_batch_runs(tmp_path) -> None:
+    """Where the revision guard lives now: in front of the screen, not behind it."""
+
+    from etalon.campaign.drivers import MolCascadeScreening, RevisionChanged
+
+    class Compiles:
+        def __init__(self, revision: str) -> None:
+            self.revision = revision
+
+        def plan(self, config_path, library=None, *, target=None):  # noqa: ANN001, ARG002
+            return SimpleNamespace(revision_id=self.revision)
+
+        def state(self, run_id: str):  # noqa: ARG002
+            return None
+
+    driver = MolCascadeScreening(
+        screen=Compiles("rev-EDITED"),
+        config_path=tmp_path / "c.json",
+        revision_id="rev-1",
+        reference_library=tmp_path / "panel.csv",
+    )
+    with pytest.raises(RevisionChanged, match="not comparable"):
+        driver("batch_0001", tmp_path / "b.csv", "cuda:0")
 
 
 def test_an_exhausted_batch_is_recorded_as_a_measurement(sweep: Sweep) -> None:
