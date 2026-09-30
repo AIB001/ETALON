@@ -916,10 +916,20 @@ def _campaign(
     return supervisor, sweep, screen
 
 
-def _drain(supervisor, limit=40):
+def _drain(supervisor, seconds=30.0):
+    """Tick until the campaign completes, bounded by wall clock rather than by tick count.
+
+    The bound used to be 40 ticks of 50 ms, which is two seconds of *this* process's time and says
+    nothing about how long the worker threads it is waiting on need. Observed: the whole file
+    passing four runs in a row on an idle machine and this helper's caller failing once while the
+    host sat at load 232 -- a false failure that says the machine was busy, not that a supervisor
+    stopped working.
+    """
+
     import time
 
-    for _ in range(limit):
+    deadline = time.monotonic() + seconds
+    while time.monotonic() < deadline:
         supervisor.tick()
         if supervisor.complete():
             return True
