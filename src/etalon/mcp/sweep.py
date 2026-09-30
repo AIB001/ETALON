@@ -493,6 +493,7 @@ def register(mcp: Any) -> None:
         generation_devices: int = 5,
         minutes_per_batch: float = 95.0,
         unique_per_generator_hour: float = 4100.0,
+        batches_per_device: int = 1,
         detect: bool = False,
     ) -> str:
         """FREE. Size a sweep's generation and screening against each other, before starting one.
@@ -530,6 +531,8 @@ def register(mcp: Any) -> None:
 
         if batch_size < 1 or screen_devices < 1 or generation_devices < 0:
             raise ValueError("batch_size and screen_devices must be positive")
+        if batches_per_device < 1:
+            raise ValueError("batches_per_device must be at least 1")
         if minutes_per_batch <= 0 or unique_per_generator_hour <= 0:
             raise ValueError("rates must be positive")
 
@@ -560,7 +563,12 @@ def register(mcp: Any) -> None:
 
         per_screen_device = (60.0 / minutes_per_batch) * batch_size
         produced = generation_devices * unique_per_generator_hour
-        consumed = screen_devices * per_screen_device
+        # Screening throughput scales with concurrent batches, not with cards. Supervisor
+        # takes batches_per_device for the case a measurement made real on ALK2: the
+        # docking tier was CPU-bound, so eight cards each ran two batches and the plan that
+        # could only describe one-per-card refused to size the configuration the campaign
+        # was actually running.
+        consumed = screen_devices * batches_per_device * per_screen_device
         binding = "generation" if produced < consumed else "screening"
         ratio = (consumed / produced) if produced else float("inf")
         hours = (pool_size / min(produced, consumed)) if pool_size and min(produced, consumed) else None
@@ -617,6 +625,7 @@ def register(mcp: Any) -> None:
         return ok(
             unique_molecules_per_hour={"generation": round(produced), "screening": round(consumed)},
             binding_constraint=binding,
+            batches_per_device=batches_per_device,
             capacity_ratio=round(ratio, 2) if produced else None,
             hours_to_screen_pool=None if hours is None else round(hours, 1),
             recommended_split=split,

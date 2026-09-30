@@ -916,6 +916,25 @@ def _campaign(
     return supervisor, sweep, screen
 
 
+def _settle(supervisor, seconds=15.0):
+    """Wait for every in-flight job to finish, then reap it with one tick.
+
+    The alternative -- tick, sleep a fixed 50 ms, tick -- assumes a generation thread completes in
+    50 ms. Observed: this file passing three runs in a row alone and failing once when run beside
+    tests/test_mcp.py, which starts servers and takes the CPU away. A test that depends on how busy
+    the machine is reports the machine, not the supervisor.
+    """
+
+    import time
+
+    deadline = time.monotonic() + seconds
+    while any(job.process.poll() is None for job in supervisor.jobs):
+        if time.monotonic() >= deadline:
+            break
+        time.sleep(0.01)
+    supervisor.tick()
+
+
 def _drain(supervisor, seconds=30.0):
     """Tick until the campaign completes, bounded by wall clock rather than by tick count.
 
@@ -1070,8 +1089,7 @@ def test_consecutive_barren_chunks_stop_a_loop_but_one_does_not(tmp_path, keyed)
 
     for index in range(BARREN_LIMIT):
         supervisor.tick()
-        time.sleep(0.05)
-        supervisor.tick()
+        _settle(supervisor)
         if index < BARREN_LIMIT - 1:
             assert "empty" not in supervisor.stopped, f"stopped after {index + 1} barren chunks"
     for _ in range(3):
