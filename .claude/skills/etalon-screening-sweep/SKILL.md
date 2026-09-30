@@ -138,6 +138,22 @@ and **neither records the device it was measured on**, so detection cannot tell 
 The result says which of its numbers are yours and which are borrowed, in `basis`. Re-measure them on
 your own cascade and target before trusting a split computed from them.
 
+**And the plan counts devices, while the docking tier is CPU-bound.** The tier does not only run an
+engine: PoseBusters checks every pose it produces, in Python, row by row, holding the GIL. Measured on
+ALK2 — eight batches all at `docking_score`, every card at 0% across a three-sample peak, the campaign
+holding 6.2 cores of a 96-core machine, and `py-spy` showing the main thread in
+`posebusters/modules/distance_geometry.py` under `pandas.apply`. Adding a ninth GPU to that would have
+bought nothing.
+
+Do not answer it by turning pose checking off. On one measured shard, 278 poses that all passed the
+score gate had **22.7% passing the minimum-distance-to-protein check**, and the score cannot see the
+difference: its correlation with the closest protein contact is +0.014, and a pose that passes every
+check has a median score of 44.4 against 44.5 for one that fails. The check is the only thing standing
+between the shortlist and ligands packed into the receptor.
+
+So when a sweep is slower than the plan says, measure which resource is actually scarce before moving
+any. `etalon_campaign_plan` is arithmetic over device counts and cannot tell you this one.
+
 ### 1. Calibrate, before anything else
 
 Screen a panel of known binders **and declared negative controls** through the exact cascade you
