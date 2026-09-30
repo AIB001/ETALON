@@ -152,7 +152,9 @@ class MolCascadeProcessScreening:
     env: dict[str, str] | None = None
     timeout: float | None = None
 
-    def _argv(self, library: Path, run_id: str, *, dry_run: bool) -> list[str]:
+    def _argv(
+        self, library: Path, run_id: str, *, dry_run: bool, device: str = ""
+    ) -> list[str]:
         argv = [
             *self.executable,
             "screen",
@@ -170,6 +172,8 @@ class MolCascadeProcessScreening:
             argv += ["--dry-run", "--json"]
         else:
             argv += ["--workers", str(self.workers)]
+            if device:
+                argv += ["--device", device]
             # Only resume a run that exists: MolCascade raises RUN_NOT_FOUND otherwise, which is
             # every batch's first attempt. The in-process driver had the same fault and it is the
             # same one line -- worth saying twice, because "resume is always safe" is true of the
@@ -185,10 +189,21 @@ class MolCascadeProcessScreening:
 
         environment = dict(os.environ)
         environment.update(self.env or {})
-        # One visible card per batch. MolCascade's own --device names a lane within what it can see,
-        # and two batches naming cuda:0 of different physical cards is the confusion this avoids.
-        if device.startswith("cuda:"):
-            environment["CUDA_VISIBLE_DEVICES"] = device.split(":", 1)[1]
+        # Deliberately NOT setting CUDA_VISIBLE_DEVICES: the device goes to MolCascade as --device,
+        # because CUDA_VISIBLE_DEVICES does not compose and setting it here defeats the isolation it
+        # looks like it provides.
+        #
+        # MolCascade pins each shard with ``os.environ["CUDA_VISIBLE_DEVICES"] = device[5:]``
+        # (parallel/shards.py), and that value is absolute -- it indexes the machine's devices, not
+        # the subset its own process can see. So a child launched under CUDA_VISIBLE_DEVICES=3 sees
+        # one card, names it cuda:0, and pins its shards to "0" -- physical card zero.
+        #
+        # Measured on ALK2: eight batches, eight distinct CUDA_VISIBLE_DEVICES values in the eight
+        # screen processes, and every one of their Uni-Dock children on the same physical GPU --
+        # six engines and 63 GB on card 0 while seven cards sat at 0%. It also re-explains an
+        # earlier out-of-memory failure that looked like too many shards per card: with twelve
+        # workers per batch, all of them were on card zero.
+        environment.pop("CUDA_VISIBLE_DEVICES", None)
 
         probe = subprocess.run(  # noqa: S603 -- argv built from validated campaign configuration
             self._argv(self.reference_library, f"{batch_id}__identity", dry_run=True),
@@ -211,7 +226,7 @@ class MolCascadeProcessScreening:
             )
 
         done = subprocess.run(  # noqa: S603 -- same argv, with the batch's own library
-            self._argv(library, batch_id, dry_run=False),
+            self._argv(library, batch_id, dry_run=False, device=device),
             capture_output=True,
             text=True,
             env=environment,

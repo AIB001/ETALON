@@ -1506,3 +1506,35 @@ def test_progress_counts_a_cached_stage_as_reached(tmp_path) -> None:
     assert reading["stage"] == 21
     assert reading["stages"] == 22
     assert reading["current"] == "conformers"
+
+
+def test_the_device_goes_in_the_argv_not_the_environment(tmp_path) -> None:
+    """CUDA_VISIBLE_DEVICES does not compose, so setting it here would defeat itself.
+
+    MolCascade pins each shard with ``os.environ["CUDA_VISIBLE_DEVICES"] = device[5:]``, and that
+    value indexes the machine's devices rather than the subset the process can see. A screen
+    launched under ``CUDA_VISIBLE_DEVICES=3`` sees one card, names it ``cuda:0``, and pins its
+    shards to "0" -- physical card zero. Measured on ALK2: eight screens with eight distinct values,
+    and every Uni-Dock child on the same physical GPU, 63 GB on card 0 while seven cards idled.
+    """
+
+    from etalon.campaign.drivers import MolCascadeProcessScreening
+
+    class NoRuns:
+        def state(self, run_id: str):  # noqa: ARG002
+            return None
+
+    driver = MolCascadeProcessScreening(
+        screen=NoRuns(),
+        config_path=tmp_path / "c.json",
+        workspace=tmp_path / "ws",
+        revision_id="rev-1",
+        target_args=(),
+        reference_library=tmp_path / "panel.csv",
+    )
+    argv = driver._argv(tmp_path / "b.csv", "batch_0004", dry_run=False, device="cuda:3")
+    assert argv[argv.index("--device") + 1] == "cuda:3"
+    # The identity probe compiles and stops; it reaches no engine and names no card.
+    assert "--device" not in driver._argv(
+        driver.reference_library, "batch_0004__identity", dry_run=True
+    )
