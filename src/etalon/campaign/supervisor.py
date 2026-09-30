@@ -222,7 +222,9 @@ class Supervisor:
         """
 
         notes: list[str] = []
-        finished = self._reap()
+        finished, failures = self._reap()
+        # Straight into notes: a failure that only a counter records reads as nothing happening.
+        notes.extend(failures)
         ingested, admitted, duplicates = self._ingest_chunks()
         # Recovery is also how a finished batch gets recorded, and there is deliberately no second
         # path for the ordinary case. Sweep.recover already asks the run record of every claimed
@@ -293,19 +295,32 @@ class Supervisor:
 
     # -- the pass, in pieces ------------------------------------------------
 
-    def _reap(self) -> tuple[dict[str, Any], ...]:
-        """Collect finished subprocesses. Never waits."""
+    def _reap(self) -> tuple[tuple[dict[str, Any], ...], tuple[str, ...]]:
+        """Collect finished subprocesses, and say which ones raised. Never waits.
+
+        A screen that raises used to be reaped in silence: this dropped the job and reported only
+        finished *generation*, so the error ``_Call`` had carefully carried to the poller was read
+        by nobody. Measured on ALK2: every batch failed on its first line, the supervisor ticked on
+        for fourteen hours, and the campaign filled a 470,651-molecule pool that nothing ever
+        screened. A failing screen and an idle one are the same picture -- batches claimed, GPUs
+        quiet -- so the failure has to be said out loud or it cannot be told from a slow start.
+        """
 
         finished: list[dict[str, Any]] = []
+        failures: list[str] = []
         still_running: list[_Job] = []
         for job in self.jobs:
-            if job.process.poll() is None:
+            status = job.process.poll()
+            if status is None:
                 still_running.append(job)
                 continue
             if job.kind == "generation":
                 finished.append({"tag": job.name, "seconds": round(time.monotonic() - job.started, 1)})
+            error = getattr(job.process, "error", None)
+            if error is not None:
+                failures.append(f"{job.kind} {job.name} on {job.device} failed: {error!r}")
         self.jobs = still_running
-        return tuple(finished)
+        return tuple(finished), tuple(failures)
 
     def _ingest_chunks(self) -> tuple[int, int, int]:
         if self._ingest is None:
