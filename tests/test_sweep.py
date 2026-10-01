@@ -1676,3 +1676,42 @@ def test_a_score_that_orders_neither_class_is_not_informative() -> None:
     )
     row = enrichment(scores, panel, {"e": _POPULATION})[0]
     assert row.informative is False
+
+
+def test_a_pose_quality_tier_is_not_offered_as_droppable() -> None:
+    """"Widen it or drop the tier" is wrong advice for a check on the coordinates.
+
+    A known active failing `t9_redock` has not been shown to be a poor binder; it has been shown
+    that the docking placed it badly, and every number computed from those coordinates inherits
+    that. Measured on ALK2, this exact wording is what the campaign cited when it disabled the
+    redock tier after one known active redocked at 5.834 A -- trading a pose-reproducibility check
+    for a molecule whose pose was, by that very measurement, not reproducible.
+    """
+
+    structural = Calibration(
+        revision_id="rev-1",
+        run_id="panel",
+        outcome="committed",
+        panel_size=len(PANEL),
+        actives=sum(1 for m in PANEL if m.known_active),
+        registered=len(PANEL),
+        tiers=(TierVerdict("t9_redock", "redock", 8, 7, ("C-26-A2",), ()),),
+        finalize=(),
+        separation=(),
+    )
+    reason = " ".join(structural.refusals())
+    assert "do NOT drop it" in reason
+    assert "judges the pose, not the molecule" in reason
+
+    selective = Calibration(
+        revision_id="rev-1",
+        run_id="panel",
+        outcome="committed",
+        panel_size=len(PANEL),
+        actives=sum(1 for m in PANEL if m.known_active),
+        registered=len(PANEL),
+        tiers=(TierVerdict("t9_docking", "docking", 8, 7, ("C-26-A2",), ()),),
+        finalize=(),
+        separation=(),
+    )
+    assert "widen it or drop the tier" in " ".join(selective.refusals())

@@ -183,6 +183,57 @@ If it refuses, it names which known actives the gate deleted. **Widen that gate 
 panel.** Do not lower `required_recall` to get past it: the panel is the only evidence the threshold
 has, and a campaign that discards it has an unexamined assertion applied to every molecule.
 
+**Two exceptions, and they run opposite ways.**
+
+*Pose-quality tiers are not droppable.* `t9_redock` and `t10_docking_metrics` judge whether the
+pose is real, not whether the molecule is good, so a known active failing one of them says the
+docking placed that molecule badly -- and every number computed from those coordinates inherits the
+error. Measured: of 278 poses that all passed a score gate, 22.7% passed the
+minimum-distance-to-protein check, and the score's correlation with the closest protein contact is
++0.014, so filtering harder on the number removes none of them. The redock tier stays on, and its
+default 2.0 A is loose: on an ALK2 panel the co-crystal ligand redocked at 0.70 A and the two best
+actives at 0.699 and 1.035, then nothing until 2.008. A cut at **1.5 A** sits in that gap and costs
+the panel nothing. Tighten toward the reproducibility your own positive control shows, not away
+from it.
+
+*Do not widen a score gate to the weakest known active either.* That is the opposite failure and it
+is the one that produces a shortlist nobody can use -- see the next section.
+
+### 2b. Set the score cut as a share of the population, never as a score
+
+A docking score is not a binding free energy -- `docking_score/v1` says so in its own `not_affinity`
+invariant -- so "the weakest known binder scored -8.497, keep everything at -8.0 or better" is an
+argument that only works if the two quantities share a scale. They do not, and two campaigns
+measured it:
+
+| | SND1 (shallow PPI groove) | ALK2 (kinase ATP site) |
+|---|---|---|
+| best known binder | **-7.78** | -11.47 |
+| weakest known active | -5.90 (co-crystal) | **-8.497** |
+| gate set to | -8.0 | -8.0 |
+| where that sits | **above the whole panel** | **below the whole panel** |
+| kept, of molecules docked | **2 of 5,822** | **69%** |
+
+One number, a 2,000-fold difference in what it does, and nothing in the threshold says which case
+you are in. The sharper statement: **an absolute threshold is a percentile gate whose setting nobody
+measured.** Against the 274,097 molecules ALK2 actually screened, that -8.0 was "keep the best 81%".
+
+```
+etalon.campaign.calibrate.enrichment(scores, panel, population)   # where the panel sits
+etalon.campaign.calibrate.percentile_threshold(population, 0.01)  # the number a gate takes
+```
+
+Choose the share first -- 1% of a 540,000-molecule sweep is 5,400 molecules, a number a campaign can
+act on -- then read what it costs. `Enrichment.recall_at(keep)` says how much of the known chemistry
+that cut deletes, and `keep_for(1.0)` says what full recall would cost.
+
+Expect the answer to be uncomfortable, and report it rather than resolving it by moving the
+threshold. On ALK2 the eight known actives spread from the 1.7th percentile to the 81st, so recall
+at the best 1% is **0.000** and full recall costs keeping **81.3%** of the library. `informative`
+stays true -- the actives do sit better than the panel's hard negatives, median 23.7% against 82.7%
+-- so the score enriches without being able to support a shortlist. That is the same thing an empty
+`rankable_engines` was saying, in a form you can act on.
+
 Pass the returned `gate` object verbatim as `gate_json` to `etalon_sweep_emit`.
 
 ### 3. Fill the pool and carve batches

@@ -84,6 +84,19 @@ def _direction(row: Mapping[str, Any]) -> str:
         return declared
     return _DIRECTION_BY_KIND.get(str(row.get("score_kind") or "").strip().upper(), LOWER_STRONGER)
 
+#: Tiers whose criteria judge whether a *pose* is real rather than whether a *molecule* is good.
+#: A known active failing one of these has not been shown to be a poor binder -- it has been shown
+#: that the docking placed it badly, which is a fact about the run. They are therefore not droppable
+#: when they refuse: removing a pose-quality check to pass a calibration keeps the molecule and
+#: throws away the evidence that its coordinates are untrustworthy, and every number computed from
+#: those coordinates downstream inherits that.
+#:
+#: Measured on one KarmaDock shard: of 278 poses that all passed the score gate, 22.7% passed the
+#: minimum-distance-to-protein check, and the score could not see the difference -- its correlation
+#: with the closest protein contact is +0.014. The check is the only thing between a shortlist and
+#: ligands packed into the receptor.
+STRUCTURAL_TIERS = frozenset({"t9_redock", "t10_docking_metrics"})
+
 #: Fraction of the panel's known actives that must survive the funnel for the configuration to be
 #: admissible. One, and the default is not a round number chosen for neatness.
 #:
@@ -332,10 +345,19 @@ class Calibration:
             if tier.unavailable:
                 reasons.append(f"tier {tier.tier_id} could not be read: {tier.unavailable}")
             if tier.deletes_actives:
-                reasons.append(
-                    f"tier {tier.tier_id} deleted known actives "
-                    f"{list(tier.lost_actives)} -- widen it or drop the tier"
-                )
+                if tier.tier_id in STRUCTURAL_TIERS:
+                    reasons.append(
+                        f"tier {tier.tier_id} deleted known actives {list(tier.lost_actives)}. "
+                        "This tier judges the pose, not the molecule, so do NOT drop it: a known "
+                        "binder failing it says the docking placed that molecule badly, and every "
+                        "number computed from those coordinates inherits the error. Look at the "
+                        "pose, re-dock it, or accept the loss and record it -- but keep the check."
+                    )
+                else:
+                    reasons.append(
+                        f"tier {tier.tier_id} deleted known actives "
+                        f"{list(tier.lost_actives)} -- widen it or drop the tier"
+                    )
         measured = self.recall
         if measured is not None and measured < self.required_recall and not reasons:
             reasons.append(
@@ -773,6 +795,7 @@ __all__ = [
     "LOWER_STRONGER",
     "MIXED",
     "REQUIRED_RECALL",
+    "STRUCTURAL_TIERS",
     "Calibration",
     "PanelMember",
     "Separation",
