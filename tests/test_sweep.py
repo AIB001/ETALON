@@ -1757,3 +1757,42 @@ def test_a_prefix_scopes_batch_ids_to_one_campaign(tmp_path, keyed) -> None:
     )
     second.admit([(f"K{i}", "C", "f") for i in range(5)])
     assert [b.batch_id for b in second.emit(revision_id="rev-1")] == ["v7_batch_0001"]
+
+
+def test_a_sweep_that_lost_its_prefix_is_refused_by_its_own_pool(tmp_path, keyed) -> None:
+    """The dangerous direction, and the one `startswith` would wave through.
+
+    The prefix is a constructor argument and is not stored, so a supervisor restarted from a script
+    that lost it carves into a different id family in the same pool. The run-collision guard does
+    not fire -- `batch_0028` beside `v7_batch_0027` is a free name -- and the campaign ends up
+    holding two families. Measured downstream on ALK2: a harvest selecting runs by id prefix then
+    collected the *other* family, 27 batches from a different cascade revision, and reported their
+    198,511 hits under this campaign's name.
+    """
+
+    screen = FakeScreen()
+    gate = authorize_gate(calibration(), provenance=screen.provenance())
+    pool = tmp_path / "pool.sqlite"
+
+    scoped = Sweep(screen, Ledger(tmp_path / "a.jsonl"), pool, batch_size=5, gate=gate, prefix="v7_")
+    scoped.admit([(f"K{i}", "C", "f") for i in range(5)])
+    assert [b.batch_id for b in scoped.emit(revision_id="rev-1")] == ["v7_batch_0001"]
+
+    lost = Sweep(screen, Ledger(tmp_path / "a.jsonl"), pool, batch_size=5, gate=gate)
+    lost.admit([(f"J{i}", "C", "f") for i in range(5)])
+    with pytest.raises(SweepError, match="two id families") as refusal:
+        lost.emit(revision_id="rev-1")
+    # The refusal names the prefix that would make it work, read out of the pool itself.
+    assert "'v7_'" in str(refusal.value)
+
+    # And the other direction: a prefix pointed at a pool carved without one.
+    bare = Sweep(screen, Ledger(tmp_path / "c.jsonl"), tmp_path / "c.sqlite", batch_size=5, gate=gate)
+    bare.admit([(f"L{i}", "C", "f") for i in range(5)])
+    assert [b.batch_id for b in bare.emit(revision_id="rev-1")] == ["batch_0001"]
+    moved = Sweep(
+        screen, Ledger(tmp_path / "c.jsonl"), tmp_path / "c.sqlite",
+        batch_size=5, gate=gate, prefix="v8_",
+    )
+    moved.admit([(f"M{i}", "C", "f") for i in range(5)])
+    with pytest.raises(SweepError, match="two id families"):
+        moved.emit(revision_id="rev-1")

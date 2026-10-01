@@ -45,6 +45,7 @@ to each, and a supervisor of any shape drives it.
 from __future__ import annotations
 
 import json
+import re
 import sqlite3
 import time
 from collections.abc import Iterable, Sequence
@@ -77,6 +78,17 @@ class SweepError(RuntimeError):
 
 def _now() -> str:
     return datetime.now(UTC).isoformat()
+
+
+def _MATCHES(prefix: str, batch_id: str) -> bool:
+    """Whether ``batch_id`` is one this prefix would have carved.
+
+    Anchored at both ends on purpose. ``startswith`` would accept the dangerous direction silently:
+    every id starts with the empty prefix, so a sweep that *lost* its prefix passes a prefix check
+    written that way while carving ``batch_0028`` beside ``v7_batch_0027``.
+    """
+
+    return re.fullmatch(re.escape(prefix) + r"batch_\d{4,}", batch_id) is not None
 
 
 _SCHEMA = """
@@ -256,6 +268,42 @@ class Sweep:
 
     # -- batches ------------------------------------------------------------
 
+    def _check_prefix(self, db: sqlite3.Connection) -> None:
+        """Refuse a prefix that disagrees with the one this pool was carved under.
+
+        The prefix is a campaign's scope for batch ids, and it is passed to the constructor rather
+        than stored -- so a supervisor restarted from a script that lost the argument carves into a
+        *different* id family in the same pool. Nothing downstream notices: the run-collision guard
+        below only fires on a name an earlier run already took, and ``batch_0028`` after
+        ``v7_batch_0001..0027`` is free. The campaign then holds two id families, and every reader
+        that selects a campaign's runs by id prefix -- which is how a workspace of several
+        campaigns' run records is read at all -- silently sees half of it.
+
+        Measured on ALK2: a harvest globbing ``runs/batch_*.json`` against a workspace holding both
+        families collected the *previous* campaign's 27 batches and reported 198,511 hits under the
+        new campaign's name. The numbers were real; they described a different cascade revision.
+
+        The pool already knows the answer, so this costs one query.
+        """
+
+        ids = [str(row[0]) for row in db.execute("SELECT batch_id FROM batch")]
+        stray = [b for b in ids if not _MATCHES(self.prefix, b)]
+        if stray:
+            found = sorted(
+                {m.group(1) for m in (re.fullmatch(r"(.*)batch_\d+", b) for b in stray) if m}
+            )
+            fix = (
+                f"Pass prefix={found[0]!r} to use this pool"
+                if len(found) == 1
+                else "Point this sweep at a pool of its own"
+            )
+            raise SweepError(
+                f"this pool was carved under batch ids like {stray[0]!r}, but this sweep has "
+                f"prefix {self.prefix!r}. Carving now would put two id families in one campaign, "
+                f"and a reader selecting runs by prefix would see only one of them. {fix}, or "
+                "point this sweep at a pool of its own."
+            )
+
     def emit(self, *, revision_id: str, flush: bool = False) -> tuple[Batch, ...]:
         """Carve every full batch the pool can support, and refuse without a gate authorization.
 
@@ -276,6 +324,7 @@ class Sweep:
             db.execute("BEGIN IMMEDIATE")
             try:
                 existing = int(db.execute("SELECT COUNT(*) FROM batch").fetchone()[0])
+                self._check_prefix(db)
                 while True:
                     unbatched = int(
                         db.execute("SELECT COUNT(*) FROM molecule WHERE batch IS NULL").fetchone()[0]
