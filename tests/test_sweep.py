@@ -1715,3 +1715,45 @@ def test_a_pose_quality_tier_is_not_offered_as_droppable() -> None:
         separation=(),
     )
     assert "widen it or drop the tier" in " ".join(selective.refusals())
+
+
+def test_a_batch_id_that_already_names_a_run_is_refused(sweep: Sweep) -> None:
+    """A batch id is a run id, and recovery reads run records by id without knowing whose they are.
+
+    Measured on ALK2: a second sweep over the same pool, with its own fresh ledger and its own
+    gate, carved batch_0001..0027 into a workspace that still held the first sweep's finished runs
+    under those names. `recover()` found them SUCCEEDED and recorded all 27 as committed within 100
+    seconds -- results produced by a different cascade, under a different gate, filed as the new
+    campaign's own output. Nothing failed and nothing warned.
+    """
+
+    sweep.admit([(f"K{i}", "C", "f") for i in range(5)])
+    sweep.screen.runs["batch_0001"] = ScreenResult(
+        "batch_0001", "someone-elses-revision", "SUCCEEDED", (stage("s", "SUCCEEDED", artifact="a"),)
+    )
+    with pytest.raises(SweepError, match="already names a run"):
+        sweep.emit(revision_id="rev-1")
+
+
+def test_a_prefix_scopes_batch_ids_to_one_campaign(tmp_path, keyed) -> None:
+    """The remedy the refusal names: two campaigns in one workspace need distinct run ids."""
+
+    screen = FakeScreen()
+    gate = authorize_gate(calibration(), provenance=screen.provenance())
+    first = Sweep(screen, Ledger(tmp_path / "a.jsonl"), tmp_path / "a.sqlite", batch_size=5, gate=gate)
+    first.admit([(f"K{i}", "C", "f") for i in range(5)])
+    assert [b.batch_id for b in first.emit(revision_id="rev-1")] == ["batch_0001"]
+    screen.runs["batch_0001"] = ScreenResult(
+        "batch_0001", "rev-1", "SUCCEEDED", (stage("s", "SUCCEEDED", artifact="a"),)
+    )
+
+    second = Sweep(
+        screen,
+        Ledger(tmp_path / "b.jsonl"),
+        tmp_path / "b.sqlite",
+        batch_size=5,
+        gate=gate,
+        prefix="v7_",
+    )
+    second.admit([(f"K{i}", "C", "f") for i in range(5)])
+    assert [b.batch_id for b in second.emit(revision_id="rev-1")] == ["v7_batch_0001"]

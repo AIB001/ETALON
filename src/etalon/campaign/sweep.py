@@ -191,6 +191,7 @@ class Sweep:
         *,
         batch_size: int = DEFAULT_BATCH_SIZE,
         gate: GateAuthorization | None = None,
+        prefix: str = "",
     ) -> None:
         if batch_size < 1:
             raise ValueError("batch_size must be positive")
@@ -198,6 +199,13 @@ class Sweep:
         self.ledger = ledger
         self.pool = Path(pool)
         self.batch_size = int(batch_size)
+        # Campaign scope for batch ids. A run id is a name in the workspace, and two campaigns in
+        # one workspace that both start at batch_0001 are two campaigns writing the same names.
+        # Measured: a second ALK2 sweep carved batch_0001..0027 into a fresh ledger, recover()
+        # found the first sweep's finished runs under those names, and the new campaign recorded
+        # 27 committed batches in 100 seconds -- results produced by a different cascade, under a
+        # different gate, filed as its own.
+        self.prefix = str(prefix)
         self.gate = gate
         self.pool.parent.mkdir(parents=True, exist_ok=True)
         with closing(self._connect()) as db:
@@ -277,7 +285,21 @@ class Sweep:
                     )
                     if not take:
                         break
-                    batch_id = f"batch_{existing + len(carved) + 1:04d}"
+                    batch_id = f"{self.prefix}batch_{existing + len(carved) + 1:04d}"
+                    # A batch id is a run id, and a run id that already names a run in the
+                    # workspace is not this campaign's. Refusing here is the only cheap place:
+                    # recover() reads the run record by id and cannot tell whose it is, so a
+                    # collision is recorded as this campaign's own result. Measured on ALK2 -- a
+                    # second sweep over the same pool carved batch_0001..0027 into a fresh ledger
+                    # and recorded all 27 as committed within 100 seconds, every one of them a
+                    # result from the previous cascade under the previous gate.
+                    if self.screen.state(batch_id) is not None:
+                        raise SweepError(
+                            f"{batch_id} already names a run in this workspace. A batch id is a "
+                            "run id; carving this one would let recovery file another campaign's "
+                            "result as yours. Give this sweep a prefix -- Sweep(..., prefix="
+                            f"'{revision_id[:8]}_') -- or screen it in a workspace of its own."
+                        )
                     at = _now()
                     db.execute(
                         "UPDATE molecule SET batch = ? WHERE key IN "
