@@ -45,6 +45,8 @@ of the lost molecules were known to bind.
 
 from __future__ import annotations
 
+import bisect
+import math
 import statistics
 from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass, field
@@ -362,6 +364,206 @@ class Calibration:
         }
 
 
+#: Default share of a screened population a docking tier should keep. One percent of a 540,000
+#: molecule sweep is 5,400 molecules -- a number a campaign can do something with, and small enough
+#: that the next tier's cost is bounded. There is nothing special about 1%; what matters is that the
+#: gate is expressed as a share of the population rather than as a score, for the reason
+#: :func:`enrichment` exists.
+DEFAULT_KEEP = 0.01
+
+
+@dataclass(frozen=True, slots=True)
+class Enrichment:
+    """Where a panel's known actives sit in the distribution of molecules actually screened.
+
+    This is the measurement a threshold should be set from, and the one ETALON did not have.
+
+    A docking score is not a binding free energy -- ``docking_score/v1`` says so in its own
+    ``not_affinity`` invariant -- so a threshold justified by "the weakest known binder scored
+    -8.497, keep everything at -8.0 or better" is an argument that only works if the two quantities
+    share a scale. They do not. Measured, the same number means opposite things on two targets: on
+    SND1's shallow PPI groove ``-8.0`` sits *above* every known binder (best -7.78) and kept 2 of
+    5,822 docked molecules; on ALK2's kinase ATP site it sits *below* every known active (weakest
+    -8.497) and kept 69%. One number, a 2,000-fold difference in what it does, and nothing in the
+    threshold says which case you are in.
+
+    A percentile does not have that defect. "Keep the best 1%" means the same thing on both targets,
+    bounds the next tier's cost, and makes the shortlist's size a decision rather than an accident.
+
+    What it costs is visible here: :attr:`percentiles` says where each known active falls, so
+    :meth:`recall_at` says what a given cut would delete. On ALK2 that is the uncomfortable finding
+    the absolute threshold hid -- the eight known actives spread from the 1.7th percentile to the
+    81st, so no cut small enough to be a shortlist retains them, which is the same thing
+    ``rankable_engines`` being empty was already saying.
+    """
+
+    engine_id: str
+    direction: str
+    population: int
+    #: Each known active's percentile in the population, best first. 0.01 means "only 1% of the
+    #: screened molecules score at least this well".
+    percentiles: tuple[float, ...]
+    #: The panel's inactives, for contrast. A score with no enrichment puts both classes everywhere.
+    inactive_percentiles: tuple[float, ...] = ()
+
+    @property
+    def actives(self) -> int:
+        return len(self.percentiles)
+
+    @property
+    def best(self) -> float | None:
+        return self.percentiles[0] if self.percentiles else None
+
+    @property
+    def worst(self) -> float | None:
+        return self.percentiles[-1] if self.percentiles else None
+
+    @property
+    def median(self) -> float | None:
+        return statistics.median(self.percentiles) if self.percentiles else None
+
+    def recall_at(self, keep: float = DEFAULT_KEEP) -> float | None:
+        """Fraction of known actives a "keep the best ``keep``" gate would retain.
+
+        ``None`` when the panel declares no actives, which is the only case where this is
+        unevaluable rather than simply low.
+        """
+
+        if not self.percentiles:
+            return None
+        return sum(1 for p in self.percentiles if p <= keep) / len(self.percentiles)
+
+    def keep_for(self, recall: float) -> float | None:
+        """The smallest share of the population that retains ``recall`` of the known actives.
+
+        This is the question an operator actually has -- "how small can the shortlist be and still
+        keep the chemistry I know binds" -- and it has an answer only because the panel's positions
+        are measured against the population rather than against each other.
+        """
+
+        if not self.percentiles or not 0.0 < recall <= 1.0:
+            return None
+        needed = math.ceil(recall * len(self.percentiles))
+        return self.percentiles[min(needed, len(self.percentiles)) - 1]
+
+    @property
+    def informative(self) -> bool | None:
+        """Whether the score separates the panel's actives from its inactives at all.
+
+        ``None`` without both classes. False when the median active sits no better than the median
+        inactive -- a score ordering the population no better than chance with respect to the only
+        molecules whose answer is known. A percentile gate on such a score is a random subsample of
+        a chosen size, which is a legitimate thing to want and a different claim from enrichment.
+        """
+
+        if not self.percentiles or not self.inactive_percentiles:
+            return None
+        return statistics.median(self.percentiles) < statistics.median(self.inactive_percentiles)
+
+    def as_dict(self) -> dict[str, Any]:
+        return {
+            "engine_id": self.engine_id,
+            "direction": self.direction,
+            "population": self.population,
+            "actives": self.actives,
+            "best_percentile": self.best,
+            "median_percentile": self.median,
+            "worst_percentile": self.worst,
+            "inactive_median_percentile": (
+                statistics.median(self.inactive_percentiles)
+                if self.inactive_percentiles
+                else None
+            ),
+            "informative": self.informative,
+            "recall_at_0.5%": self.recall_at(0.005),
+            "recall_at_1%": self.recall_at(0.01),
+            "recall_at_5%": self.recall_at(0.05),
+            "keep_for_full_recall": self.keep_for(1.0),
+        }
+
+
+def percentile_threshold(
+    population: Sequence[float], keep: float, direction: str = LOWER_STRONGER
+) -> float | None:
+    """The score that keeps the best ``keep`` share of ``population``.
+
+    A cascade gate takes a number, so this is where the percentile becomes one. Recording that the
+    number came from here -- and from which population -- is what keeps it from being mistaken later
+    for a statement about affinity.
+    """
+
+    if not population or not 0.0 < keep <= 1.0:
+        return None
+    ordered = sorted(population, reverse=direction == HIGHER_STRONGER)
+    index = max(0, min(len(ordered) - 1, math.ceil(keep * len(ordered)) - 1))
+    return ordered[index]
+
+
+def enrichment(
+    scores: Iterable[Mapping[str, Any]],
+    panel: Sequence[PanelMember],
+    population: Mapping[str, Sequence[float]],
+) -> tuple[Enrichment, ...]:
+    """Place a panel's molecules in the distribution of everything the campaign screened.
+
+    Args:
+        scores: The panel's own ``docking_score/v1`` rows, as :func:`separation` takes them.
+        panel: The molecules, with ``known_active`` declared.
+        population: Per engine, the scores of the screened library. Not the panel's scores: a panel
+            is tens of molecules and the question here is where they sit among hundreds of
+            thousands.
+    """
+
+    actives = {m.parent_id for m in panel if m.known_active}
+    inactives = {m.parent_id for m in panel if not m.known_active}
+    best: dict[str, dict[str, float]] = {}
+    directions: dict[str, set[str]] = {}
+    for row in scores:
+        engine = str(row.get("engine_id", "")) or "unknown"
+        parent = str(row.get("parent_id", ""))
+        value = row.get("score")
+        if parent not in actives and parent not in inactives:
+            continue
+        if not isinstance(value, (int, float)) or isinstance(value, bool):
+            continue
+        heading = _direction(row)
+        directions.setdefault(engine, set()).add(heading)
+        canonical = float(value) if heading == LOWER_STRONGER else -float(value)
+        kept = best.setdefault(engine, {})
+        kept[parent] = min(canonical, kept.get(parent, float("inf")))
+
+    rows: list[Enrichment] = []
+    for engine in sorted(best):
+        seen = directions[engine]
+        heading = next(iter(seen)) if len(seen) == 1 else MIXED
+        values = population.get(engine) or ()
+        if not values:
+            continue
+        canon = [float(v) if heading != HIGHER_STRONGER else -float(v) for v in values]
+        canon.sort()
+        total = len(canon)
+
+        def place(score: float) -> float:
+            # Share of the population at least as strong, in canonical (smaller is stronger) terms.
+            return bisect.bisect_right(canon, score) / total
+
+        measured = best[engine]
+        rows.append(
+            Enrichment(
+                engine_id=engine,
+                direction=heading,
+                population=total,
+                percentiles=tuple(
+                    sorted(place(v) for p, v in measured.items() if p in actives)
+                ),
+                inactive_percentiles=tuple(
+                    sorted(place(v) for p, v in measured.items() if p in inactives)
+                ),
+            )
+        )
+    return tuple(rows)
+
+
 def _verdict(row: Mapping[str, Any], actives: frozenset[str]) -> TierVerdict:
     lost = tuple(str(name) for name in row.get("lost", ()))
     return TierVerdict(
@@ -564,7 +766,9 @@ def calibrate(
 
 
 __all__ = [
+    "DEFAULT_KEEP",
     "DOCKING_SCORE",
+    "Enrichment",
     "HIGHER_STRONGER",
     "LOWER_STRONGER",
     "MIXED",
@@ -574,5 +778,7 @@ __all__ = [
     "Separation",
     "TierVerdict",
     "calibrate",
+    "enrichment",
+    "percentile_threshold",
     "separation",
 ]

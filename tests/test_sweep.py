@@ -1609,3 +1609,70 @@ def test_a_device_with_a_batch_on_it_offers_one_fewer_slot(tmp_path, keyed) -> N
     assert two._free_slots() == ["cuda:5", "cuda:6", "cuda:6"]
     two.jobs.append(_Job(kind="screen", name="b2", device="cuda:5", process=Forever(), started=0.0))
     assert two._free_slots() == ["cuda:6", "cuda:6"]
+
+
+# -- enrichment: a threshold is a percentile you have not measured -----------
+#
+# The ALK2 campaign's Uni-Dock gate was set to -8.0 because the weakest known active scored -8.497.
+# Measured against the 274,097 molecules the campaign actually screened, -8.356 sits at the 81st
+# percentile -- so that gate was a "keep the best 81%" gate, and nobody knew it. The same number on
+# SND1's shallow groove sat *above* every known binder and kept 2 of 5,822. One threshold, a
+# 2,000-fold difference in what it does.
+_POPULATION = tuple(-6.0 - i * 0.004 for i in range(1000))  # -6.000 down to -9.996, strongest last
+
+
+def test_a_score_threshold_is_a_percentile_nobody_measured(tmp_path) -> None:  # noqa: ARG001
+    from etalon.campaign.calibrate import enrichment
+
+    panel = (
+        PanelMember("strong", True, "co-crystal"),
+        PanelMember("weak", True, "measured, micromolar"),
+        PanelMember("decoy", False, "negative control"),
+    )
+    scores = tuple(
+        {"parent_id": p, "engine_id": "unidock", "score": v, "direction": "LOWER_STRONGER"}
+        for p, v in (("strong", -9.99), ("weak", -7.0), ("decoy", -6.5))
+    )
+    row = enrichment(scores, panel, {"unidock": _POPULATION})[0]
+
+    assert row.population == 1000
+    # -9.99 is at the strong end of a -6.0 to -10.0 ramp; -7.0 is three quarters of the way in.
+    assert row.best is not None and row.best < 0.01
+    assert 0.70 < row.worst < 0.80
+    # Keeping the best 1% retains the co-crystal ligand and deletes the micromolar one.
+    assert row.recall_at(0.01) == 0.5
+    # Full recall costs whatever percentile the weakest active sits at -- which is the number the
+    # absolute threshold was choosing without saying so.
+    assert row.keep_for(1.0) == row.worst
+    assert row.informative is True
+
+
+def test_the_percentile_becomes_the_number_a_cascade_gate_takes() -> None:
+    from etalon.campaign.calibrate import HIGHER_STRONGER, percentile_threshold
+
+    # Lower-is-stronger: the best 10% of a descending ramp.
+    assert percentile_threshold(_POPULATION, 0.10) == pytest.approx(-9.6, abs=0.01)
+    # Higher-is-stronger reverses which end is kept, and the helper must not read one as the other.
+    rising = tuple(-v for v in _POPULATION)
+    assert percentile_threshold(rising, 0.10, HIGHER_STRONGER) == pytest.approx(9.6, abs=0.01)
+    assert percentile_threshold((), 0.1) is None
+    assert percentile_threshold(_POPULATION, 0.0) is None
+
+
+def test_a_score_that_orders_neither_class_is_not_informative() -> None:
+    from etalon.campaign.calibrate import enrichment
+
+    panel = (
+        PanelMember("a1", True),
+        PanelMember("a2", True),
+        PanelMember("i1", False),
+        PanelMember("i2", False),
+    )
+    # Actives bracket the inactives symmetrically: the median active is no better than the
+    # median inactive, which is what a score with no enrichment on this panel looks like.
+    scores = tuple(
+        {"parent_id": p, "engine_id": "e", "score": v, "direction": "LOWER_STRONGER"}
+        for p, v in (("a1", -9.0), ("i1", -8.9), ("a2", -6.9), ("i2", -7.0))
+    )
+    row = enrichment(scores, panel, {"e": _POPULATION})[0]
+    assert row.informative is False
