@@ -81,10 +81,23 @@ the PDBQT preparation inside `docking_score`. Neither is stuck.
 Before lowering any worker's CPU share, attribute the load:
 
 ```
-ps -eo pcpu,args | awk '/molcascade/{m+=$1} /prism-gen/{g+=$1} /<neighbour>/{n+=$1} \
-  END {printf "screen %.0f%%  gen %.0f%%  neighbour %.0f%%\n", m, g, n}'
+pidstat -u 5 1               # a 5-second interval, per process
 vmstat 1 2 | tail -1          # runnable queue — what the load average is not
 ```
+
+**Not `ps -eo pcpu`.** That column is total CPU time over the process's whole lifetime, not a current
+reading, and the two tenants on a shared host are never the same age. Measured at one instant on ALK2,
+with the campaign 25 minutes into a run and the neighbour's processes days old:
+
+| | campaign | neighbour |
+|---|---|---|
+| `ps -eo pcpu` | 2043% | 2210% |
+| `pidstat -u 5 1` | **904%** | **4166%** |
+
+`ps` reports a dead heat; the interval says the neighbour is 4.6x the campaign. The error is not a
+constant factor and it has no reliable sign — a campaign that just left a CPU-heavy tier reads high,
+a long-lived neighbour reads low — so there is no correction to apply, only a different command. The
+earlier version of this file recommended `ps` for exactly this job.
 
 Two readings from one night, both of which would have produced a wrong action:
 

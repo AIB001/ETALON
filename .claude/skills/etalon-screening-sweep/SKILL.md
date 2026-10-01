@@ -307,9 +307,15 @@ finished" for a batch at stage 27 twice in one night from exactly that read. The
 Before lowering any worker's CPU share, find out whose load it is:
 
 ```
-ps -eo pcpu,args | awk '/molcascade/{m+=$1} /prism-gen/{g+=$1} END {printf "screen %.0f%% gen %.0f%%\n", m, g}'
+pidstat -u 5 1         # a 5-second interval, per process
 vmstat 1 2 | tail -1   # runnable queue, which the load average is not
 ```
+
+Use an interval, not `ps -eo pcpu`: that column averages over each process's whole lifetime, and on a
+shared host the two tenants are never the same age. Measured at one instant on ALK2, `ps` put the
+campaign at 2043% and the neighbour at 2210% — a dead heat — while a 5-second interval put them at
+904% and 4166%. Acting on the first reading means throttling the campaign to relieve load that is not
+its own.
 
 Measured, twice in one night: load average 128.9 of which a *neighbouring tenant* was 62 cores and the
 campaign was 16; and load average 84 with a runnable queue of 7, the rest being D-state I/O wait.
