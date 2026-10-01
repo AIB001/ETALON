@@ -415,13 +415,20 @@ class Supervisor:
             if not pending:
                 break
             batch = pending[0]
-            library = self.workspace / "libraries" / f"{batch.batch_id}.csv"
             try:
                 self.sweep.claim(batch.batch_id, by=device)
             except Exception as error:  # noqa: BLE001 -- another supervisor took it; not an error
                 notes.append(f"{batch.batch_id} was claimed by someone else ({error})")
                 continue
-            library_rows(self.sweep, batch.batch_id, library)
+            # Named after its own bytes, not after the batch. MolCascade's source stage carries this
+            # path in its stage config and `stage_cache_key` hashes the config, so a name carrying
+            # the batch id makes the entry stage's key unique per batch -- and every downstream key
+            # with it. Measured on ALK2: two campaigns over the same pool wrote byte-identical
+            # libraries under two names and re-ran all 43 stages, docking included, for identical
+            # scores. See `library_rows`.
+            library = library_rows(
+                self.sweep, batch.batch_id, self.workspace / "libraries", content_addressed=True
+            )
             self.jobs.append(
                 _Job(
                     kind="screen",

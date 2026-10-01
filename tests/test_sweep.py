@@ -756,6 +756,111 @@ def test_library_rows_always_write_an_id_column(sweep: Sweep, tmp_path) -> None:
     assert len(rows) == 5
 
 
+def test_two_campaigns_over_the_same_molecules_write_one_library_file(tmp_path, keyed) -> None:
+    """The library's *name* is in the screen's cache key, so a name per batch is a cache miss per batch.
+
+    MolCascade's source stage carries the library's absolute path in its stage config and
+    `stage_cache_key` hashes that config. A caller-chosen name therefore makes the entry stage's key
+    unique, republishes its output under a new digest, and changes every downstream stage's input
+    digest with it -- the whole funnel re-runs.
+
+    Measured on ALK2: a second campaign over the same pool wrote the same 20,000 molecules to
+    `batch_0001.csv` and `v7_batch_0001.csv`. Byte-identical files, same md5. Of 43 stages the 10
+    whose config had genuinely changed were the gates meant to change, and `docking_score`'s own
+    config was identical -- yet all 43 re-ran, because the 11th differing config was the source
+    stage's and the only thing in it that differed was the file name.
+    """
+
+    screen = FakeScreen()
+    gate = authorize_gate(calibration(), provenance=screen.provenance())
+    molecules = [(f"K{i}", f"C{i}", "flowr") for i in range(5)]
+
+    old = Sweep(screen, Ledger(tmp_path / "a.jsonl"), tmp_path / "a.sqlite", batch_size=5, gate=gate)
+    old.admit(molecules)
+    old.emit(revision_id="rev-1")
+    new = Sweep(
+        screen, Ledger(tmp_path / "b.jsonl"), tmp_path / "b.sqlite",
+        batch_size=5, gate=gate, prefix="v7_",
+    )
+    new.admit(molecules)
+    new.emit(revision_id="rev-1")
+
+    root = tmp_path / "libraries"
+    first = library_rows(old, "batch_0001", root, content_addressed=True)
+    second = library_rows(new, "v7_batch_0001", root, content_addressed=True)
+
+    assert first == second, "same molecules, same bytes -- so the same path, or the cache cannot hit"
+    assert first.name.startswith("lib-") and first.name.endswith(".csv")
+    assert "batch_0001" not in first.name, "a batch id in the name is what defeats the cache"
+    assert len(list(root.glob("*.csv"))) == 1
+
+    # Different molecules must still get a different file, or two batches would alias.
+    other = Sweep(screen, Ledger(tmp_path / "c.jsonl"), tmp_path / "c.sqlite", batch_size=5, gate=gate)
+    other.admit([(f"J{i}", f"N{i}", "flowr") for i in range(5)])
+    other.emit(revision_id="rev-1")
+    assert library_rows(other, "batch_0001", root, content_addressed=True) != first
+
+    # The explicit-path form is unchanged: tests and manual runs still name their own file.
+    explicit = library_rows(old, "batch_0001", tmp_path / "named.csv")
+    assert explicit.name == "named.csv"
+    assert explicit.read_bytes() == first.read_bytes()
+
+
+def test_a_library_already_on_disk_keeps_the_name_it_has(tmp_path, keyed) -> None:
+    """One path per content -- not a particular spelling of it.
+
+    A campaign that ran before content-addressing wrote its libraries under its own scheme, and the
+    screen's cache entries are keyed on *those* paths. Insisting on a fresh `lib-<digest>.csv` would
+    be content-addressing that still recomputes everything it was introduced to avoid.
+
+    Measured on ALK2: 27 batches of 20,000 molecules, every one byte-identical to the previous
+    campaign's batch of the same number, 3.9 GB of artifacts and 1,633 cache entries already on
+    disk, ~250 minutes a batch.
+    """
+
+    screen = FakeScreen()
+    gate = authorize_gate(calibration(), provenance=screen.provenance())
+    molecules = [(f"K{i}", f"C{i}", "flowr") for i in range(5)]
+    root = tmp_path / "libraries"
+
+    older = Sweep(screen, Ledger(tmp_path / "a.jsonl"), tmp_path / "a.sqlite", batch_size=5, gate=gate)
+    older.admit(molecules)
+    older.emit(revision_id="rev-1")
+    legacy = library_rows(older, "batch_0001", root / "batch_0001.csv")  # the old naming scheme
+
+    newer = Sweep(
+        screen, Ledger(tmp_path / "b.jsonl"), tmp_path / "b.sqlite",
+        batch_size=5, gate=gate, prefix="v7_",
+    )
+    newer.admit(molecules)
+    newer.emit(revision_id="rev-1")
+    found = library_rows(newer, "v7_batch_0001", root, content_addressed=True)
+
+    assert found == legacy, "the bytes are already on disk; a second name is a second cache miss"
+    assert len(list(root.glob("*.csv"))) == 1
+
+    # And when one content already sits under several names, the oldest wins -- that is the one the
+    # cache entries were written against. Measured on ALK2: 54 files, 27 distinct contents, every v6
+    # name shadowed by a v7 twin, and indexing the later name yields a tidy index and no cache hit.
+    import os
+    import time
+
+    shadow = root / "zz_later_name.csv"
+    shadow.write_bytes(legacy.read_bytes())
+    os.utime(shadow, (time.time() + 60, time.time() + 60))
+    (root / "by-content.json").unlink()
+    assert library_rows(newer, "v7_batch_0001", root, content_addressed=True) == legacy
+
+    # A library that is genuinely new still gets a digest name.
+    other = Sweep(screen, Ledger(tmp_path / "c.jsonl"), tmp_path / "c.sqlite", batch_size=5, gate=gate)
+    other.admit([(f"J{i}", f"N{i}", "flowr") for i in range(5)])
+    other.emit(revision_id="rev-1")
+    fresh = library_rows(other, "batch_0001", root, content_addressed=True)
+    assert fresh.name.startswith("lib-")
+    # And is found again by content on the next pass, without rescanning.
+    assert library_rows(other, "batch_0001", root, content_addressed=True) == fresh
+
+
 def test_molecules_of_an_unemitted_batch_is_refused(sweep: Sweep) -> None:
     with pytest.raises(SweepError, match="never emitted"):
         sweep.molecules("batch_9999")

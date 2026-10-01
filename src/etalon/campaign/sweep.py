@@ -619,25 +619,120 @@ class Sweep:
         }
 
 
-def library_rows(sweep: Sweep, batch_id: str, path: str | Path) -> Path:
+def library_rows(
+    sweep: Sweep, batch_id: str, path: str | Path, *, content_addressed: bool = False
+) -> Path:
     """Write a batch as the CSV MolCascade reads, with the id column it needs.
 
     The id column is not optional in practice. Without it a run records no molecule names, and three
     later readers -- per-tier recall, per-molecule explanation, a named shortlist -- have nothing to
     key on. Measured: MolCascade's own recall measurement refuses such a run outright rather than
     reporting a funnel that lost everything.
+
+    Args:
+        content_addressed: Treat ``path`` as a directory and name the file after a digest of its
+            own bytes. **This is what lets the screen's cache work at all**, and the reason is not
+            tidiness.
+
+            MolCascade's source stage carries the library's absolute path in its stage config, and
+            ``stage_cache_key`` hashes that config -- so a name chosen by the caller is folded into
+            the entry stage's key, its output artifact is republished under a new digest, and every
+            downstream stage's input digest changes with it. The whole funnel re-runs, docking
+            included, to produce identical numbers.
+
+            Measured on ALK2: a second campaign over the same pool wrote the same 20,000 molecules
+            to ``batch_0001.csv`` and ``v7_batch_0001.csv``. The files were byte-identical, same
+            md5. Of the 43 stages, the 10 whose config had actually changed were the gates that were
+            meant to change; ``docking_score``'s own config was identical. All 43 re-ran, because
+            the 11th differing config was the source stage's and the only thing in it that differed
+            was the file name.
     """
 
     import csv
+    import hashlib
+    import io
 
-    target = Path(path)
-    target.parent.mkdir(parents=True, exist_ok=True)
     rows = sweep.molecules(batch_id)
-    with target.open("w", encoding="utf-8", newline="") as handle:
-        writer = csv.DictWriter(handle, fieldnames=["id", "smiles", "source"])
-        writer.writeheader()
-        writer.writerows(rows)
+    buffer = io.StringIO(newline="")
+    writer = csv.DictWriter(buffer, fieldnames=["id", "smiles", "source"])
+    writer.writeheader()
+    writer.writerows(rows)
+    payload = buffer.getvalue().encode("utf-8")
+
+    if not content_addressed:
+        target = Path(path)
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_bytes(payload)
+        return target
+
+    root = Path(path)
+    root.mkdir(parents=True, exist_ok=True)
+    digest = hashlib.sha256(payload).hexdigest()
+    existing = _library_index(root).get(digest)
+    if existing is not None and (root / existing).is_file():
+        # Reuse the name this exact library already has, whatever it is. The goal is one path per
+        # content, not a particular spelling of it -- and an earlier campaign that wrote these bytes
+        # under its own naming scheme has cache entries keyed on *that* path. Measured on ALK2: 27
+        # batches of 20,000 molecules each, every one byte-identical to the previous campaign's
+        # batch of the same number, 3.9 GB of artifacts and 1,633 cache entries already on disk, and
+        # a batch costing ~250 minutes. Insisting on a fresh `lib-<digest>.csv` here would be
+        # content-addressing that still recomputes everything.
+        return root / existing
+
+    target = root / f"lib-{digest}.csv"
+    if not (target.is_file() and target.stat().st_size == len(payload)):
+        target.write_bytes(payload)
+    _remember_library(root, digest, target.name)
     return target
+
+
+def _library_index(root: Path) -> dict[str, str]:
+    """Map content digest to the file name holding it, building the index on first use.
+
+    Built by hashing whatever CSVs are already in the directory, so a campaign started before
+    content-addressing existed still has its libraries found. At campaign scale this is tens of
+    files of a couple of megabytes -- paid once, then read from the index.
+    """
+
+    import hashlib
+
+    index_path = root / "by-content.json"
+    try:
+        index = json.loads(index_path.read_text(encoding="utf-8"))
+        if isinstance(index, dict):
+            return {str(k): str(v) for k, v in index.items()}
+    except (OSError, ValueError):
+        pass
+
+    index: dict[str, str] = {}
+    # Oldest name wins. When one content sits under several names -- which is exactly the situation
+    # this index exists to repair -- the cache entries belong to whichever was written first, so
+    # picking any other name indexes the content to a path the screen has never seen. Measured on
+    # ALK2: 54 library files, 27 distinct contents, every v6 name shadowed by a v7 twin; keying on
+    # the later name would have produced a tidy index and not one cache hit.
+    for candidate in sorted(root.glob("*.csv"), key=lambda p: (p.stat().st_mtime, p.name)):
+        try:
+            index.setdefault(hashlib.sha256(candidate.read_bytes()).hexdigest(), candidate.name)
+        except OSError:
+            continue
+    try:
+        index_path.write_text(json.dumps(index, indent=1, sort_keys=True), encoding="utf-8")
+    except OSError:
+        pass
+    return index
+
+
+def _remember_library(root: Path, digest: str, name: str) -> None:
+    index = _library_index(root)
+    if index.get(digest) == name:
+        return
+    index[digest] = name
+    try:
+        (root / "by-content.json").write_text(
+            json.dumps(index, indent=1, sort_keys=True), encoding="utf-8"
+        )
+    except OSError:
+        pass
 
 
 def as_json(sweep: Sweep) -> str:
