@@ -1009,6 +1009,42 @@ def test_most_passes_are_quiet_and_say_so(tmp_path, keyed) -> None:
     assert supervisor.tick().quiet
 
 
+def test_a_pass_whose_only_product_is_a_note_is_not_quiet() -> None:
+    """Notes are where a screen that raised ends up, and `quiet` decides whether a pass is printed.
+
+    One ALK2 campaign spent 14 hours screening nothing: every batch was claimed, the screen raised
+    on its first line, and the supervisor ticked on with no output. The fix put those failures in
+    `notes` -- but `quiet` did not look at `notes`, so a pass whose one product was a failure still
+    reported itself as having changed nothing, and a printer that skips quiet passes still showed
+    nothing. The channel was repaired; the gate in front of it was not.
+    """
+
+    from etalon.campaign.supervisor import TickReport
+
+    assert not TickReport(notes=("v7_batch_0003: screen raised FileNotFoundError",)).quiet
+    assert TickReport().quiet
+
+
+def test_recovery_that_left_a_batch_alone_is_a_quiet_pass() -> None:
+    """`running` is `Sweep.recover`'s documented no-op: the one branch of four that mutates nothing.
+
+    Counting it meant a campaign with batches in flight had no quiet pass at all. Measured on ALK2:
+    27 consecutive ticks, each printing the same 1,200-character line listing 16 batches as running,
+    and that line is the channel a failure note arrives on. A log where every pass looks eventful
+    hides a note exactly as well as a log that prints nothing.
+    """
+
+    from etalon.campaign.supervisor import TickReport
+
+    left_alone = TickReport(
+        recovered=({"batch_id": "v7_batch_0001", "action": "running"},) * 16
+    )
+    assert left_alone.quiet
+
+    requeued = TickReport(recovered=({"batch_id": "v7_batch_0001", "action": "requeued"},))
+    assert not requeued.quiet, "requeued releases the claim -- that is a change"
+
+
 def test_a_supervisor_resumes_from_disk(tmp_path, keyed) -> None:
     """Kill it mid-campaign and the next one picks up from the pool, the ledger and the manifests."""
 

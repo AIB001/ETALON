@@ -75,15 +75,33 @@ class TickReport:
 
     @property
     def quiet(self) -> bool:
-        """Whether this pass changed nothing. Most passes are quiet, and saying so is the point."""
+        """Whether this pass changed nothing. Most passes are quiet, and saying so is the point.
 
+        Two things this got wrong, and they compound, because `quiet` is what decides whether a pass
+        is printed at all.
+
+        **A note is never quiet.** Notes are where a screen that raised ends up -- `tick()` puts
+        `_reap`'s failures there first, with the comment that a failure only a counter records reads
+        as nothing happening. But `notes` was not in this list, so a pass whose one product was a
+        failure reported itself as quiet and a printer that skips quiet passes never showed it. That
+        is the same shape as the defect those notes were added to fix.
+
+        **A `running` recovery is quiet.** `Sweep.recover` returns one entry per outstanding batch
+        and `running` is its documented no-op -- "left alone", the only branch of the four that
+        mutates nothing. Counting it meant a campaign with batches in flight had no quiet passes at
+        all: measured on ALK2, 27 consecutive ticks each printing the same 1,200-character line
+        listing 16 batches as running, which is the channel a failure note would have arrived on.
+        """
+
+        moved = [r for r in self.recovered if r.get("action") != "running"]
         return not any(
             (
+                self.notes,
                 self.ingested_chunks,
                 self.emitted,
                 self.screens_started,
                 self.recorded,
-                self.recovered,
+                moved,
                 self.generation_started,
                 self.generation_finished,
                 self.retired,
