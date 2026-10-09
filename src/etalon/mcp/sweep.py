@@ -262,26 +262,60 @@ def register(mcp: Any) -> None:
     @mcp.tool()
     @tool(Cost.FREE)
     def etalon_sweep_claim(
-        workspace: str, pool: str, ledger: str, batch_id: str, by: str, library_path: str = ""
+        workspace: str,
+        pool: str,
+        ledger: str,
+        batch_id: str,
+        by: str,
+        library_dir: str = "",
+        library_path: str = "",
     ) -> str:
-        """FREE. Reserve one batch for one screener, and optionally write its library CSV.
+        """FREE. Reserve one batch for one screener, and write its library CSV.
 
         The reservation is what makes a crashed screener's batch findable rather than merely absent,
         and the conditional update is what stops two screeners taking the same batch.
 
+        Prefer ``library_dir``. A library's *path* is inside the screen's cache key -- MolCascade's
+        source stage carries it in its stage config and ``stage_cache_key`` hashes that config -- so
+        a file named after the batch makes the entry stage's key unique per batch and every
+        downstream key with it. Measured on ALK2: two campaigns over the same pool wrote
+        byte-identical 20,000-molecule libraries under ``batch_0001.csv`` and ``v7_batch_0001.csv``,
+        same md5, and all 43 stages re-ran -- docking included, for identical scores -- because the
+        only stage config that differed was the source stage's file name.
+
         Args:
             by: Who is taking it. Refused if empty: an anonymous reservation cannot be recovered.
-            library_path: Absolute path to write the batch as CSV. Always includes an ``id`` column --
-                without one a run records no molecule names, and per-tier recall, per-molecule
-                explanation and a named shortlist all have nothing to key on.
+            library_dir: Absolute path to a *directory*. The file is named after a digest of its own
+                bytes, so the same molecules always land on the same path and the screen's cache can
+                hit across batches and across campaigns. This is the form to use.
+            library_path: Absolute path to one named CSV file, for a caller that needs a particular
+                name. Defeats the cache as described above; refused together with ``library_dir``.
+
+        Either form always includes an ``id`` column -- without one a run records no molecule names,
+        and per-tier recall, per-molecule explanation and a named shortlist have nothing to key on.
         """
 
         from etalon.campaign.sweep import library_rows
 
+        if library_dir.strip() and library_path.strip():
+            return fail(
+                "AmbiguousLibrary",
+                "library_dir and library_path name two different files for one batch",
+                hint="Pass library_dir alone unless you need a specific file name.",
+            )
         sweep = _sweep(workspace, pool, ledger)
         batch = sweep.claim(batch_id, by=by)
         written = None
-        if library_path.strip():
+        if library_dir.strip():
+            written = str(
+                library_rows(
+                    sweep,
+                    batch_id,
+                    absolute_path(library_dir, label="library_dir"),
+                    content_addressed=True,
+                )
+            )
+        elif library_path.strip():
             written = str(
                 library_rows(sweep, batch_id, absolute_path(library_path, label="library_path"))
             )

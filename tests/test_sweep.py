@@ -958,6 +958,124 @@ def test_one_unreadable_csv_does_not_abort_library_writing(tmp_path, keyed) -> N
     assert written.read_text(encoding="utf-8").startswith("id,smiles,source")
 
 
+def _claim_tool():  # noqa: ANN202 -- mirrors the SDK's untyped decorator factory
+    from etalon.mcp import sweep as mcp_sweep
+
+    class Collector:
+        def __init__(self) -> None:
+            self.tools: dict[str, object] = {}
+
+        def tool(self):  # noqa: ANN202
+            def decorate(function):  # noqa: ANN001, ANN202
+                self.tools[function.__name__] = function
+                return function
+
+            return decorate
+
+        def resource(self, _uri: str):  # noqa: ANN202
+            def decorate(function):  # noqa: ANN001, ANN202
+                return function
+
+            return decorate
+
+    collector = Collector()
+    mcp_sweep.register(collector)
+    return collector.tools["etalon_sweep_claim"]
+
+
+def test_the_mcp_claim_tool_can_write_a_content_addressed_library(tmp_path, keyed) -> None:
+    """The content-addressed form existed but only the in-process supervisor could reach it.
+
+    An MCP-driven campaign got a file named after the batch, which is the exact cache defeat the
+    content-addressed form was written for: MolCascade's source stage carries the library path in
+    its stage config and `stage_cache_key` hashes that config, so every downstream key changes with
+    the name. Measured on ALK2: byte-identical 20,000-molecule libraries under `batch_0001.csv` and
+    `v7_batch_0001.csv`, same md5, all 43 stages re-run, docking included, for identical scores.
+    """
+
+    import json as _json
+
+    screen = FakeScreen()
+    gate = authorize_gate(calibration(), provenance=screen.provenance())
+    molecules = [(f"K{i}", f"C{i}", "flowr") for i in range(5)]
+    pool, ledger = tmp_path / "pool.sqlite", tmp_path / "ledger.jsonl"
+    workspace = tmp_path / "ws"
+    workspace.mkdir()
+
+    sweep = Sweep(screen, Ledger(ledger), pool, batch_size=5, gate=gate)
+    sweep.admit(molecules)
+    sweep.emit(revision_id="rev-1")
+
+    claim = _claim_tool()
+    root = tmp_path / "libraries"
+    answer = _json.loads(
+        claim(
+            workspace=str(workspace),
+            pool=str(pool),
+            ledger=str(ledger),
+            batch_id="batch_0001",
+            by="cuda:0",
+            library_dir=str(root),
+        )
+    )
+    assert answer["ok"] is True
+    written = Path(answer["library"])
+    assert written.name.startswith("lib-") and written.name.endswith(".csv")
+    assert "batch_0001" not in written.name, "a batch id in the name is what defeats the cache"
+    assert written.read_text(encoding="utf-8").startswith("id,smiles,source")
+
+    # The same molecules under another campaign's batch id land on the same path, which is the
+    # whole point: one path per content, so the screen's cache can hit across campaigns.
+    other_pool, other_ledger = tmp_path / "p2.sqlite", tmp_path / "l2.jsonl"
+    twin = Sweep(screen, Ledger(other_ledger), other_pool, batch_size=5, gate=gate, prefix="v7_")
+    twin.admit(molecules)
+    twin.emit(revision_id="rev-1")
+    second = _json.loads(
+        claim(
+            workspace=str(workspace),
+            pool=str(other_pool),
+            ledger=str(other_ledger),
+            batch_id="v7_batch_0001",
+            by="cuda:1",
+            library_dir=str(root),
+        )
+    )
+    assert Path(second["library"]) == written
+    assert len(list(root.glob("*.csv"))) == 1
+
+
+def test_the_mcp_claim_tool_refuses_two_names_for_one_library(tmp_path, keyed) -> None:
+    """Two paths for one batch's molecules is a question about which the screen will cache on."""
+
+    import json as _json
+
+    screen = FakeScreen()
+    gate = authorize_gate(calibration(), provenance=screen.provenance())
+    pool, ledger = tmp_path / "pool.sqlite", tmp_path / "ledger.jsonl"
+    workspace = tmp_path / "ws"
+    workspace.mkdir()
+    sweep = Sweep(screen, Ledger(ledger), pool, batch_size=5, gate=gate)
+    sweep.admit([(f"K{i}", f"C{i}", "flowr") for i in range(5)])
+    sweep.emit(revision_id="rev-1")
+
+    answer = _json.loads(
+        _claim_tool()(
+            workspace=str(workspace),
+            pool=str(pool),
+            ledger=str(ledger),
+            batch_id="batch_0001",
+            by="cuda:0",
+            library_dir=str(tmp_path / "libraries"),
+            library_path=str(tmp_path / "named.csv"),
+        )
+    )
+    assert answer["ok"] is False
+    assert answer["error"]["code"] == "AmbiguousLibrary"
+    # And nothing was written under either name.
+    assert not (tmp_path / "named.csv").exists()
+    assert not (tmp_path / "libraries").exists()
+
+
 def test_molecules_of_an_unemitted_batch_is_refused(sweep: Sweep) -> None:
     with pytest.raises(SweepError, match="never emitted"):
         sweep.molecules("batch_9999")
@@ -1335,6 +1453,63 @@ def test_consecutive_barren_chunks_stop_a_loop_but_one_does_not(tmp_path, keyed)
         time.sleep(0.05)
     assert "empty" in supervisor.stopped
     assert supervisor.state()["generators"]["empty"]["consecutive_barren"] >= BARREN_LIMIT
+
+
+def test_a_library_that_cannot_be_written_does_not_strand_the_claimed_batch(tmp_path, keyed) -> None:
+    """The claim is committed before the library exists, so a failure there reserves and abandons.
+
+    Measured: one dangling CSV in the library directory raised out of index construction, the batch
+    stayed claimed with nothing running against it, and the supervisor driving the campaign exited
+    before any other device was offered work. `Sweep.recover` releases a claimed batch whose run
+    record does not exist, so containment is enough -- but only if the tick survives to reach it.
+    """
+
+    import etalon.campaign.supervisor as supervisor_module
+    from etalon.campaign.supervisor import Supervisor
+
+    screen = FakeScreen()
+    sweep = Sweep(
+        screen,
+        Ledger(tmp_path / "l.jsonl"),
+        tmp_path / "p.sqlite",
+        batch_size=5,
+        gate=authorize_gate(calibration(), provenance=screen.provenance()),
+    )
+    sweep.admit([(f"K{i}", f"C{i}", "flowr") for i in range(10)])
+    sweep.emit(revision_id="rev-1")
+    assert len(sweep.pending()) == 2
+
+    launched: list[str] = []
+    original = supervisor_module.library_rows
+
+    def refuses(*args, **kwargs):
+        raise OSError("dangling library")
+
+    supervisor_module.library_rows = refuses
+    try:
+        supervisor = Supervisor(
+            sweep,
+            revision_id="rev-1",
+            workspace=tmp_path / "ws",
+            generators=[],
+            screen_devices=("cuda:0",),
+            screen=lambda batch_id, *_: launched.append(batch_id),
+        )
+        report = supervisor.tick()
+        assert report.screens_started == ()
+        assert launched == []
+        assert any("could not be given a library" in note for note in report.notes)
+        # The batch is claimed, which is what recovery looks for.
+        assert len(sweep.outstanding()) == 1
+    finally:
+        supervisor_module.library_rows = original
+
+    # Next tick: recovery releases it (no run record exists) and the batch screens normally.
+    report = supervisor.tick()
+    assert any(r["action"] == "requeued" for r in report.recovered), report.recovered
+    _settle(supervisor)
+    report = supervisor.tick()
+    assert report.screens_started, report.notes
 
 
 def test_the_screen_driver_refuses_an_edited_cascade() -> None:

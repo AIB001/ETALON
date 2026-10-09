@@ -426,9 +426,20 @@ class Supervisor:
             # with it. Measured on ALK2: two campaigns over the same pool wrote byte-identical
             # libraries under two names and re-ran all 43 stages, docking included, for identical
             # scores. See `library_rows`.
-            library = library_rows(
-                self.sweep, batch.batch_id, self.workspace / "libraries", content_addressed=True
-            )
+            try:
+                library = library_rows(
+                    self.sweep, batch.batch_id, self.workspace / "libraries", content_addressed=True
+                )
+            except Exception as error:  # noqa: BLE001 -- a claimed batch with no job is the worst case
+                # The claim is already committed at this point, so an exception here leaves the
+                # batch reserved with nothing running against it and ends the tick before any other
+                # device is offered work. Measured: one dangling CSV in the library directory raised
+                # out of index construction, the batch stayed claimed, and the supervisor driving
+                # the campaign exited. `Sweep.recover` runs at the top of every tick and releases a
+                # claimed batch whose run record does not exist, so containing it here is enough --
+                # the batch is re-offered next pass and the other devices still get theirs.
+                notes.append(f"{batch.batch_id} could not be given a library ({error!r})")
+                continue
             self.jobs.append(
                 _Job(
                     kind="screen",
