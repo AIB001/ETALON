@@ -123,9 +123,28 @@ def read_chunk(path: Path, *, tag: str | None = None) -> list[tuple[str, str, st
     than yielding no molecules, and an ingest loop that did not expect an exception there stopped for
     twelve hours.
 
-    The identity key is the InChIKey. Whatever key a campaign chooses has to be chosen *before* the
-    pool is filled -- two standardisation policies give one molecule two keys, and a pool cannot be
-    un-deduplicated afterwards.
+    The identity key is the InChIKey **of the SMILES this function ships**, not of the molecule it
+    read. The distinction is the whole of it: a key derived from the 3D molecule is not a function
+    of the string the screen docks, and two keys for one docking input means that input is docked
+    twice and counted twice.
+
+    Measured on the ALK2 v7 pool, which was filled under the earlier policy: 540,883 rows,
+    540,851 distinct SMILES. Thirty-two SMILES carried two InChIKeys each, and in thirty-one of the
+    thirty-two the two rows landed in *different* batches -- so thirty-one molecules were docked
+    twice while ``AdmitReport.duplicates`` reported none of them. The direction is always the same.
+    RDKit assigns a chiral tag from a signed volume with no tolerance band, so ``MolToSmiles``
+    writes ``[C@H]``; the InChI library perceives stereo from the same coordinates with a tolerance
+    of its own, and on a geometry a generative model placed marginally it declares the centre
+    undefined and returns the flat ``UHFFFAOYSA`` block. Forty-one such disagreements appear in five
+    PocketXMol chunks.
+
+    Reparsing is what makes the key a pure function of the shipped SMILES. It costs about 36% more
+    than keying the 3D molecule directly, measured over 4,729 molecules, because the one InChI call
+    is simply moved rather than added.
+
+    Whatever key a campaign chooses still has to be chosen *before* the pool is filled -- two
+    standardisation policies give one molecule two keys, and a pool cannot be un-deduplicated
+    afterwards. This function no longer holds two.
     """
 
     from rdkit import Chem, RDLogger
@@ -145,8 +164,12 @@ def read_chunk(path: Path, *, tag: str | None = None) -> list[tuple[str, str, st
         if molecule is None:
             continue
         try:
-            key = Chem.MolToInchiKey(molecule)
             smiles = Chem.MolToSmiles(molecule)
+            # Key the string that will be docked, not the molecule that was read. Reparsing is the
+            # whole point: it puts the key downstream of the SMILES, so one shipped SMILES cannot
+            # acquire two identities.
+            shipped = Chem.MolFromSmiles(smiles) if smiles else None
+            key = Chem.MolToInchiKey(shipped) if shipped is not None else ""
         except Exception:  # noqa: BLE001 -- one unconvertible molecule must not lose the chunk
             continue
         if key and smiles:

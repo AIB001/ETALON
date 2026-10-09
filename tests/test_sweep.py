@@ -134,6 +134,65 @@ def sweep(tmp_path, keyed) -> Sweep:
     return made
 
 
+# -- one SMILES, one row -----------------------------------------------------
+
+
+def test_a_second_key_on_one_smiles_is_a_duplicate_not_a_second_molecule(sweep) -> None:
+    """The pool deduplicates on the caller's key, and nothing checked the key against the SMILES.
+
+    Measured on the v7 pool: 540,883 rows over 540,851 distinct SMILES. The thirty-two SMILES with
+    two keys each were counted as sixty-four molecules, thirty-one pairs were carved into two
+    different batches, and `AdmitReport.duplicates` reported zero of them.
+    """
+
+    one = "c1ccccc1"
+    first = sweep.admit([("AAAAAAAAAAAAAA-UHFFFAOYSA-N", one, "g0")])
+    assert (first.accepted, first.duplicates) == (1, 0)
+
+    second = sweep.admit([("AAAAAAAAAAAAAA-INIZCTEOSA-N", one, "g1")])
+    assert (second.accepted, second.duplicates) == (0, 1)
+    assert sweep.ready() == 1
+
+    pool = sweep.state()["pool"]
+    assert pool["unique"] == 1
+    assert pool["one_row_per_smiles"] is True
+    assert pool["smiles_conflicts"] == 0
+    # And the first proposer keeps the attribution, which is what a source breakdown rests on.
+    assert pool["by_source"] == {"g0": 1}
+
+
+def test_a_pool_that_already_holds_one_smiles_twice_opens_and_says_so(tmp_path, keyed) -> None:
+    """A finished campaign's pool cannot be rewritten to make a new rule fit.
+
+    The v7 pool is such a pool. Imposing the unique index on it would raise, and deleting the
+    conflicting rows would destroy the record of what was actually screened -- those molecules were
+    docked, twice. So the constraint goes unenforced there and the reading has to admit it, rather
+    than a caller inferring from the code that one SMILES means one row everywhere.
+    """
+
+    import sqlite3
+
+    path = tmp_path / "legacy.sqlite"
+    gate = authorize_gate(calibration(), provenance=FakeScreen().provenance())
+    Sweep(FakeScreen(), Ledger(tmp_path / "l.jsonl"), path, batch_size=5, gate=gate)
+
+    # Reach past `admit` to plant the violation the old ingest path produced.
+    db = sqlite3.connect(path)
+    db.execute("DROP INDEX molecule_smiles")
+    db.executemany(
+        "INSERT INTO molecule(key, smiles, source, seen_at) VALUES (?,?,?,?)",
+        [("K1-UHFFFAOYSA-N", "c1ccccc1", "g0", 1.0), ("K1-INIZCTEOSA-N", "c1ccccc1", "g0", 2.0)],
+    )
+    db.commit()
+    db.close()
+
+    reopened = Sweep(FakeScreen(), Ledger(tmp_path / "l.jsonl"), path, batch_size=5, gate=gate)
+    pool = reopened.state()["pool"]
+    assert pool["unique"] == 2
+    assert pool["one_row_per_smiles"] is False
+    assert pool["smiles_conflicts"] == 1
+
+
 # -- exhaustion is an outcome, not a failure ---------------------------------
 
 
@@ -523,14 +582,14 @@ def test_deduplication_is_global_and_permanent(sweep: Sweep) -> None:
 
 
 def test_a_batch_is_carved_only_when_the_watermark_is_reached(sweep: Sweep) -> None:
-    sweep.admit([(f"K{i}", "C", "flowr") for i in range(8)])
+    sweep.admit([(f"K{i}", f"C{i}", "flowr") for i in range(8)])
     carved = sweep.emit(revision_id="rev-1")
     assert [b.batch_id for b in carved] == ["batch_0001"]
     assert sweep.ready() == 3
 
 
 def test_flush_carves_the_short_remainder_and_stops(sweep: Sweep) -> None:
-    sweep.admit([(f"K{i}", "C", "flowr") for i in range(7)])
+    sweep.admit([(f"K{i}", f"C{i}", "flowr") for i in range(7)])
     carved = sweep.emit(revision_id="rev-1", flush=True)
     assert [b.size for b in carved] == [5, 2]
     assert sweep.ready() == 0
@@ -538,19 +597,19 @@ def test_flush_carves_the_short_remainder_and_stops(sweep: Sweep) -> None:
 
 def test_emitting_without_a_gate_authorization_is_refused(tmp_path, keyed) -> None:
     bare = Sweep(FakeScreen(), Ledger(tmp_path / "l.jsonl"), tmp_path / "p.sqlite", batch_size=2)
-    bare.admit([("K1", "C", "f"), ("K2", "C", "f")])
+    bare.admit([("K1", "C1", "f"), ("K2", "C2", "f")])
     with pytest.raises(NotAuthorized, match="known-active panel"):
         bare.emit(revision_id="rev-1")
 
 
 def test_emitting_with_a_token_for_another_funnel_is_refused(sweep: Sweep) -> None:
-    sweep.admit([(f"K{i}", "C", "f") for i in range(5)])
+    sweep.admit([(f"K{i}", f"C{i}", "f") for i in range(5)])
     with pytest.raises(NotAuthorized, match="configuration changed"):
         sweep.emit(revision_id="rev-EDITED")
 
 
 def test_two_screeners_cannot_claim_one_batch(sweep: Sweep) -> None:
-    sweep.admit([(f"K{i}", "C", "f") for i in range(5)])
+    sweep.admit([(f"K{i}", f"C{i}", "f") for i in range(5)])
     sweep.emit(revision_id="rev-1")
     sweep.claim("batch_0001", by="gpu5")
     with pytest.raises(SweepError, match="not claimable"):
@@ -558,14 +617,14 @@ def test_two_screeners_cannot_claim_one_batch(sweep: Sweep) -> None:
 
 
 def test_an_anonymous_claim_is_refused(sweep: Sweep) -> None:
-    sweep.admit([(f"K{i}", "C", "f") for i in range(5)])
+    sweep.admit([(f"K{i}", f"C{i}", "f") for i in range(5)])
     sweep.emit(revision_id="rev-1")
     with pytest.raises(ValueError, match="name its claimer"):
         sweep.claim("batch_0001", by="  ")
 
 
 def test_an_outcome_is_append_only(sweep: Sweep) -> None:
-    sweep.admit([(f"K{i}", "C", "f") for i in range(5)])
+    sweep.admit([(f"K{i}", f"C{i}", "f") for i in range(5)])
     sweep.emit(revision_id="rev-1")
     sweep.claim("batch_0001", by="gpu5")
     done = ScreenResult("batch_0001", "rev-1", "SUCCEEDED", (stage("shortlist", "SUCCEEDED", artifact="a"),))
@@ -591,7 +650,7 @@ def test_a_batch_keeps_the_revision_it_was_emitted_under(sweep: Sweep) -> None:
     ``test_a_drifted_configuration_is_refused_before_the_batch_runs``.
     """
 
-    sweep.admit([(f"K{i}", "C", "f") for i in range(5)])
+    sweep.admit([(f"K{i}", f"C{i}", "f") for i in range(5)])
     sweep.emit(revision_id="rev-1")
     sweep.claim("batch_0001", by="gpu5")
     recorded = sweep.record(
@@ -631,7 +690,7 @@ def test_a_drifted_configuration_is_refused_before_the_batch_runs(tmp_path) -> N
 
 
 def test_an_exhausted_batch_is_recorded_as_a_measurement(sweep: Sweep) -> None:
-    sweep.admit([(f"K{i}", "C", "f") for i in range(5)])
+    sweep.admit([(f"K{i}", f"C{i}", "f") for i in range(5)])
     sweep.emit(revision_id="rev-1")
     sweep.claim("batch_0001", by="gpu5")
     recorded = sweep.record(
@@ -654,7 +713,7 @@ def test_an_exhausted_batch_is_recorded_as_a_measurement(sweep: Sweep) -> None:
 
 
 def test_the_ledger_line_carries_the_revision_and_the_gate(sweep: Sweep) -> None:
-    sweep.admit([(f"K{i}", "C", "f") for i in range(5)])
+    sweep.admit([(f"K{i}", f"C{i}", "f") for i in range(5)])
     sweep.emit(revision_id="rev-1")
     sweep.claim("batch_0001", by="gpu5")
     sweep.record("batch_0001", ScreenResult("batch_0001", "rev-1", "SUCCEEDED", (stage("s", "SUCCEEDED", artifact="a"),)))
@@ -675,7 +734,7 @@ def test_an_unfinished_run_is_not_recorded_as_a_measurement(sweep: Sweep) -> Non
     carries ``committed_stages`` but no reader compares it against the funnel's length.
     """
 
-    sweep.admit([(f"K{i}", "C", "f") for i in range(5)])
+    sweep.admit([(f"K{i}", f"C{i}", "f") for i in range(5)])
     sweep.emit(revision_id="rev-1")
     sweep.claim("batch_0001", by="gpu5")
     midway = ScreenResult(
@@ -703,7 +762,7 @@ def test_two_recorders_cannot_both_file_an_outcome(sweep: Sweep) -> None:
     conditional-update-plus-rowcount route; the terminal write did not.
     """
 
-    sweep.admit([(f"K{i}", "C", "f") for i in range(5)])
+    sweep.admit([(f"K{i}", f"C{i}", "f") for i in range(5)])
     sweep.emit(revision_id="rev-1")
     sweep.claim("batch_0001", by="gpu5")
     stale = sweep.batch("batch_0001")  # the row as BOTH recorders read it: claimed, unrecorded
@@ -752,7 +811,7 @@ def test_the_ledger_records_the_gate_the_batch_was_emitted_under(tmp_path, keyed
         batch_size=5,
         gate=emitting,
     )
-    carver.admit([(f"K{i}", "C", "f") for i in range(5)])
+    carver.admit([(f"K{i}", f"C{i}", "f") for i in range(5)])
     carver.emit(revision_id="rev-1")
     carved = carver.batch("batch_0001")
     assert carved is not None and carved.gate == emitting.calibration_sha256
@@ -812,7 +871,7 @@ def test_a_pool_carved_before_the_gate_column_still_records(tmp_path, keyed) -> 
     for i in range(5):
         db.execute(
             "INSERT INTO molecule(key, smiles, source, seen_at, batch) VALUES (?,?,?,?,?)",
-            (f"K{i}", "C", "f", float(i), "batch_0001"),
+            (f"K{i}", f"C{i}", "f", float(i), "batch_0001"),
         )
     db.commit()
     db.close()
@@ -841,7 +900,7 @@ def test_a_pool_carved_before_the_gate_column_still_records(tmp_path, keyed) -> 
 
 
 def _three_claimed(sweep: Sweep) -> None:
-    sweep.admit([(f"K{i}", "C", "f") for i in range(15)])  # batch_size=5, so exactly three batches
+    sweep.admit([(f"K{i}", f"C{i}", "f") for i in range(15)])  # batch_size=5, so exactly three batches
     sweep.emit(revision_id="rev-1")
     for batch, who in zip(sweep.pending(), ("gpu5", "gpu6", "gpu7"), strict=True):
         sweep.claim(batch.batch_id, by=who)
@@ -904,7 +963,7 @@ def test_recovery_never_consults_the_process_table(sweep: Sweep, monkeypatch) ->
 
 
 def test_more_than_one_revision_marks_the_batches_incomparable(sweep: Sweep) -> None:
-    sweep.admit([(f"K{i}", "C", "f") for i in range(10)])
+    sweep.admit([(f"K{i}", f"C{i}", "f") for i in range(10)])
     sweep.emit(revision_id="rev-1")
     for batch in sweep.pending():
         sweep.claim(batch.batch_id, by="gpu5")
@@ -912,7 +971,7 @@ def test_more_than_one_revision_marks_the_batches_incomparable(sweep: Sweep) -> 
     assert sweep.state()["comparable"] is True
     # A second revision can only arrive by re-emitting under a retuned funnel; simulate the record.
     object.__setattr__(sweep, "gate", authorize_gate(calibration(revision="rev-2"), provenance={"t": "1"}))
-    sweep.admit([(f"M{i}", "C", "f") for i in range(5)])
+    sweep.admit([(f"M{i}", f"M{i}", "f") for i in range(5)])
     third = sweep.emit(revision_id="rev-2")[0]
     sweep.claim(third.batch_id, by="gpu6")
     sweep.record(third.batch_id, ScreenResult(third.batch_id, "rev-2", "SUCCEEDED", (stage("s", "SUCCEEDED", artifact="a"),)))
@@ -1321,6 +1380,7 @@ def test_a_chunk_cannot_be_more_unique_than_delivered() -> None:
 def _campaign(
     tmp_path,
     keyed,
+    monkeypatch,
     *,
     chunk=8,
     total=24,
@@ -1381,13 +1441,16 @@ def _campaign(
             return []
         return [(s, s, source) for s in json.loads(payload.read_text())]
 
-    generation_module.read_chunk = read
-    generation_module.Ingest.consume = lambda self, chunk: (
-        self.consumed.add(str(chunk)),
-        self.state.parent.mkdir(parents=True, exist_ok=True),
-        self.state.write_text(json.dumps(sorted(self.consumed))),
-        read(chunk),
-    )[-1]
+    def consume(self, chunk):
+        self.consumed.add(str(chunk))
+        self.state.parent.mkdir(parents=True, exist_ok=True)
+        self.state.write_text(json.dumps(sorted(self.consumed)))
+        return read(chunk)
+
+    # Through ``monkeypatch`` rather than by assignment: a bare assignment here is never undone, so
+    # every later test in the process read chunks through this fake and saw no rows.
+    monkeypatch.setattr(generation_module, "read_chunk", read)
+    monkeypatch.setattr(generation_module.Ingest, "consume", consume)
 
     def screen_batch(batch_id, library, device):
         result = ScreenResult(
@@ -1449,7 +1512,7 @@ def _drain(supervisor, seconds=30.0):
     return supervisor.complete()
 
 
-def test_generators_with_separate_output_roots_are_refused(tmp_path, keyed) -> None:
+def test_generators_with_separate_output_roots_are_refused(tmp_path, keyed, monkeypatch) -> None:
     """Per-generator roots ingest one generator and silently drop the rest.
 
     Only one Ingest is kept for the campaign and it discovers chunks by path, so distinct roots
@@ -1461,7 +1524,7 @@ def test_generators_with_separate_output_roots_are_refused(tmp_path, keyed) -> N
 
     from etalon.campaign.supervisor import Supervisor
 
-    supervisor, sweep, _ = _campaign(tmp_path, keyed, generator_devices=("cuda:0", "cuda:1"))
+    supervisor, sweep, _ = _campaign(tmp_path, keyed, monkeypatch, generator_devices=("cuda:0", "cuda:1"))
     generators = list(supervisor.generators.values())
     assert len(generators) == 2, "one generator cannot exhibit a disagreement about roots"
     split = [
@@ -1478,10 +1541,10 @@ def test_generators_with_separate_output_roots_are_refused(tmp_path, keyed) -> N
         )
 
 
-def test_a_campaign_runs_itself_to_completion(tmp_path, keyed) -> None:
+def test_a_campaign_runs_itself_to_completion(tmp_path, keyed, monkeypatch) -> None:
     """Generation, ingest, emission, screening and recording, with nobody watching."""
 
-    supervisor, sweep, _ = _campaign(tmp_path, keyed)
+    supervisor, sweep, _ = _campaign(tmp_path, keyed, monkeypatch)
     assert _drain(supervisor), "the campaign did not terminate"
     state = sweep.state()
     assert state["batches"]["recorded"] == 2
@@ -1490,14 +1553,14 @@ def test_a_campaign_runs_itself_to_completion(tmp_path, keyed) -> None:
     assert supervisor.state()["generators"]["flowr_a"]["stopped"] is True
 
 
-def test_most_passes_are_quiet_and_say_so(tmp_path, keyed) -> None:
+def test_most_passes_are_quiet_and_say_so(tmp_path, keyed, monkeypatch) -> None:
     """The report a supervisor returns when nothing happened must be distinguishable.
 
     490 of one campaign's 500 readings changed nothing. A loop whose every pass looks eventful
     trains its reader to stop looking.
     """
 
-    supervisor, _, _ = _campaign(tmp_path, keyed)
+    supervisor, _, _ = _campaign(tmp_path, keyed, monkeypatch)
     _drain(supervisor)
     assert supervisor.tick().quiet
 
@@ -1538,10 +1601,10 @@ def test_recovery_that_left_a_batch_alone_is_a_quiet_pass() -> None:
     assert not requeued.quiet, "requeued releases the claim -- that is a change"
 
 
-def test_a_supervisor_resumes_from_disk(tmp_path, keyed) -> None:
+def test_a_supervisor_resumes_from_disk(tmp_path, keyed, monkeypatch) -> None:
     """Kill it mid-campaign and the next one picks up from the pool, the ledger and the manifests."""
 
-    first, sweep, screen = _campaign(tmp_path, keyed)
+    first, sweep, screen = _campaign(tmp_path, keyed, monkeypatch)
     first.tick()  # start generation
     import time
 
@@ -1549,20 +1612,20 @@ def test_a_supervisor_resumes_from_disk(tmp_path, keyed) -> None:
     first.tick()  # ingest chunk 1
     assert sweep.state()["pool"]["unique"] == 8
 
-    second, sweep2, _ = _campaign(tmp_path, keyed)  # a new process, same paths
+    second, sweep2, _ = _campaign(tmp_path, keyed, monkeypatch)  # a new process, same paths
     assert sweep2.state()["pool"]["unique"] == 8, "the pool survived"
     assert _drain(second), "the resumed supervisor did not finish the campaign"
 
 
-def test_an_already_ingested_chunk_is_not_ingested_twice(tmp_path, keyed) -> None:
-    supervisor, sweep, _ = _campaign(tmp_path, keyed)
+def test_an_already_ingested_chunk_is_not_ingested_twice(tmp_path, keyed, monkeypatch) -> None:
+    supervisor, sweep, _ = _campaign(tmp_path, keyed, monkeypatch)
     _drain(supervisor)
     before = sweep.state()["pool"]["unique"]
     supervisor.tick()
     assert sweep.state()["pool"]["unique"] == before
 
 
-def test_consecutive_barren_chunks_stop_a_loop_but_one_does_not(tmp_path, keyed) -> None:
+def test_consecutive_barren_chunks_stop_a_loop_but_one_does_not(tmp_path, keyed, monkeypatch) -> None:
     """One empty chunk is a sampler discarding reconstruction failures; five is the model."""
 
     import json
@@ -1597,13 +1660,14 @@ def test_consecutive_barren_chunks_stop_a_loop_but_one_does_not(tmp_path, keyed)
         (path / "manifest.json").write_text(json.dumps({"candidate_count": 0}))
         return ChunkResult(gen.tag, index, path, gen.chunk, 0, 1.0, 0, barren="model returned nothing")
 
-    generation_module.read_chunk = lambda path, tag=None: []
-    generation_module.Ingest.consume = lambda self, chunk: (
-        self.consumed.add(str(chunk)),
-        self.state.parent.mkdir(parents=True, exist_ok=True),
-        self.state.write_text(json.dumps(sorted(self.consumed))),
-        [],
-    )[-1]
+    def consume(self, chunk):
+        self.consumed.add(str(chunk))
+        self.state.parent.mkdir(parents=True, exist_ok=True)
+        self.state.write_text(json.dumps(sorted(self.consumed)))
+        return []
+
+    monkeypatch.setattr(generation_module, "read_chunk", lambda path, tag=None: [])
+    monkeypatch.setattr(generation_module.Ingest, "consume", consume)
 
     supervisor = Supervisor(
         sweep,
@@ -1725,6 +1789,107 @@ def test_a_failed_chunk_reads_as_empty_rather_than_raising(tmp_path) -> None:
     assert read_chunk(chunk) == []
 
 
+# One real PocketXMol candidate, 24 atoms, whose two stereo perceivers disagree: RDKit assigns a
+# chiral tag from the signed volume and writes `[C@H]` into the canonical SMILES, while the InChI
+# library reads the same coordinates, declares the centre undefined, and returns the flat
+# `UHFFFAOYSA` block. Kept as a molblock rather than built in code because the disagreement is a
+# property of this geometry.
+_MARGINAL_STEREO_MOLBLOCK = """\
+
+     RDKit          3D
+
+ 24 27  0  0  0  0  0  0  0  0999 V2000
+   22.9521  -19.3510    5.3527 C   0  0  0  0  0  0  0  0  0  0  0  0
+   19.2912  -27.3646    8.0099 C   0  0  0  0  0  0  0  0  0  0  0  0
+   24.2273  -16.6098    7.4187 C   0  0  0  0  0  0  0  0  0  0  0  0
+   22.4362  -19.6355    3.1056 C   0  0  0  0  0  0  0  0  0  0  0  0
+   19.6924  -29.3658    6.9094 N   0  0  0  0  0  0  0  0  0  0  0  0
+   20.0882  -25.8517    6.2671 C   0  0  0  0  0  0  0  0  0  0  0  0
+   19.6294  -25.5116    5.0348 C   0  0  0  0  0  0  0  0  0  0  0  0
+   19.8925  -27.1228    6.7350 C   0  0  2  0  0  0  0  0  0  0  0  0
+   23.5848  -18.6368    6.4120 C   0  0  0  0  0  0  0  0  0  0  0  0
+   21.6429  -21.1161    4.6114 C   0  0  0  0  0  0  0  0  0  0  0  0
+   21.7425  -20.7066    3.3939 N   0  0  0  0  0  0  0  0  0  0  0  0
+   23.6690  -17.2747    6.3866 C   0  0  0  0  0  0  0  0  0  0  0  0
+   24.7541  -18.6317    8.4498 C   0  0  0  0  0  0  0  0  0  0  0  0
+   20.0999  -28.3586    6.0281 C   0  0  0  0  0  0  0  0  0  0  0  0
+   20.7450  -24.9537    7.0733 C   0  0  0  0  0  0  0  0  0  0  0  0
+   19.8682  -24.2691    4.5891 C   0  0  0  0  0  0  0  0  0  0  0  0
+   20.8563  -22.1703    4.8327 N   0  0  0  0  0  0  0  0  0  0  0  0
+   19.1292  -28.8360    8.0992 C   0  0  0  0  0  0  0  0  0  0  0  0
+   24.7695  -17.2806    8.4069 N   0  0  0  0  0  0  0  0  0  0  0  0
+   22.2791  -20.5022    5.5659 N   0  0  0  0  0  0  0  0  0  0  0  0
+   24.0997  -19.3431    7.4509 C   0  0  0  0  0  0  0  0  0  0  0  0
+   22.9955  -18.9046    4.0589 C   0  0  0  0  0  0  0  0  0  0  0  0
+   21.0122  -23.7403    6.5861 C   0  0  0  0  0  0  0  0  0  0  0  0
+   20.5873  -23.4118    5.3363 C   0  0  0  0  0  0  0  0  0  0  0  0
+  1  9  1  0
+  1 20  2  0
+  1 22  1  0
+  2  8  1  0
+  2 18  1  0
+  3 12  2  0
+  3 19  1  0
+  4 11  1  0
+  4 22  2  0
+  5 14  1  0
+  5 18  1  0
+  6  7  1  0
+  8  6  1  6
+  6 15  2  0
+  7 16  2  0
+  8 14  1  0
+  9 12  1  0
+  9 21  2  0
+ 10 11  2  0
+ 10 17  1  0
+ 10 20  1  0
+ 13 19  2  0
+ 13 21  1  0
+ 15 23  1  0
+ 16 24  1  0
+ 17 24  1  0
+ 23 24  2  0
+M  END
+M  END
+"""
+
+
+def _write_chunk(chunk, molblock: str) -> None:
+    chunk.mkdir(parents=True, exist_ok=True)
+    (chunk / "manifest.json").write_text("{}")
+    (chunk / "candidates.sdf").write_text(molblock.rstrip("\n") + "\n$$$$\n")
+
+
+def test_a_chunk_row_is_keyed_on_the_smiles_it_ships(tmp_path) -> None:
+    """A key read off the 3D molecule is not a function of the string the screen docks.
+
+    Thirty-two SMILES in the v7 pool carried two InChIKeys each; thirty-one of those pairs were
+    carved into two different batches, docked twice, and counted as two molecules.
+    """
+
+    pytest.importorskip("rdkit")
+    from rdkit import Chem, RDLogger
+
+    from etalon.campaign.generation import read_chunk
+
+    RDLogger.DisableLog("rdApp.*")
+    chunk = tmp_path / "pocketxmol" / "chunk_001"
+    _write_chunk(chunk, _MARGINAL_STEREO_MOLBLOCK)
+
+    rows = read_chunk(chunk)
+    assert len(rows) == 1
+    key, smiles, _ = rows[0]
+
+    # The property, which is what has to hold for every molecule rather than just this one.
+    assert key == Chem.MolToInchiKey(Chem.MolFromSmiles(smiles))
+
+    # And this particular geometry is one where the old policy gave a different answer, so the
+    # test would fail against it rather than merely passing for a different reason.
+    read = Chem.MolFromMolBlock(_MARGINAL_STEREO_MOLBLOCK, removeHs=True, sanitize=True)
+    assert Chem.MolToInchiKey(read) != key
+
+
 def test_a_generator_resumes_at_the_first_unwritten_chunk(tmp_path) -> None:
     from etalon.campaign.generation import Generator, Pocket
 
@@ -1765,7 +1930,7 @@ def test_the_generation_command_sets_no_cuda_mask() -> None:
 # -- a retired generator's device, which used to sit idle for the rest of the campaign -------
 
 
-def test_a_retired_generator_hands_its_device_to_screening(tmp_path, keyed) -> None:
+def test_a_retired_generator_hands_its_device_to_screening(tmp_path, keyed, monkeypatch) -> None:
     """The move an operator made by hand eighteen hours in, made when the loop ends instead.
 
     ``screen_devices`` was fixed at construction, so a campaign that retired its generators finished
@@ -1773,7 +1938,7 @@ def test_a_retired_generator_hands_its_device_to_screening(tmp_path, keyed) -> N
     -- produced half that campaign's hits.
     """
 
-    supervisor, _, _ = _campaign(tmp_path, keyed, migrate=True)
+    supervisor, _, _ = _campaign(tmp_path, keyed, monkeypatch, migrate=True)
     assert "cuda:0" not in supervisor.screen_devices
 
     _drain(supervisor)
@@ -1783,12 +1948,12 @@ def test_a_retired_generator_hands_its_device_to_screening(tmp_path, keyed) -> N
     assert supervisor.state()["screen_devices"] == ["cuda:5", "cuda:6", "cuda:0"]
 
 
-def test_migration_is_reported_and_is_not_a_quiet_pass(tmp_path, keyed) -> None:
+def test_migration_is_reported_and_is_not_a_quiet_pass(tmp_path, keyed, monkeypatch) -> None:
     """A device changing hands is an event. 490 of 500 passes are quiet and this is not one of them."""
 
     import time
 
-    supervisor, _, _ = _campaign(tmp_path, keyed, migrate=True)
+    supervisor, _, _ = _campaign(tmp_path, keyed, monkeypatch, migrate=True)
     reports = []
     for _ in range(40):
         report = supervisor.tick()
@@ -1805,7 +1970,7 @@ def test_migration_is_reported_and_is_not_a_quiet_pass(tmp_path, keyed) -> None:
     assert any("joined the screening pool" in note for note in moved[0].notes)
 
 
-def test_without_the_flag_the_idle_device_is_named_once_and_not_taken(tmp_path, keyed) -> None:
+def test_without_the_flag_the_idle_device_is_named_once_and_not_taken(tmp_path, keyed, monkeypatch) -> None:
     """Off by default, because on a shared host those cards may be owed back to the machine.
 
     An idle GPU nobody mentions is the failure this exists to stop, so the refusal to take it still
@@ -1814,7 +1979,7 @@ def test_without_the_flag_the_idle_device_is_named_once_and_not_taken(tmp_path, 
 
     import time
 
-    supervisor, _, _ = _campaign(tmp_path, keyed, migrate=False)
+    supervisor, _, _ = _campaign(tmp_path, keyed, monkeypatch, migrate=False)
     reports = []
     for _ in range(40):
         reports.append(supervisor.tick())
@@ -1834,7 +1999,7 @@ def test_without_the_flag_the_idle_device_is_named_once_and_not_taken(tmp_path, 
     assert "migrate_retired_devices=True" in mentions[0]
 
 
-def test_a_card_shared_by_two_loops_is_not_taken_until_both_stop(tmp_path, keyed) -> None:
+def test_a_card_shared_by_two_loops_is_not_taken_until_both_stop(tmp_path, keyed, monkeypatch) -> None:
     """One model across two loops on one card is a normal configuration.
 
     ``tag`` rather than the model is the generator's identity precisely because of this shape, and a
@@ -1842,7 +2007,13 @@ def test_a_card_shared_by_two_loops_is_not_taken_until_both_stop(tmp_path, keyed
     """
 
     supervisor, _, _ = _campaign(
-        tmp_path, keyed, generator_devices=("cuda:0", "cuda:0"), total=8, chunk=8, migrate=True
+        tmp_path,
+        keyed,
+        monkeypatch,
+        generator_devices=("cuda:0", "cuda:0"),
+        total=8,
+        chunk=8,
+        migrate=True,
     )
     assert set(supervisor.generators) == {"flowr_a", "flowr_b"}
 
@@ -1863,11 +2034,11 @@ def test_a_card_shared_by_two_loops_is_not_taken_until_both_stop(tmp_path, keyed
     assert "cuda:0" in supervisor.screen_devices
 
 
-def test_a_device_named_in_both_lists_is_not_offered_two_batches(tmp_path, keyed) -> None:
+def test_a_device_named_in_both_lists_is_not_offered_two_batches(tmp_path, keyed, monkeypatch) -> None:
     """A duplicate lane would be claimed twice and refused by the sweep rather than by anything
     that could explain it."""
 
-    supervisor, _, _ = _campaign(tmp_path, keyed, generator_devices=("cuda:5",), migrate=True)
+    supervisor, _, _ = _campaign(tmp_path, keyed, monkeypatch, generator_devices=("cuda:5",), migrate=True)
     assert supervisor.screen_devices == ("cuda:5", "cuda:6")
 
     _drain(supervisor)
@@ -2144,7 +2315,7 @@ def test_the_device_goes_in_the_argv_not_the_environment(tmp_path) -> None:
     )
 
 
-def test_one_batch_per_device_unless_told_otherwise(tmp_path, keyed) -> None:
+def test_one_batch_per_device_unless_told_otherwise(tmp_path, keyed, monkeypatch) -> None:
     """The default rations devices; ``batches_per_device`` says when that is the wrong resource.
 
     Measured on ALK2: the docking tier's wall clock went to PoseBusters in Python rather than to the
@@ -2154,7 +2325,7 @@ def test_one_batch_per_device_unless_told_otherwise(tmp_path, keyed) -> None:
 
     from etalon.campaign.supervisor import Supervisor
 
-    supervisor, sweep, _ = _campaign(tmp_path, keyed)
+    supervisor, sweep, _ = _campaign(tmp_path, keyed, monkeypatch)
     devices = ("cuda:5", "cuda:6")
 
     def build(per_device: int) -> Supervisor:
@@ -2173,12 +2344,12 @@ def test_one_batch_per_device_unless_told_otherwise(tmp_path, keyed) -> None:
         build(0)
 
 
-def test_a_device_with_a_batch_on_it_offers_one_fewer_slot(tmp_path, keyed) -> None:
+def test_a_device_with_a_batch_on_it_offers_one_fewer_slot(tmp_path, keyed, monkeypatch) -> None:
     """Occupancy is counted per device, not treated as a boolean."""
 
     from etalon.campaign.supervisor import Supervisor, _Job
 
-    supervisor, sweep, _ = _campaign(tmp_path, keyed)
+    supervisor, sweep, _ = _campaign(tmp_path, keyed, monkeypatch)
     two = Supervisor(
         sweep,
         revision_id="rev-1",
@@ -2197,7 +2368,7 @@ def test_a_device_with_a_batch_on_it_offers_one_fewer_slot(tmp_path, keyed) -> N
     assert two._free_slots() == ["cuda:6", "cuda:6"]
 
 
-def test_a_batch_already_screening_here_is_not_handed_to_a_second_device(tmp_path, keyed) -> None:
+def test_a_batch_already_screening_here_is_not_handed_to_a_second_device(tmp_path, keyed, monkeypatch) -> None:
     """``recover`` releases a claim with no run record, and a screen that just started has none.
 
     A screen subprocess has to start, import MolCascade and compile the funnel before it writes a
@@ -2211,7 +2382,7 @@ def test_a_batch_already_screening_here_is_not_handed_to_a_second_device(tmp_pat
 
     import threading
 
-    supervisor, sweep, _ = _campaign(tmp_path, keyed, batch_size=5)
+    supervisor, sweep, _ = _campaign(tmp_path, keyed, monkeypatch, batch_size=5)
     held = threading.Event()
     dispatched: list[str] = []
 
@@ -2220,7 +2391,7 @@ def test_a_batch_already_screening_here_is_not_handed_to_a_second_device(tmp_pat
         held.wait(10.0)  # the window: started, no run record written yet
 
     supervisor.screen = slow_screen  # type: ignore[assignment]
-    sweep.admit([(f"K{i}", "C", "f") for i in range(5)])
+    sweep.admit([(f"K{i}", f"C{i}", "f") for i in range(5)])
     sweep.emit(revision_id="rev-1")
 
     try:
@@ -2236,7 +2407,7 @@ def test_a_batch_already_screening_here_is_not_handed_to_a_second_device(tmp_pat
         held.set()
 
 
-def test_a_restarted_supervisor_does_not_dispatch_on_top_of_live_screens(tmp_path, keyed) -> None:
+def test_a_restarted_supervisor_does_not_dispatch_on_top_of_live_screens(tmp_path, keyed, monkeypatch) -> None:
     """``self.jobs`` is this process's memory; a supervisor is advertised as restartable.
 
     The previous process's screens keep committing stages after it dies -- measured, a worker whose
@@ -2248,8 +2419,8 @@ def test_a_restarted_supervisor_does_not_dispatch_on_top_of_live_screens(tmp_pat
 
     from etalon.campaign.supervisor import Supervisor
 
-    _, sweep, screen = _campaign(tmp_path, keyed, batch_size=5)
-    sweep.admit([(f"K{i}", "C", "f") for i in range(15)])
+    _, sweep, screen = _campaign(tmp_path, keyed, monkeypatch, batch_size=5)
+    sweep.admit([(f"K{i}", f"C{i}", "f") for i in range(15)])
     sweep.emit(revision_id="rev-1")
     for batch_id, device in (("batch_0001", "cuda:5"), ("batch_0002", "cuda:6")):
         sweep.claim(batch_id, by=device)
@@ -2392,7 +2563,7 @@ def test_a_batch_id_that_already_names_a_run_is_refused(sweep: Sweep) -> None:
     campaign's own output. Nothing failed and nothing warned.
     """
 
-    sweep.admit([(f"K{i}", "C", "f") for i in range(5)])
+    sweep.admit([(f"K{i}", f"C{i}", "f") for i in range(5)])
     sweep.screen.runs["batch_0001"] = ScreenResult(
         "batch_0001", "someone-elses-revision", "SUCCEEDED", (stage("s", "SUCCEEDED", artifact="a"),)
     )
@@ -2406,7 +2577,7 @@ def test_a_prefix_scopes_batch_ids_to_one_campaign(tmp_path, keyed) -> None:
     screen = FakeScreen()
     gate = authorize_gate(calibration(), provenance=screen.provenance())
     first = Sweep(screen, Ledger(tmp_path / "a.jsonl"), tmp_path / "a.sqlite", batch_size=5, gate=gate)
-    first.admit([(f"K{i}", "C", "f") for i in range(5)])
+    first.admit([(f"K{i}", f"C{i}", "f") for i in range(5)])
     assert [b.batch_id for b in first.emit(revision_id="rev-1")] == ["batch_0001"]
     screen.runs["batch_0001"] = ScreenResult(
         "batch_0001", "rev-1", "SUCCEEDED", (stage("s", "SUCCEEDED", artifact="a"),)
@@ -2420,7 +2591,7 @@ def test_a_prefix_scopes_batch_ids_to_one_campaign(tmp_path, keyed) -> None:
         gate=gate,
         prefix="v7_",
     )
-    second.admit([(f"K{i}", "C", "f") for i in range(5)])
+    second.admit([(f"K{i}", f"C{i}", "f") for i in range(5)])
     assert [b.batch_id for b in second.emit(revision_id="rev-1")] == ["v7_batch_0001"]
 
 
@@ -2440,11 +2611,11 @@ def test_a_sweep_that_lost_its_prefix_is_refused_by_its_own_pool(tmp_path, keyed
     pool = tmp_path / "pool.sqlite"
 
     scoped = Sweep(screen, Ledger(tmp_path / "a.jsonl"), pool, batch_size=5, gate=gate, prefix="v7_")
-    scoped.admit([(f"K{i}", "C", "f") for i in range(5)])
+    scoped.admit([(f"K{i}", f"C{i}", "f") for i in range(5)])
     assert [b.batch_id for b in scoped.emit(revision_id="rev-1")] == ["v7_batch_0001"]
 
     lost = Sweep(screen, Ledger(tmp_path / "a.jsonl"), pool, batch_size=5, gate=gate)
-    lost.admit([(f"J{i}", "C", "f") for i in range(5)])
+    lost.admit([(f"J{i}", f"J{i}", "f") for i in range(5)])
     with pytest.raises(SweepError, match="two id families") as refusal:
         lost.emit(revision_id="rev-1")
     # The refusal names the prefix that would make it work, read out of the pool itself.
@@ -2452,12 +2623,12 @@ def test_a_sweep_that_lost_its_prefix_is_refused_by_its_own_pool(tmp_path, keyed
 
     # And the other direction: a prefix pointed at a pool carved without one.
     bare = Sweep(screen, Ledger(tmp_path / "c.jsonl"), tmp_path / "c.sqlite", batch_size=5, gate=gate)
-    bare.admit([(f"L{i}", "C", "f") for i in range(5)])
+    bare.admit([(f"L{i}", f"L{i}", "f") for i in range(5)])
     assert [b.batch_id for b in bare.emit(revision_id="rev-1")] == ["batch_0001"]
     moved = Sweep(
         screen, Ledger(tmp_path / "c.jsonl"), tmp_path / "c.sqlite",
         batch_size=5, gate=gate, prefix="v8_",
     )
-    moved.admit([(f"M{i}", "C", "f") for i in range(5)])
+    moved.admit([(f"M{i}", f"M{i}", "f") for i in range(5)])
     with pytest.raises(SweepError, match="two id families"):
         moved.emit(revision_id="rev-1")

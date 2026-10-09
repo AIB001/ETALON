@@ -119,10 +119,21 @@ CREATE TABLE IF NOT EXISTS batch (
 # and the campaign already on disk is the one with batches in it.
 _MIGRATIONS = (("batch", "gate", "ALTER TABLE batch ADD COLUMN gate TEXT"),)
 
+# One SMILES, one row. Not in `_SCHEMA` because this one can legitimately fail to be created, and
+# the schema script runs as one `executescript` that must not be left half-applied.
+_SMILES_INDEX = "molecule_smiles"
+
 
 @dataclass(frozen=True, slots=True)
 class AdmitReport:
-    """What one ingest added to the pool."""
+    """What one ingest added to the pool.
+
+    ``duplicates`` is ``offered - accepted``, so it counts every row the pool refused for any
+    reason -- a key it already held, and now also a SMILES it already held. The second case used to
+    be invisible: a molecule offered with a second key for a SMILES already in the pool was counted
+    as newly accepted, and on the v7 pool thirty-one of them were carved into a second batch and
+    docked again while this field reported nothing.
+    """
 
     offered: int
     accepted: int
@@ -242,7 +253,40 @@ class Sweep:
                 present = {row[1] for row in db.execute(f"PRAGMA table_info({table})")}
                 if column not in present:
                     db.execute(statement)
+            self._ensure_one_row_per_smiles(db)
             db.commit()
+
+    @staticmethod
+    def _ensure_one_row_per_smiles(db: sqlite3.Connection) -> None:
+        """Make a second row for one SMILES an ignored insert rather than a second docking.
+
+        The pool deduplicates on ``key``, and ``key`` is the caller's -- ``etalon_sweep_admit`` takes
+        it as an argument and says an InChIKey is the usual choice. Nothing checked that it was a
+        function of the SMILES, and on the ALK2 v7 pool it was not: thirty-two SMILES carried two
+        keys each, thirty-one of those pairs were carved into two different batches, and each was
+        docked twice and counted as two molecules. The ingest path is fixed at its source in
+        :func:`etalon.campaign.generation.read_chunk`, but the pool is a public boundary and the
+        invariant belongs on the boundary.
+
+        With the index in place ``INSERT OR IGNORE`` drops the second row, so ``accepted`` does not
+        rise and ``AdmitReport.duplicates`` becomes true for the first time.
+
+        A pool that already violates the invariant cannot have it imposed -- SQLite raises
+        ``IntegrityError`` and the index is not created -- and a finished campaign's pool must not
+        be rewritten to make a new rule fit. So the fallback is a plain index: the invariant is not
+        enforced there, and :meth:`state` says so out loud under ``one_row_per_smiles`` rather than
+        letting a reader assume it holds everywhere.
+        """
+
+        existing = db.execute(
+            "SELECT name FROM sqlite_master WHERE type='index' AND name=?", (_SMILES_INDEX,)
+        ).fetchone()
+        if existing is not None:
+            return
+        try:
+            db.execute(f"CREATE UNIQUE INDEX {_SMILES_INDEX} ON molecule(smiles)")
+        except sqlite3.IntegrityError:
+            db.execute(f"CREATE INDEX {_SMILES_INDEX} ON molecule(smiles)")
 
     def _connect(self) -> sqlite3.Connection:
         db = sqlite3.connect(self.pool, timeout=30.0, isolation_level=None)
@@ -262,7 +306,11 @@ class Sweep:
         knows what the library already held.
 
         ``INSERT OR IGNORE`` rather than a read-then-write, because two collectors ingesting
-        concurrently would both find a key absent.
+        concurrently would both find a key absent. It also does the second half of the work: with
+        the unique index on ``smiles`` in place, a row whose SMILES the pool already holds under a
+        different key is ignored too, so the deduplication no longer depends on the caller having
+        derived ``key`` from ``smiles``. See :meth:`_ensure_one_row_per_smiles` for the pool this
+        was measured on and for the one case where the index cannot be imposed.
         """
 
         rows = [(k, s, src, time.time()) for k, s, src in molecules if str(k).strip()]
@@ -667,9 +715,35 @@ class Sweep:
                     "SELECT source, COUNT(*) FROM molecule GROUP BY source ORDER BY 2 DESC"
                 ).fetchall()
             )
+            # Whether one SMILES means one row is a property of *this* pool, not of the code: a
+            # pool filled before the invariant existed keeps its violations, because rewriting a
+            # finished campaign's pool to fit a new rule would destroy the record of what was
+            # actually screened. So the reading asks the database rather than assuming.
+            index_sql = db.execute(
+                "SELECT sql FROM sqlite_master WHERE type='index' AND name=?", (_SMILES_INDEX,)
+            ).fetchone()
+            one_per_smiles = index_sql is not None and "UNIQUE" in str(index_sql[0]).upper()
+            smiles_conflicts = (
+                0
+                if one_per_smiles
+                else int(
+                    db.execute(
+                        "SELECT COUNT(*) FROM "
+                        "(SELECT smiles FROM molecule GROUP BY smiles HAVING COUNT(*) > 1)"
+                    ).fetchone()[0]
+                )
+            )
         revisions = sorted({b.revision_id for b in done if b.revision_id})
         return {
-            "pool": {"unique": int(total), "awaiting_batch": int(pooled), "by_source": by_source},
+            "pool": {
+                "unique": int(total),
+                "awaiting_batch": int(pooled),
+                "by_source": by_source,
+                "one_row_per_smiles": one_per_smiles,
+                # How many SMILES this pool holds more than once. Zero by construction where the
+                # invariant is enforced; a count of molecules screened twice where it is not.
+                "smiles_conflicts": smiles_conflicts,
+            },
             "batches": {
                 "emitted": len(done) + len(self.pending()) + len(self.outstanding()),
                 "pending": len(self.pending()),

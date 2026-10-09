@@ -214,9 +214,19 @@ def register(mcp: Any) -> None:
 
         Args:
             molecules_json: ``[{"key": ..., "smiles": ..., "source": ...}, ...]``. ``key`` is the
-                identity the deduplication is on; an InChIKey is the usual choice. Two different
-                standardisation policies produce two different keys for one molecule, so the policy
-                has to be fixed before the pool is filled, not after.
+                identity the deduplication is on; an InChIKey is the usual choice, and it should be
+                derived from the ``smiles`` in the same row rather than from whatever 3D structure
+                that SMILES came from. Two different standardisation policies produce two different
+                keys for one molecule, and the policy has to be fixed before the pool is filled, not
+                after.
+
+                A key that disagrees with its own SMILES is no longer silently accepted: the pool
+                holds one row per SMILES, so a second key on a SMILES it already has is an ignored
+                insert and is reported in ``duplicates``. That is a measurement rather than a
+                precaution -- on the ALK2 v7 pool, filled before the constraint existed, thirty-one
+                molecules reached two batches and were docked twice. A pool that already violates
+                the constraint keeps it unenforced; ``etalon_sweep_status`` reports which case a
+                pool is in under ``pool.one_row_per_smiles``.
         """
 
         rows = json.loads(molecules_json)
