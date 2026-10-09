@@ -36,9 +36,22 @@ class MolCascadeScreening:
         target: MolCascade's ``TargetConfig`` mapping -- receptor, box, reference ligand. Absolute
             paths only; a relative workspace makes MolCascade derive a relative receptor path that
             its own validation then rejects.
-        workers: CPU lanes per batch. Ten by default rather than the machine's width: with several
-            batches and several generation loops in flight, a wider default oversubscribes the host,
-            and screening is the side of that trade with spare capacity.
+        workers: Shards run at once *within* one batch. Ten by default rather than the machine's
+            width: with several batches and several generation loops in flight, a wider default
+            oversubscribes the host, and screening is the side of that trade with spare capacity.
+
+            This number is live, and that is the thing to know about it. It is handed to
+            ``Screen.run``, which builds ``StageResources(workers=workers, devices=(device,))``
+            directly and so never passes through MolCascade's ``plan_lanes`` -- the function whose
+            whole job is to refuse more processes than there are cards. So ten workers against the
+            one card named here is ten shards on one card, and each Uni-Dock shard allocates on the
+            order of 25 GB. Measured on ALK2, twelve shards against one 96 GB card gave
+            ``cudaErrorMemoryAllocation`` at ``monte_carlo.cu:2490``, and the pose-strain stage then
+            failed downstream with "shard N was given no files for side input 'poses'" -- a
+            consequence, not a second fault. Keep ``workers * 25 GB`` inside one card's memory.
+
+            It is also the *only* one of the two drivers where this number does anything; see
+            :class:`MolCascadeProcessScreening`, where it is inert.
     """
 
     screen: Screen
@@ -131,14 +144,28 @@ class MolCascadeProcessScreening:
             takes rather than a reimplementation of it.
         executable: argv prefix for the CLI. A list so a wrapper that activates an environment can
             be put in front of it.
-        env: Extra environment for the child. ``CUDA_VISIBLE_DEVICES`` is set from ``device``.
-        workers: Shards run at once *within* one batch. This is CPU parallelism for the cheap tiers
-            and **GPU concurrency for the docking ones**, and the second is the one that bites: each
-            batch sees exactly one card here, and each Uni-Dock shard allocates on the order of
-            25 GB. Measured on ALK2, twelve shards against one 96 GB card gave
-            ``cudaErrorMemoryAllocation`` at ``monte_carlo.cu:2490``, and the pose-strain stage then
-            failed downstream with "shard N was given no files for side input 'poses'" -- a
-            consequence, not a second fault. Keep ``workers * 25 GB`` inside one card's memory.
+        env: Extra environment for the child. ``CUDA_VISIBLE_DEVICES`` is deliberately **removed**
+            from it rather than set: the card is named to MolCascade as ``--device cuda:N``, which
+            is an absolute physical index, and MolCascade pins each shard with that index. Setting
+            ``CUDA_VISIBLE_DEVICES`` as well makes the child renumber the one card it can see to
+            ``cuda:0`` and pin every shard to physical card zero. The comment at the removal
+            records the measurement: eight batches, eight distinct masks, every Uni-Dock child on
+            card 0 while seven cards sat idle.
+        workers: Shards run at once *within* one batch -- **and inert here**, which is the opposite
+            of what this entry used to claim.
+
+            The CLI routes it through ``plan_lanes``, which plans one lane per card and then says
+            of ``workers``: "it never raises it above the number of lanes, because there is nothing
+            for the extra processes to be pinned to" -- the clamp is ``workers < len(lanes)``, a
+            lower bound only. The supervisor gives each batch exactly one card, so ``--device
+            cuda:N`` yields ``lanes = ("cuda:N",)`` and ``plan.workers == 1``. The resulting
+            ``StageResources`` is run-wide and no stage recomputes it, so the cheap CPU tiers
+            inherit that single lane too: nothing in a pinned run is made wider by this number.
+
+            Left at ten so that an unpinned invocation (``device=""``, hence ``--device`` absent and
+            one lane per detected card) is not silently narrowed, and so the two drivers take the
+            same argument. The per-card memory arithmetic that used to be documented here belongs to
+            :class:`MolCascadeScreening`, where ``workers`` bypasses ``plan_lanes`` and is live.
     """
 
     screen: Screen

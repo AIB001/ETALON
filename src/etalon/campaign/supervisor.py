@@ -384,9 +384,6 @@ class Supervisor:
             return ()
         return tuple(batch.batch_id for batch in self.sweep.emit(revision_id=self.revision_id))
 
-    def _busy_devices(self) -> set[str]:
-        return {job.device for job in self.jobs if job.kind == "screen"}
-
     def _free_slots(self) -> list[str]:
         """Screening slots available now, a device repeated once per free slot on it.
 
@@ -395,11 +392,26 @@ class Supervisor:
         Uni-Dock runs in bursts and the wall clock goes to pose validation in Python -- so eight
         batches on eight cards held 1.3 cores each of a 96-core machine and 25 GB of each 96 GB
         card. The limit being enforced was the one resource that was not scarce.
+
+        Occupancy is read from the pool as well as from ``self.jobs``, because ``self.jobs`` is this
+        *process's* memory and a supervisor is advertised as restartable. A restarted one starts
+        with an empty job list while the previous process's screens are still committing stages --
+        ``Sweep.recover`` deliberately leaves those alone, a claim is exactly the durable record of
+        them, and reading only memory therefore reported every card free and dispatched a second
+        full set on top. The claim names the device because ``_start_screens`` claims ``by=device``.
         """
 
         from collections import Counter
 
         busy = Counter(job.device for job in self.jobs if job.kind == "screen")
+        live = {job.name for job in self.jobs if job.kind == "screen"}
+        for batch in self.sweep.outstanding():
+            # Already counted through this process's own job list; counting it twice would retire a
+            # slot that is occupied once.
+            if batch.batch_id in live:
+                continue
+            if batch.claimed_by in self.screen_devices:
+                busy[batch.claimed_by] += 1
         slots: list[str] = []
         for device in self.screen_devices:
             slots.extend([device] * max(0, self.batches_per_device - busy[device]))
@@ -410,8 +422,20 @@ class Supervisor:
             return ()
         started: list[str] = []
         free = self._free_slots()
+        # Batches this process already has a screen running for. `Sweep.recover` releases the claim
+        # of a batch with no run record yet, and a screen that was launched seconds ago has no run
+        # record yet -- the subprocess has to start, import MolCascade and compile the funnel before
+        # it writes one. So a batch dispatched on one tick is routinely back in `pending()` on the
+        # next, and without this it is handed to a second device: two subprocesses, one batch id,
+        # one run id, both committing stages into the same run record. Recovery cannot untangle that
+        # afterwards, because a batch id *is* a run id and the record does not say how many writers
+        # it had. Containing it here is right rather than in `recover`, which has no way to know
+        # whether a process still exists -- that is the design decision its docstring records.
+        running_here = {job.name for job in self.jobs if job.kind == "screen"}
         for device in free:
-            pending = self.sweep.pending()
+            pending = tuple(
+                batch for batch in self.sweep.pending() if batch.batch_id not in running_here
+            )
             if not pending:
                 break
             batch = pending[0]
@@ -448,6 +472,7 @@ class Supervisor:
                     process=_Call(self.screen, batch.batch_id, library, device),
                 )
             )
+            running_here.add(batch.batch_id)
             started.append(f"{batch.batch_id}@{device}")
         return tuple(started)
 

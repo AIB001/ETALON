@@ -2197,6 +2197,85 @@ def test_a_device_with_a_batch_on_it_offers_one_fewer_slot(tmp_path, keyed) -> N
     assert two._free_slots() == ["cuda:6", "cuda:6"]
 
 
+def test_a_batch_already_screening_here_is_not_handed_to_a_second_device(tmp_path, keyed) -> None:
+    """``recover`` releases a claim with no run record, and a screen that just started has none.
+
+    A screen subprocess has to start, import MolCascade and compile the funnel before it writes a
+    run record -- seconds on a loaded host. ``Sweep.recover`` runs at the top of every tick and
+    releases the claim of any claimed batch whose run record does not exist, which is right for a
+    crash and wrong for a launch: the batch is back in ``pending()`` on the very next tick while
+    its screen is still starting. Handed to a second device, two subprocesses commit stages into
+    one run record, and because a batch id *is* a run id nothing afterwards can say that record had
+    two writers.
+    """
+
+    import threading
+
+    supervisor, sweep, _ = _campaign(tmp_path, keyed, batch_size=5)
+    held = threading.Event()
+    dispatched: list[str] = []
+
+    def slow_screen(batch_id, library, device):  # noqa: ANN001, ARG001
+        dispatched.append(f"{batch_id}@{device}")
+        held.wait(10.0)  # the window: started, no run record written yet
+
+    supervisor.screen = slow_screen  # type: ignore[assignment]
+    sweep.admit([(f"K{i}", "C", "f") for i in range(5)])
+    sweep.emit(revision_id="rev-1")
+
+    try:
+        assert supervisor._start_screens([]) == ("batch_0001@cuda:5",)
+        # The release recovery performs, verbatim: claimed, and no run record to ask.
+        assert [r.action for r in sweep.recover()] == ["requeued"]
+        assert [b.batch_id for b in sweep.pending()] == ["batch_0001"]
+
+        # Next pass. cuda:6 is free, batch_0001 is pending again, and its screen is still live here.
+        assert supervisor._start_screens([]) == ()
+        assert dispatched == ["batch_0001@cuda:5"]
+    finally:
+        held.set()
+
+
+def test_a_restarted_supervisor_does_not_dispatch_on_top_of_live_screens(tmp_path, keyed) -> None:
+    """``self.jobs`` is this process's memory; a supervisor is advertised as restartable.
+
+    The previous process's screens keep committing stages after it dies -- measured, a worker whose
+    shell had died left a child committing stages for another hour -- and ``Sweep.recover``
+    deliberately leaves a running run alone, because the claim is exactly the durable record of it.
+    Counting occupancy from memory alone therefore reported every card free, and the restart
+    dispatched a second full set of batches on top of the first.
+    """
+
+    from etalon.campaign.supervisor import Supervisor
+
+    _, sweep, screen = _campaign(tmp_path, keyed, batch_size=5)
+    sweep.admit([(f"K{i}", "C", "f") for i in range(15)])
+    sweep.emit(revision_id="rev-1")
+    for batch_id, device in (("batch_0001", "cuda:5"), ("batch_0002", "cuda:6")):
+        sweep.claim(batch_id, by=device)
+        screen.runs[batch_id] = ScreenResult(
+            batch_id, "rev-1", "RUNNING", (stage("conformers", "SUCCEEDED", artifact="a"),)
+        )
+    assert {r.action for r in sweep.recover()} == {"running"}
+
+    def build(per_device: int) -> Supervisor:
+        return Supervisor(
+            sweep,
+            revision_id="rev-1",
+            workspace=tmp_path / f"restart{per_device}",
+            screen_devices=("cuda:5", "cuda:6"),
+            batches_per_device=per_device,
+            screen=lambda *args: None,
+        )
+
+    fresh = build(1)
+    assert fresh.jobs == []  # a restart genuinely remembers nothing
+    assert fresh._free_slots() == []
+    assert fresh._start_screens([]) == ()
+    # The ration is still per device, not a blanket refusal: two per card leaves one each.
+    assert build(2)._free_slots() == ["cuda:5", "cuda:6"]
+
+
 # -- enrichment: a threshold is a percentile you have not measured -----------
 #
 # The ALK2 campaign's Uni-Dock gate was set to -8.0 because the weakest known active scored -8.497.
