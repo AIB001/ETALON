@@ -303,6 +303,12 @@ def register(mcp: Any) -> None:
 
         Either form always includes an ``id`` column -- without one a run records no molecule names,
         and per-tier recall, per-molecule explanation and a named shortlist have nothing to key on.
+
+        The reservation is committed before the library is written, so a library that cannot be
+        written comes back as ``LibraryNotWritten`` rather than as a filesystem error: the batch is
+        reserved, claiming it again is refused, and ``etalon_sweep_recover`` is what releases it.
+        Retrying this call first reports the batch as unclaimable and says nothing about the
+        reservation it is holding.
         """
 
         from etalon.campaign.sweep import library_rows
@@ -315,19 +321,44 @@ def register(mcp: Any) -> None:
             )
         sweep = _sweep(workspace, pool, ledger)
         batch = sweep.claim(batch_id, by=by)
-        written = None
-        if library_dir.strip():
-            written = str(
-                library_rows(
-                    sweep,
-                    batch_id,
-                    absolute_path(library_dir, label="library_dir"),
-                    content_addressed=True,
+        # The claim is committed from here on, so a failure writing the library leaves the batch
+        # reserved with nothing screening it. The supervisor contains this and names the remedy;
+        # this tool used to let the exception out, and the generic boundary handler then told the
+        # caller the opposite of the truth. Measured: a library_dir whose parent is a regular file
+        # returned NotADirectoryError with retryable=true and "calling again is reasonable once",
+        # and the recommended retry returned "batch_0001 is not claimable" hinted as a defect to
+        # report rather than retry -- while the batch sat outstanding and recover() would have
+        # released it in one call.
+        try:
+            written = None
+            if library_dir.strip():
+                written = str(
+                    library_rows(
+                        sweep,
+                        batch_id,
+                        absolute_path(library_dir, label="library_dir"),
+                        content_addressed=True,
+                    )
                 )
-            )
-        elif library_path.strip():
-            written = str(
-                library_rows(sweep, batch_id, absolute_path(library_path, label="library_path"))
+            elif library_path.strip():
+                written = str(
+                    library_rows(sweep, batch_id, absolute_path(library_path, label="library_path"))
+                )
+        except Exception as error:  # noqa: BLE001 -- a claimed batch with no library is the worst case
+            return fail(
+                "LibraryNotWritten",
+                f"{batch_id} is claimed and its library was not written: {error!r}",
+                hint=(
+                    "The reservation is committed; claiming it again will be refused. Fix the "
+                    "library path, then call etalon_sweep_recover, which releases a claimed batch "
+                    "whose run record does not exist and re-offers it as pending. Do not retry "
+                    "this call first -- it will report the batch as unclaimable and say nothing "
+                    "about the reservation."
+                ),
+                retryable=False,
+                batch_id=batch_id,
+                claimed_by=by,
+                batch=batch.as_dict(),
             )
         return ok(batch=batch.as_dict(), library=written)
 

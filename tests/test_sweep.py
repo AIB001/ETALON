@@ -2055,6 +2055,83 @@ def test_the_generation_command_sets_no_cuda_mask() -> None:
     assert not any("CUDA_VISIBLE_DEVICES" in part for part in command)
 
 
+def test_the_generation_seed_is_the_same_seed_in_the_next_process(tmp_path) -> None:
+    """The same tag and index used to mean a different seed in every interpreter.
+
+    ``Generator.command`` built its seed as ``seed_base + index * 1000 + abs(hash(tag)) % 997``,
+    and CPython salts ``hash`` on a ``str`` per process unless ``PYTHONHASHSEED`` is set, which
+    nothing in this project sets. Measured across three interpreters:
+
+        abs(hash("flowr_g0")) % 997        419, 184, 470
+        abs(hash("pocketxmol_g5")) % 997   824, 966, 457
+
+    So the arithmetic promised "same generator, same chunk index, same seed" and broke the promise
+    at every supervisor restart. ``next_index`` resumes at the first unwritten chunk, so a chunk
+    deleted or lost to a crash is regenerated -- under a seed that existed only in the argv of a
+    process that is gone, which is why the molecules were not reproducible and nothing recorded
+    what they had been generated from.
+
+    Two subprocesses with different hash salts, which is the condition the field version met by
+    accident on every restart.
+    """
+
+    import subprocess
+    import sys
+
+    program = (
+        "from pathlib import Path;"
+        "from etalon.campaign.generation import Generator, Pocket;"
+        "g = Generator(tag='flowr_g0', model='flowr',"
+        " pocket=Pocket('A', 'reference', Path('/r.sdf')), device='cuda:0',"
+        " protein=Path('/p.pdb'), output_root=Path('/gen'),"
+        " generation_config=Path('/g.yaml'));"
+        "c = g.command(7);"
+        "print(c[c.index('--seed') + 1])"
+    )
+    seeds = []
+    for salt in ("1", "2"):
+        environment = dict(os.environ, PYTHONHASHSEED=salt)
+        seeds.append(
+            subprocess.run(  # noqa: S603 -- our own interpreter, argv built here
+                [sys.executable, "-c", program],
+                capture_output=True,
+                text=True,
+                check=True,
+                env=environment,
+                cwd=str(Path(__file__).resolve().parent.parent),
+            ).stdout.strip()
+        )
+
+    assert seeds[0] == seeds[1], f"two processes, two seeds for one chunk: {seeds}"
+
+    # And the seed reaches the record, so the molecules in a chunk are attributable to one. It used
+    # to live only in that process's argv: ChunkResult carried tag, index, delivered and seconds,
+    # and nothing afterwards could say what the generator had been seeded with.
+    from etalon.campaign.generation import ChunkResult, Generator, Pocket
+
+    generator = Generator(
+        tag="flowr_g0",
+        model="flowr",
+        pocket=Pocket("A", "reference", tmp_path / "r.sdf"),
+        device="cuda:0",
+        protein=tmp_path / "p.pdb",
+        output_root=tmp_path / "gen",
+        generation_config=tmp_path / "g.yaml",
+    )
+    assert generator.seed(7) == int(seeds[0])
+    result = ChunkResult(
+        tag="flowr_g0",
+        index=7,
+        path=tmp_path,
+        requested=1,
+        delivered=1,
+        seconds=1.0,
+        returncode=0,
+        seed=generator.seed(7),
+    )
+    assert result.as_dict()["seed"] == generator.seed(7)
+
+
 # -- a retired generator's device, which used to sit idle for the rest of the campaign -------
 
 
@@ -2760,3 +2837,58 @@ def test_a_sweep_that_lost_its_prefix_is_refused_by_its_own_pool(tmp_path, keyed
     moved.admit([(f"M{i}", f"M{i}", "f") for i in range(5)])
     with pytest.raises(SweepError, match="two id families"):
         moved.emit(revision_id="rev-1")
+
+
+def test_a_claim_whose_library_cannot_be_written_names_the_reservation_it_is_holding(
+    tmp_path, keyed
+) -> None:
+    """The containment reached the supervisor and not the tool an LLM drives.
+
+    `Sweep.claim` commits before `library_rows` runs, so a library that cannot be written leaves
+    the batch reserved with nothing screening it. The supervisor catches that and notes it; this
+    tool let the exception out, and the boundary's generic handler then said the opposite of the
+    truth. Measured, with `library_dir` under a path whose parent is a regular file:
+
+        first call   NotADirectoryError, retryable=true, "calling again is reasonable once"
+        the retry    SweepError "batch_0001 is not claimable", hinted as a defect to report
+
+    Meanwhile `state()["batches"]` read `outstanding: 1` and one `etalon_sweep_recover` would have
+    released it.
+    """
+
+    import json as _json
+
+    screen = FakeScreen()
+    gate = authorize_gate(calibration(), provenance=screen.provenance())
+    pool, ledger = tmp_path / "pool.sqlite", tmp_path / "ledger.jsonl"
+    workspace = tmp_path / "ws"
+    workspace.mkdir()
+    sweep = Sweep(screen, Ledger(ledger), pool, batch_size=5, gate=gate)
+    sweep.admit([(f"K{i}", f"C{i}", "flowr") for i in range(5)])
+    sweep.emit(revision_id="rev-1")
+
+    blocker = tmp_path / "blocker"
+    blocker.write_text("a regular file, so nothing can be created beneath it")
+
+    answer = _json.loads(
+        _claim_tool()(
+            workspace=str(workspace),
+            pool=str(pool),
+            ledger=str(ledger),
+            batch_id="batch_0001",
+            by="cuda:0",
+            library_dir=str(blocker / "libraries"),
+        )
+    )
+
+    assert answer["ok"] is False
+    assert answer["error"]["code"] == "LibraryNotWritten"
+    assert answer["error"]["retryable"] is False, "claiming it again cannot succeed"
+    assert "etalon_sweep_recover" in answer["error"]["hint"], "the remedy is named"
+    assert answer["error"]["context"]["batch_id"] == "batch_0001"
+    assert answer["error"]["context"]["claimed_by"] == "cuda:0"
+
+    # And the reservation the message describes is really there, which is why naming it matters.
+    assert Sweep(screen, Ledger(ledger), pool, batch_size=5, gate=gate).state()["batches"][
+        "outstanding"
+    ] == 1

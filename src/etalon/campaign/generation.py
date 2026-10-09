@@ -27,6 +27,7 @@ routinely; a loop that aborts on the first one retires a working model.
 
 from __future__ import annotations
 
+import hashlib
 import json
 import subprocess
 import time
@@ -85,6 +86,10 @@ class ChunkResult:
     #: Set when the chunk produced no consumable output, with the reason. Not an exception: a barren
     #: chunk is data the loop reasons about.
     barren: str | None = None
+    #: The seed the chunk was generated under. ``None`` for a result built without it, which is how
+    #: a reader tells "not recorded" from "recorded". Carried because the seed used to live only in
+    #: one process's argv, so nothing afterwards could say which molecules came from which seed.
+    seed: int | None = None
 
     @property
     def usable(self) -> bool:
@@ -101,6 +106,7 @@ class ChunkResult:
             "returncode": self.returncode,
             "barren": self.barren,
             "usable": self.usable,
+            "seed": self.seed,
         }
 
 
@@ -217,6 +223,26 @@ class Generator:
         existing = sorted(p.name for p in self.directory.glob("chunk_*")) if self.directory.is_dir() else []
         return len(existing) + 1
 
+    def seed(self, index: int) -> int:
+        """The seed for one chunk, stable across processes.
+
+        This used to be ``self.seed_base + index * 1000 + abs(hash(self.tag)) % 997``, and
+        ``hash`` on a ``str`` is salted per interpreter -- CPython randomises it unless
+        ``PYTHONHASHSEED`` is set, which nothing here sets. Measured: three interpreters asked
+        for ``abs(hash("flowr_g0")) % 997`` answered 419, 184 and 470.
+
+        So the arithmetic said "same tag and same index, same seed" and delivered a different
+        seed every time the supervisor was restarted. Regenerating a chunk after a restart --
+        which ``next_index`` makes free and therefore likely -- produced different molecules
+        under a seed that exists nowhere but that one process's argv. A digest of the tag keeps
+        the decorrelation the term was there for and makes the promise true.
+
+        No recorded number changes: there was no stable previous value to preserve.
+        """
+
+        spread = int.from_bytes(hashlib.sha256(self.tag.encode("utf-8")).digest()[:4], "big")
+        return self.seed_base + index * 1000 + spread % 997
+
     def command(self, index: int) -> list[str]:
         """The exact ``prism generate`` invocation for one chunk.
 
@@ -235,7 +261,7 @@ class Generator:
             "-o", str(self.chunk_path(index)),
             "--generation-config", str(self.generation_config),
             "--num-samples", str(self.chunk),
-            "--seed", str(self.seed_base + index * 1000 + abs(hash(self.tag)) % 997),
+            "--seed", str(self.seed(index)),
             "--device", self.device,
             "--qc", self.qc,
         ]
@@ -297,6 +323,7 @@ class PrismGeneration:
             seconds=seconds,
             returncode=returncode,
             barren=barren,
+            seed=generator.seed(index),
         )
 
 
