@@ -56,6 +56,7 @@ from pathlib import Path
 from typing import Any
 
 from etalon.authority.gate import GateAuthorization, require_gate
+from etalon.boundary.infra import etalon_revision
 from etalon.boundary.screen import Screen, ScreenResult
 from etalon.campaign.ledger import Ledger
 
@@ -110,14 +111,18 @@ CREATE TABLE IF NOT EXISTS batch (
     revision_id  TEXT,
     outcome      TEXT,               -- committed | exhausted | failed, once recorded
     recorded_at  TEXT,
-    gate         TEXT                -- the calibration digest this batch was *emitted* under
+    gate         TEXT,               -- the calibration digest this batch was *emitted* under
+    etalon       TEXT                -- the ETALON revision that claimed it, i.e. that screened it
 );
 """
 
 # Pools written before the `gate` column existed. `CREATE TABLE IF NOT EXISTS` is a no-op on an
 # existing table, so a column added to the schema above never reaches a campaign already on disk --
 # and the campaign already on disk is the one with batches in it.
-_MIGRATIONS = (("batch", "gate", "ALTER TABLE batch ADD COLUMN gate TEXT"),)
+_MIGRATIONS = (
+    ("batch", "gate", "ALTER TABLE batch ADD COLUMN gate TEXT"),
+    ("batch", "etalon", "ALTER TABLE batch ADD COLUMN etalon TEXT"),
+)
 
 # One SMILES, one row. Not in `_SCHEMA` because this one can legitimately fail to be created, and
 # the schema script runs as one `executescript` that must not be left half-applied.
@@ -171,6 +176,21 @@ class Batch:
     old one -- so a ledger read back afterwards attributed every batch to whichever authorization
     happened to be live when the recorder ran. ``None`` on a row written before this column existed.
     """
+    etalon: str | None = None
+    """The ETALON revision of the process that *claimed* this batch, from
+    :func:`etalon.boundary.infra.etalon_revision`.
+
+    The claimer rather than the emitter or the recorder, because the claimer is the process that
+    runs the screen: it writes the library, dispatches the funnel and reads the result back. A
+    batch requeued and re-claimed by a newer ETALON correctly carries the newer revision. ``None``
+    where the commit was unevaluable, on a row written before this column existed, or on a batch
+    recorded without ever being claimed -- which is why ``record`` falls back to the live revision
+    rather than filing a null.
+
+    Not recorded for the emit side. The funnel's ``revision_id`` identifies the screen and the gate
+    digest identifies the admission rule, so what a comparison is missing is the code that drove
+    the screening, and that is this.
+    """
 
     @property
     def recorded(self) -> bool:
@@ -192,6 +212,7 @@ class Batch:
             "outcome": self.outcome,
             "recorded_at": self.recorded_at,
             "gate": self.gate,
+            "etalon": self.etalon,
         }
 
 
@@ -476,9 +497,12 @@ class Sweep:
         with closing(self._connect()) as db:
             db.execute("BEGIN IMMEDIATE")
             cursor = db.execute(
-                "UPDATE batch SET claimed_by = ?, claimed_at = ? "
+                "UPDATE batch SET claimed_by = ?, claimed_at = ?, etalon = ? "
                 "WHERE batch_id = ? AND claimed_by IS NULL AND outcome IS NULL",
-                (by, _now(), batch_id),
+                # Stamped here because this process is the one that will screen it. See
+                # ``Batch.etalon``; ``or None`` so an unevaluable commit stays distinguishable from
+                # a recorded one.
+                (by, _now(), etalon_revision() or None, batch_id),
             )
             if cursor.rowcount != 1:
                 db.execute("ROLLBACK")
@@ -591,6 +615,10 @@ class Sweep:
             # anybody reads. ``or`` rather than a plain read so a pool carved before the column
             # existed still files the live digest instead of a null.
             gate=recorded.gate or (None if self.gate is None else self.gate.calibration_sha256),
+            # ETALON's own revision, which every provenance block in this project omitted while
+            # naming the three packages ETALON drives. Read off the row -- the claimer screened it --
+            # with the same fallback the gate uses for a batch with no row value to read.
+            etalon=recorded.etalon or (etalon_revision() or None),
         )
         updated = self.batch(batch_id)
         assert updated is not None
@@ -671,7 +699,7 @@ class Sweep:
         with closing(self._connect()) as db:
             row = db.execute(
                 "SELECT batch_id, size, emitted_at, claimed_by, claimed_at, run_id, revision_id, "
-                "outcome, recorded_at, gate FROM batch WHERE batch_id = ?",
+                "outcome, recorded_at, gate, etalon FROM batch WHERE batch_id = ?",
                 (batch_id,),
             ).fetchone()
         return None if row is None else Batch(*row)
@@ -680,7 +708,7 @@ class Sweep:
         with closing(self._connect()) as db:
             rows = db.execute(
                 "SELECT batch_id, size, emitted_at, claimed_by, claimed_at, run_id, revision_id, "
-                f"outcome, recorded_at, gate FROM batch WHERE {where} ORDER BY batch_id",
+                f"outcome, recorded_at, gate, etalon FROM batch WHERE {where} ORDER BY batch_id",
                 args,
             ).fetchall()
         return tuple(Batch(*row) for row in rows)
@@ -734,6 +762,7 @@ class Sweep:
                 )
             )
         revisions = sorted({b.revision_id for b in done if b.revision_id})
+        etalon_revisions = sorted({b.etalon for b in done if b.etalon})
         return {
             "pool": {
                 "unique": int(total),
@@ -753,11 +782,22 @@ class Sweep:
             },
             "batch_size": self.batch_size,
             "revisions": revisions,
+            # The ETALON revisions that screened these batches, a different question from the funnel
+            # revision and one that used to be unanswerable: six commits separate the v6 and v7
+            # campaigns' screening windows, five of them touching sweep.py, calibrate.py or
+            # supervisor.py, and neither ledger records which one ran.
+            "etalon_revisions": etalon_revisions,
+            "etalon": etalon_revision(),
             "gate": None if self.gate is None else self.gate.as_dict(),
             # More than one revision across recorded batches means the funnel changed mid-campaign.
             # Not an error -- a campaign may legitimately retune -- but enrichment computed across
-            # the boundary is not attributable to anything, so the reading says so out loud.
-            "comparable": len(revisions) <= 1,
+            # the boundary is not attributable to anything, so the reading says so out loud. Two
+            # ETALON revisions break comparability for the same reason and were previously
+            # invisible: the funnel can be byte-identical while the code choosing the molecules and
+            # reading the result back is not. A batch carved before the column existed carries no
+            # revision and counts as neither agreeing nor disagreeing, the only honest reading of a
+            # null.
+            "comparable": len(revisions) <= 1 and len(etalon_revisions) <= 1,
         }
 
 

@@ -21,6 +21,7 @@ from etalon.authority.gate import (
     unauthorized_gate,
 )
 from etalon.authority.grant import NotAuthorized
+from etalon.boundary.infra import etalon_revision
 from etalon.boundary.screen import ScreenResult, StageOutcome
 from etalon.campaign.calibrate import (
     Calibration,
@@ -976,6 +977,133 @@ def test_more_than_one_revision_marks_the_batches_incomparable(sweep: Sweep) -> 
     sweep.claim(third.batch_id, by="gpu6")
     sweep.record(third.batch_id, ScreenResult(third.batch_id, "rev-2", "SUCCEEDED", (stage("s", "SUCCEEDED", artifact="a"),)))
     assert sweep.state()["comparable"] is False
+
+
+def test_a_claimed_batch_carries_the_etalon_revision_that_will_screen_it(sweep: Sweep) -> None:
+    """Every provenance block named the three packages ETALON drives and never ETALON.
+
+    Measured: ``grep -c etalon ledger_v7.json`` returns 0 across 27 batch lines, whose single shared
+    ``infrastructure`` block names ``molcascade`` and nothing else. Establishing which ETALON had
+    screened them meant cross-checking 27 ledger timestamps against ``git log`` by hand, and the next
+    commit landed 9m50s after the last batch was recorded.
+    """
+
+    sweep.admit([(f"K{i}", f"C{i}", "f") for i in range(10)])
+    sweep.emit(revision_id="rev-1")
+    assert sweep.batch("batch_0001").etalon is None, "nothing claimed it yet"
+
+    claimed = sweep.claim("batch_0001", by="gpu5")
+    assert claimed.etalon == etalon_revision()
+    assert claimed.etalon, "this checkout is a git repository, so the revision is evaluable here"
+
+    sweep.record(
+        "batch_0001",
+        ScreenResult("batch_0001", "rev-1", "SUCCEEDED", (stage("s", "SUCCEEDED", artifact="a"),)),
+    )
+    line = [e for e in sweep.ledger.entries() if e.kind == "batch"][-1]
+    assert line.body["etalon"] == claimed.etalon
+    assert sweep.state()["etalon_revisions"] == [claimed.etalon]
+
+
+def test_a_requeued_batch_is_attributed_to_the_etalon_that_rescreened_it(sweep: Sweep) -> None:
+    # The gate has this shape already: the recorder is not always the claimer. A batch requeued by
+    # recovery and taken by a newer process was screened by the newer code, and says so.
+    sweep.admit([(f"K{i}", f"C{i}", "f") for i in range(10)])
+    sweep.emit(revision_id="rev-1")
+    sweep.claim("batch_0001", by="gpu5")
+    assert sweep.recover()[0].action == "requeued", "no run record, so the claim never started one"
+
+    sweep.claim("batch_0001", by="gpu6")
+    sweep.record(
+        "batch_0001",
+        ScreenResult("batch_0001", "rev-1", "SUCCEEDED", (stage("s", "SUCCEEDED", artifact="a"),)),
+    )
+    assert sweep.batch("batch_0001").etalon == etalon_revision()
+
+
+def test_two_etalon_revisions_mark_one_funnel_s_batches_incomparable(sweep: Sweep) -> None:
+    """The funnel can be byte-identical while the code driving it is not.
+
+    This is the case ``comparable`` could not see. ``revision_id`` is ``rev-1`` throughout, so the
+    old reading called these batches comparable, and the enrichment computed across them was
+    attributed to a funnel that two different ETALONs had fed and read back.
+    """
+
+    sweep.admit([(f"K{i}", f"C{i}", "f") for i in range(20)])
+    sweep.emit(revision_id="rev-1")
+    for batch in sweep.pending():
+        sweep.claim(batch.batch_id, by="gpu5")
+        sweep.record(
+            batch.batch_id,
+            ScreenResult(batch.batch_id, "rev-1", "SUCCEEDED", (stage("s", "SUCCEEDED", artifact="a"),)),
+        )
+    assert sweep.state()["comparable"] is True
+    assert sweep.state()["revisions"] == ["rev-1"]
+
+    # Rewrite one row's ETALON revision: a batch screened by a different commit of this repo, which
+    # is what a campaign restarted after a fix really looks like.
+    import sqlite3
+
+    with sqlite3.connect(sweep.pool) as db:
+        db.execute("UPDATE batch SET etalon = ? WHERE batch_id = ?", ("deadbeefcafe", "batch_0001"))
+    reading = sweep.state()
+    assert reading["revisions"] == ["rev-1"], "one funnel"
+    assert len(reading["etalon_revisions"]) == 2
+    assert reading["comparable"] is False
+
+
+def test_a_pool_carved_before_the_etalon_column_opens_and_migrates(tmp_path, keyed) -> None:
+    # `CREATE TABLE IF NOT EXISTS` is a no-op on an existing table, so a column added to the schema
+    # never reaches a campaign already on disk -- and the campaign already on disk is the one with
+    # batches in it. Measured on the gate column, which is why `_MIGRATIONS` exists at all.
+    import sqlite3
+
+    pool = tmp_path / "old.sqlite"
+    with sqlite3.connect(pool) as db:
+        db.executescript(
+            """
+            CREATE TABLE molecule (
+                key TEXT PRIMARY KEY, smiles TEXT NOT NULL, source TEXT NOT NULL,
+                seen_at REAL NOT NULL, batch TEXT
+            );
+            CREATE TABLE batch (
+                batch_id TEXT PRIMARY KEY, size INTEGER NOT NULL, emitted_at TEXT NOT NULL,
+                claimed_by TEXT, claimed_at TEXT, run_id TEXT, revision_id TEXT, outcome TEXT,
+                recorded_at TEXT
+            );
+            """
+        )
+        db.execute(
+            "INSERT INTO batch VALUES ('batch_0001', 7, 'then', NULL, NULL, NULL, NULL, NULL, NULL)"
+        )
+    screen = FakeScreen()
+    sweep = Sweep(
+        screen,
+        Ledger(tmp_path / "l.jsonl"),
+        pool,
+        batch_size=7,
+        gate=authorize_gate(calibration(), provenance=screen.provenance()),
+    )
+    old = sweep.batch("batch_0001")
+    assert old is not None and old.etalon is None and old.gate is None
+    assert sweep.state()["etalon_revisions"] == [], "an unrecorded batch contributes no revision"
+    assert sweep.claim("batch_0001", by="gpu5").etalon == etalon_revision()
+
+
+def test_a_tree_without_git_says_so_instead_of_reporting_a_clean_commit(tmp_path, monkeypatch) -> None:
+    # A wheel install has no .git. "Could not tell" and "told you it was clean" are different
+    # claims, and the one this project refuses to make is the second.
+    import etalon.boundary.infra as infra
+
+    monkeypatch.setattr(infra, "__file__", str(tmp_path / "a" / "b" / "c" / "infra.py"))
+    infra.etalon_provenance.cache_clear()
+    try:
+        record = infra.etalon_provenance()
+        assert "problem" in record and "unevaluable" in record["problem"]
+        assert "commit" not in record and "dirty" not in record
+        assert infra.etalon_revision() == "", "empty, not a plausible-looking digest"
+    finally:
+        infra.etalon_provenance.cache_clear()
 
 
 def test_library_rows_always_write_an_id_column(sweep: Sweep, tmp_path) -> None:

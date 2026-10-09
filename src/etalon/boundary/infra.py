@@ -37,8 +37,10 @@ from __future__ import annotations
 
 import importlib
 import json
+import subprocess
 import sys
 from dataclasses import dataclass
+from functools import lru_cache
 from pathlib import Path
 from types import ModuleType
 
@@ -188,6 +190,93 @@ def _within(candidate: Path, root: Path) -> bool:
     return True
 
 
+@lru_cache(maxsize=1)
+def etalon_provenance() -> dict[str, object]:
+    """ETALON's own identity, for a record that otherwise cites only what ETALON drives.
+
+    A provenance block in this project describes what ETALON drives and not ETALON -- and
+    ETALON is the layer that decides which molecules go into a batch, how the library is
+    written, which gate is live and what counts as a finished screen. Measured on a real
+    campaign: all 27 batch lines of ``ledger_v7.json`` carry one identical ``infrastructure``
+    block, naming ``molcascade`` with its ``source_commit`` and ``tree_sha256``, and
+    ``grep -c etalon ledger_v7.json`` returns 0.
+
+    What that costs is answering the question afterwards. Both of this project's campaigns
+    happen to have run inside commit-free windows, so establishing which ETALON had screened
+    v7 meant cross-checking 27 ledger timestamps against ``git log`` by hand -- and the next
+    commit landed 9m50s after the last batch was recorded, a margin that happens to fall on
+    the right side rather than one anything guaranteed. Six commits separate the two
+    campaigns' screening windows and five of them change ETALON source on the screening path:
+    two in ``campaign/sweep.py``, two in ``campaign/calibrate.py``, one in
+    ``campaign/supervisor.py``. A v6-versus-v7 comparison crosses all five while the ledger
+    reports only that the funnel revision differed.
+
+    ``dirty`` counts tracked files that differ from ``commit``, so a nonzero value means the
+    code that ran is not the code the commit names. Untracked files are excluded
+    deliberately: a working tree routinely holds scratch files, and a modified *tracked*
+    file is the signal that matters.
+
+    A tree with no git -- a wheel install, an exported tarball -- cannot answer this, and
+    says so under ``problem`` rather than reporting a clean zero. A check that could not run
+    is not a check that passed.
+
+    Cached for the process. The answer describes the code that is already imported and
+    running, so re-reading it later would describe a tree that this process is not
+    executing.
+    """
+
+    record: dict[str, object] = {"name": "etalon", "version": _etalon_version()}
+    root = Path(__file__).resolve().parents[3]
+    if not (root / ".git").exists():
+        record["problem"] = f"no git repository at {root}; ETALON's commit is unevaluable here"
+        return record
+    try:
+        commit = _git(root, "rev-parse", "HEAD")
+        # --untracked-files=no: see the docstring. One line per modified tracked file.
+        changed = _git(root, "status", "--porcelain", "--untracked-files=no")
+    except (OSError, subprocess.SubprocessError) as error:
+        record["problem"] = f"git refused to identify {root}: {error}"
+        return record
+    record["commit"] = commit
+    record["dirty"] = len([line for line in changed.splitlines() if line.strip()])
+    return record
+
+
+def _etalon_version() -> str:
+    import etalon
+
+    return str(getattr(etalon, "__version__", "unknown"))
+
+
+def _git(root: Path, *args: str) -> str:
+    """One git call, with no shell and no inherited stdin, raising on a nonzero exit."""
+
+    completed = subprocess.run(  # noqa: S603 -- fixed argv, no shell
+        ["git", "-C", str(root), *args],
+        capture_output=True,
+        text=True,
+        timeout=10,
+        check=True,
+        stdin=subprocess.DEVNULL,
+    )
+    return completed.stdout.strip()
+
+
+def etalon_revision() -> str:
+    """One short string for a record that has room for one: ``<commit12>`` or ``<commit12>+dirty``.
+
+    Empty when ETALON's commit is unevaluable, so a reader can tell "not recorded" from
+    "recorded as clean" -- the distinction a bare string would lose.
+    """
+
+    record = etalon_provenance()
+    commit = str(record.get("commit", ""))
+    if not commit:
+        return ""
+    dirty = int(record.get("dirty", 0) or 0)
+    return f"{commit[:12]}+dirty" if dirty else commit[:12]
+
+
 def describe(*, asset_dir: Path | None = None) -> dict[str, object]:
     """Report what would load for each package, without raising.
 
@@ -204,4 +293,12 @@ def describe(*, asset_dir: Path | None = None) -> dict[str, object]:
     return report
 
 
-__all__ = ["Infra", "InfraError", "asset_directory", "describe", "load"]
+__all__ = [
+    "Infra",
+    "InfraError",
+    "asset_directory",
+    "describe",
+    "etalon_provenance",
+    "etalon_revision",
+    "load",
+]

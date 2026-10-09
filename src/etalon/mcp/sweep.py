@@ -393,10 +393,22 @@ def register(mcp: Any) -> None:
     def etalon_sweep_status(workspace: str, pool: str, ledger: str) -> str:
         """FREE. One reading of the sweep: pool, batches by outcome, and whether they are comparable.
 
-        ``comparable`` is false when recorded batches carry more than one cascade revision. Not an
-        error -- a campaign may legitimately retune -- but enrichment computed across that boundary is
-        attributable to nothing, and a status that did not say so would let the comparison be made
-        silently.
+        ``comparable`` is false when recorded batches carry more than one cascade revision, and also
+        when they carry more than one ETALON revision. Not an error -- a campaign may legitimately
+        retune, and a campaign may legitimately be restarted after a fix -- but enrichment computed
+        across either boundary is attributable to nothing, and a status that did not say so would let
+        the comparison be made silently.
+
+        The second axis is the one that used to be unreadable. ``etalon_revisions`` lists the commits
+        that claimed and screened these batches; ``etalon`` is the one running right now. Before this
+        existed, every provenance block named MolCascade, PRISM and MolQuarry and omitted the layer
+        choosing the molecules, writing the library and deciding what counts as a finished screen --
+        so answering "which ETALON screened this" meant cross-referencing ledger timestamps against
+        ``git log`` by hand, and on one real campaign the next commit landed 9m50s after the last
+        batch was recorded.
+
+        An empty ``etalon_revisions`` beside recorded batches means those rows predate the column, not
+        that they agree.
         """
 
         sweep = _sweep(workspace, pool, ledger)
