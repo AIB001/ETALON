@@ -792,3 +792,160 @@ def test_fifo_cannot_be_an_execution_lock_and_open_is_nonblocking(simulation, mo
     with pytest.raises(SimulationError, match="regular file"):
         runner.build(protein, ligand, run_id="r")
     assert seen and not calls
+
+
+# --------------------------------------------------------------------------------------
+# A product on disk is not a product this attempt made. The build path already knows the
+# difference -- _reusable() digests topol.top, solv_ions.gro and localrun.sh and refuses a
+# manifest whose products no longer hash the same. The drive path judged a stage purely by
+# whether its .gro existed, so an attempt that ran nothing inherited the previous attempt's
+# products and reported them as its own.
+# --------------------------------------------------------------------------------------
+
+
+def _plant_products(md_dir, stages):
+    """Write what an earlier attempt would have left behind."""
+    for name, tpr, product in module.STAGE_PRODUCTS:
+        if name not in stages:
+            continue
+        (md_dir / tpr).parent.mkdir(parents=True, exist_ok=True)
+        (md_dir / tpr).write_text("earlier attempt")
+        (md_dir / product).write_text("earlier attempt")
+
+
+def test_a_product_left_by_an_earlier_attempt_is_not_reported_as_this_attempt_s(simulation):
+    runner, protein, ligand, _, _ = simulation
+    built = runner.build(protein, ligand, run_id="r")
+    _plant_products(built.md_dir, ("em", "nvt"))
+
+    # The fixture's fake driver writes nothing, so every product below predates this attempt.
+    drive = runner.drive(built, stages=("em", "nvt"))
+
+    assert drive.finished == ("em", "nvt"), "the products exist and that stays a fact"
+    assert drive.produced == (), "and this attempt wrote none of them"
+    assert drive.inherited == ("em", "nvt")
+    assert [s.state for s in drive.stages if s.stage in ("em", "nvt")] == [
+        "FINISHED_EARLIER", "FINISHED_EARLIER",
+    ]
+    assert drive.as_dict()["inherited"] == ["em", "nvt"]
+    assert drive.failed == (), "an inherited product is not a failed stage"
+
+
+def test_a_product_this_attempt_rewrote_is_reported_as_its_own(simulation, monkeypatch):
+    runner, protein, ligand, _, _ = simulation
+    built = runner.build(protein, ligand, run_id="r")
+    _plant_products(built.md_dir, ("em",))
+
+    def run(command, **kwargs):
+        if command[0] == "bash":
+            for name, tpr, product in module.STAGE_PRODUCTS:
+                if name == "em":
+                    (built.md_dir / product).write_text("this attempt, different bytes")
+        return module._CapturedRun(0, "simulated output", "")
+
+    monkeypatch.setattr(module, "_run_owned", run)
+    drive = runner.drive(built, stages=("em",))
+
+    assert drive.produced == ("em",)
+    assert drive.inherited == ()
+    assert drive.succeeded
+
+
+# --------------------------------------------------------------------------------------
+# FINAL_RESULTS_MMPBSA.dat is written by gmx_MMPBSA, which nothing in ETALON runs: the
+# operator runs mmpbsa_run.sh. So the number is always older than the drive that reads it,
+# and "did this drive produce it" is the wrong question. The answerable one is whether it
+# predates the system it is now attributed to -- a rebuild replaces topol.top and leaves the
+# old .dat sitting in GMX_PROLIG_MMPBSA, where it was read as this build's affinity.
+# --------------------------------------------------------------------------------------
+
+
+def _driving(simulation, monkeypatch, stages=("em",)):
+    """A fixture driver that actually writes the requested stage products."""
+    runner, protein, ligand, _, _ = simulation
+
+    def run(command, **kwargs):
+        if command[0] == "bash":
+            md = Path(kwargs["cwd"])
+            for name, tpr, product in module.STAGE_PRODUCTS:
+                if name in stages:
+                    (md / tpr).parent.mkdir(parents=True, exist_ok=True)
+                    (md / tpr).write_text("driven")
+                    (md / product).write_text("driven")
+        else:
+            md = Path(command[5]) / "GMX_PROLIG_MD"
+            md.mkdir(parents=True, exist_ok=True)
+            for name in ("topol.top", "solv_ions.gro", "localrun.sh"):
+                (md / name).write_text("simulation fixture only")
+        return module._CapturedRun(0, "simulated output", "")
+
+    monkeypatch.setattr(module, "_run_owned", run)
+    return PrismStage(runner, protein, stages=stages, timeout_per_molecule=60)
+
+
+def _plant_energy(stage, identifier, *, older_than_build):
+    run_dir = stage.simulate.workspace.resolve() / hashlib.sha256(identifier.encode()).hexdigest()
+    energy_dir = run_dir / stage.mmpbsa_subdir
+    energy_dir.mkdir(parents=True, exist_ok=True)
+    path = energy_dir / "FINAL_RESULTS_MMPBSA.dat"
+    path.write_text("DELTA TOTAL = -42.0 +/- 1.0\n")
+    reference = (run_dir / "GMX_PROLIG_MD" / "topol.top").stat().st_mtime_ns
+    offset = -60_000_000_000 if older_than_build else 60_000_000_000
+    os.utime(path, ns=(reference + offset, reference + offset))
+    return path
+
+
+def test_an_energy_older_than_the_system_it_describes_is_not_an_admitted_label(
+    simulation, monkeypatch, tmp_path
+):
+    stage = _driving(simulation, monkeypatch)
+    ligand = tmp_path / "lig.sdf"
+    ligand.write_text("fixture ligand")
+
+    first = stage._one("M1", ligand, -8.2)
+    assert first.provenance["no_binding_energy"], "nothing has computed an affinity yet"
+
+    _plant_energy(stage, "M1", older_than_build=True)
+    stale = stage._one("M1", ligand, -8.2)
+
+    assert stale.provenance["binding_energy"]["delta_g_bind_kcal_mol"] == -42.0, "the number is retained"
+    assert stale.expensive_value is None, "and it is not fitted against every later molecule"
+    assert "older than" in stale.provenance["binding_energy_withheld_reason"]
+
+
+def test_an_energy_computed_after_the_build_is_admitted(simulation, monkeypatch, tmp_path):
+    stage = _driving(simulation, monkeypatch)
+    ligand = tmp_path / "lig.sdf"
+    ligand.write_text("fixture ligand")
+    stage._one("M1", ligand, -8.2)
+
+    _plant_energy(stage, "M1", older_than_build=False)
+    fresh = stage._one("M1", ligand, -8.2)
+
+    assert fresh.expensive_value == -42.0
+    assert "binding_energy_withheld_reason" not in fresh.provenance
+
+
+def test_the_withheld_reason_is_a_code_the_admissibility_layer_can_read(
+    simulation, monkeypatch, tmp_path
+):
+    """A reason in provenance is prose. The layer that decides reads codes.
+
+    ``etalon.learn.admissible.rule`` raises ``KeyError`` on an observation naming a fault
+    outside the taxonomy, so emitting the finding as an observation is not optional
+    decoration -- either the code is registered and the withholding is machine-readable and
+    waivable, or the stage that reports it crashes the loop that consumes it.
+    """
+
+    from etalon.learn.admissible import Admission, rule
+
+    stage = _driving(simulation, monkeypatch)
+    ligand = tmp_path / "lig.sdf"
+    ligand.write_text("fixture ligand")
+    stage._one("M1", ligand, -8.2)
+    _plant_energy(stage, "M1", older_than_build=True)
+
+    verdict = rule(stage._one("M1", ligand, -8.2))
+
+    assert verdict.admission is Admission.WITHHELD
+    assert "F_RESULT_PREDATES_THE_SYSTEM" in verdict.blocking

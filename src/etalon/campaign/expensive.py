@@ -40,6 +40,53 @@ from etalon.faults.attribution import Observation
 from etalon.learn.admissible import Measurement
 
 
+def _predates_the_system(md_dir: Path, energy_file: Path) -> str | None:
+    """Whether this energy was computed before the system it is now filed under.
+
+    ``FINAL_RESULTS_MMPBSA.dat`` is written by ``gmx_MMPBSA``, and nothing in this project
+    runs it -- the operator runs ``mmpbsa_run.sh`` by hand. So the number is always older
+    than the drive that reads it, and "did this attempt produce it" is the wrong question
+    here: asking it would withhold every energy there has ever been.
+
+    The answerable question is narrower. A rebuild writes a new ``topol.top`` and does not
+    touch ``GMX_PROLIG_MMPBSA``, so the previous system's energy stays sitting in that
+    directory and the next round reads it as this build's affinity. Measured: planting a
+    ``.dat`` one minute older than the topology it sits beside, then rebuilding, admitted
+    ``-42.0`` as ``expensive_value`` with no observation and no note -- a label from a
+    system the directory no longer holds, fitted against every later molecule.
+
+    Returns the reason to withhold, or ``None`` when the energy is at least as new as the
+    topology. An unevaluable comparison returns a reason as well: a ``stat`` that failed is
+    not a ``stat`` that passed, and the asymmetry in :mod:`etalon.learn.admissible` --
+    withholding a good label costs one molecule, admitting a bad one shifts the policy
+    applied to all of them -- decides which way the unknown falls.
+    """
+
+    try:
+        built_at = (md_dir / "topol.top").stat().st_mtime_ns
+    except OSError as error:
+        return (
+            "cannot tell whether the energy is older than the system it describes: the "
+            f"topology it is filed under could not be read ({error}). An unevaluable check "
+            "is not a passed one"
+        )
+    try:
+        computed_at = energy_file.stat().st_mtime_ns
+    except OSError as error:
+        return (
+            "cannot tell whether the energy is older than the system it describes: the "
+            f"energy file could not be read ({error}). An unevaluable check is not a "
+            "passed one"
+        )
+    if computed_at >= built_at:
+        return None
+    return (
+        "the energy is older than the topology it is attributed to, by "
+        f"{(built_at - computed_at) / 1e9:.1f}s. This directory was rebuilt after the "
+        "energy was computed, so the number describes a system it no longer holds"
+    )
+
+
 @dataclass(frozen=True, slots=True)
 class PrismStage:
     """Build and drive one system per handoff record, then read what exists.
@@ -208,6 +255,7 @@ class PrismStage:
             if energy_dir.is_relative_to(build.output_dir.resolve())
             and energy_file.is_relative_to(build.output_dir.resolve()) else None
         )
+        stale = _predates_the_system(build.md_dir, energy_file) if energy is not None else None
         provenance: dict[str, object] = {
             "run_id": build.run_id,
             "output_dir": str(build.output_dir),
@@ -219,7 +267,16 @@ class PrismStage:
         }
         if energy is not None:
             provenance["binding_energy"] = energy.as_dict()
-            if not drive.succeeded:
+            # The number is retained either way. What the reason decides is whether it is
+            # allowed to teach the screen, and staleness is reported ahead of an unclean
+            # termination because it is the more specific finding: a clean drive that read
+            # the previous system's energy would otherwise carry no reason at all.
+            if stale is not None:
+                provenance["binding_energy_withheld_reason"] = stale
+                observations = observations + (
+                    Observation("F_RESULT_PREDATES_THE_SYSTEM", fired=True, detail=stale),
+                )
+            elif not drive.succeeded:
                 provenance["binding_energy_withheld_reason"] = (
                     "driver did not terminate successfully; retained output is not an admitted label"
                 )
@@ -232,7 +289,11 @@ class PrismStage:
         return Measurement(
             parent_id=identifier,
             cheap_value=cheap,
-            expensive_value=None if energy is None or not drive.succeeded else energy.total_kcal_mol,
+            expensive_value=(
+                None
+                if energy is None or stale is not None or not drive.succeeded
+                else energy.total_kcal_mol
+            ),
             observations=observations,
             provenance=provenance,
         )

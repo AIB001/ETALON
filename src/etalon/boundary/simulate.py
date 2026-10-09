@@ -128,6 +128,23 @@ def _digest(path: Path) -> str:
     return digest.hexdigest()
 
 
+def _identity(path: Path) -> tuple[int, int] | None:
+    """Size and modification time, or None when the file is not there.
+
+    Cheap on purpose. ``_reusable`` digests the three build products and should, because it
+    decides whether to spend a build; this runs after every drive attempt and a production
+    trajectory is tens of gigabytes. The question is narrower than "are these the same
+    bytes" -- it is "did this attempt write this file" -- and a stage that reruns rewrites
+    its product, which moves the modification time.
+    """
+
+    try:
+        status = path.stat()
+    except OSError:
+        return None
+    return (status.st_size, status.st_mtime_ns)
+
+
 def _run_directory(workspace: Path, run_id: str) -> Path:
     """A run owns one real child directory, never a caller-selected deletion target."""
 
@@ -579,16 +596,24 @@ def materialize_ligands(
 
 @dataclass(frozen=True, slots=True)
 class StageStatus:
-    """One stage of the driver script, judged by its products."""
+    """One stage of the driver script, judged by its products and by who made them."""
 
     stage: str
     tpr: bool
     product: bool
+    #: Whether *this* attempt wrote the product, rather than finding it already there.
+    #: Default True so a record constructed without the distinction reads as it always did.
+    fresh: bool = True
 
     @property
     def state(self) -> str:
-        if self.product:
+        if self.product and self.fresh:
             return "FINISHED"
+        if self.product:
+            # The product is there and this attempt did not write it. Not a failure: reusing
+            # an earlier stage's output is the point of resuming a drive. Not a measurement
+            # this attempt made either, and the two were previously the same word.
+            return "FINISHED_EARLIER"
         if self.tpr:
             # grompp worked and mdrun did not: the interesting failure, because the
             # system was buildable and the simulation was not.
@@ -596,7 +621,8 @@ class StageStatus:
         return "NEVER_STARTED"
 
     def as_dict(self) -> dict[str, object]:
-        return {"stage": self.stage, "state": self.state, "tpr": self.tpr, "product": self.product}
+        return {"stage": self.stage, "state": self.state, "tpr": self.tpr,
+                "product": self.product, "fresh": self.fresh}
 
 
 @dataclass(frozen=True, slots=True)
@@ -767,13 +793,37 @@ class DriveRecord:
     timed_out: bool = False
     execution: dict[str, object] = field(default_factory=dict)
 
+    #: The two states that mean "the product is on disk". Both satisfy the protocol; only
+    #: the first is a thing this attempt did.
+    _HAVE_PRODUCT = ("FINISHED", "FINISHED_EARLIER")
+
     @property
     def finished(self) -> tuple[str, ...]:
+        """Stages whose product exists, whoever wrote it. What every reader has meant by this."""
+
+        return tuple(s.stage for s in self.stages if s.state in self._HAVE_PRODUCT)
+
+    @property
+    def produced(self) -> tuple[str, ...]:
+        """Stages this attempt wrote a product for. A subset of ``finished``."""
+
         return tuple(s.stage for s in self.stages if s.state == "FINISHED")
 
     @property
+    def inherited(self) -> tuple[str, ...]:
+        """Stages whose product was already there when this attempt started.
+
+        Read this before calling an attempt a measurement. A drive that terminates cleanly
+        and produces nothing is indistinguishable from one that produced everything, if the
+        only question asked is whether the files exist.
+        """
+
+        return tuple(s.stage for s in self.stages if s.state == "FINISHED_EARLIER")
+
+    @property
     def failed(self) -> tuple[StageStatus, ...]:
-        return tuple(s for s in self.stages if s.stage in self.requested and s.state != "FINISHED")
+        return tuple(s for s in self.stages
+                     if s.stage in self.requested and s.state not in self._HAVE_PRODUCT)
 
     @property
     def succeeded(self) -> bool:
@@ -781,12 +831,18 @@ class DriveRecord:
 
         Compatibility: a timed-out equilibration is no longer an overall success merely
         because its requested products exist. ``finished`` retains those product facts.
+
+        An inherited product still satisfies this, because the campaign asked for a product
+        and has one, under a build identity ``_reusable`` verified. What changed is that the
+        record now says which products this attempt did not write, so ``inherited`` rather
+        than ``succeeded`` is the field that answers "was anything simulated here".
         """
 
         return (not self.timed_out and self.exit_code == 0
                 and self.execution.get("status", "completed") == "completed"
                 and bool(self.requested) and all(
-            any(stage.stage == name and stage.state == "FINISHED" for stage in self.stages)
+            any(stage.stage == name and stage.state in self._HAVE_PRODUCT
+                for stage in self.stages)
             for name in self.requested
         ))
 
@@ -798,6 +854,8 @@ class DriveRecord:
             "succeeded": self.succeeded,
             "requested": list(self.requested),
             "finished": list(self.finished),
+            "produced": list(self.produced),
+            "inherited": list(self.inherited),
             "failed": [s.as_dict() for s in self.failed],
             "stages": [s.as_dict() for s in self.stages],
             "warnings": self.warnings.as_dict(),
@@ -809,7 +867,10 @@ class DriveRecord:
                 "directory re-driven after production had completed exits 0 with em, nvt "
                 "and npt all failed and 23 error lines in the log; a run killed by the "
                 "wall clock has no normal successful exit. One bit about the last command "
-                "cannot tell those apart, and none of them says which stages finished."
+                "cannot tell those apart, and none of them says which stages finished. "
+                "`inherited` names products that were on disk before this attempt started: "
+                "the protocol is satisfied either way, but an attempt that wrote nothing is "
+                "not a simulation of anything, and `succeeded` alone cannot say which it was."
             ),
         }
 
@@ -1205,6 +1266,11 @@ class Simulate:
         attempts.append(pending)
         manifest["drive"], manifest["drive_attempts"] = pending, attempts
         _write_manifest(manifest_path, manifest)
+        # Taken before the driver starts, because afterwards there is no way to tell a product
+        # this attempt wrote from one the previous attempt left behind. The build path makes the
+        # same comparison with digests at _reusable(); products here are too large for that.
+        before = {name: (_identity(record.md_dir / tpr), _identity(record.md_dir / product))
+                  for name, tpr, product in STAGE_PRODUCTS}
         completed = _run_owned(
             ["bash", str(script)], cwd=str(record.md_dir), timeout=timeout,
             env=self.environment.exported(asset_root=self.infra.import_root),
@@ -1219,6 +1285,7 @@ class Simulate:
                 stage=name,
                 tpr=(record.md_dir / tpr).is_file(),
                 product=(record.md_dir / product).is_file(),
+                fresh=_identity(record.md_dir / product) != before[name][1],
             )
             for name, tpr, product in STAGE_PRODUCTS
         )

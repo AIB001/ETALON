@@ -673,6 +673,39 @@ _POSE_CHANGED = Fault(
     ),
 )
 
+#: The number was computed before the system it is filed under. Postflight because only the
+#: files afterwards say so, and WRONG_SUBJECT because the energy is a real measurement of a
+#: different system -- not a badly-sized measurement of this one.
+_RESULT_PREDATES_THE_SYSTEM = Fault(
+    code="F_RESULT_PREDATES_THE_SYSTEM",
+    phase=Phase.POSTFLIGHT,
+    summary=(
+        "The binding energy is older than the topology it is attributed to, so it describes a "
+        "system this directory no longer holds"
+    ),
+    observable=(
+        "modification time of GMX_PROLIG_MMPBSA/FINAL_RESULTS_MMPBSA.dat against "
+        "GMX_PROLIG_MD/topol.top in the same run directory"
+    ),
+    exactness=Exactness.EXACT,
+    consequence=Consequence.WRONG_SUBJECT,
+    lower_kcal_mol=0.0,
+    upper_kcal_mol=None,
+    evidence=Evidence.MEASURED_HERE,
+    source=(
+        "Measured on this project's own expensive stage: a FINAL_RESULTS_MMPBSA.dat written one "
+        "minute before the topol.top beside it was admitted as expensive_value = -42.0 with no "
+        "observation and no withheld reason, because nothing compared the two. gmx_MMPBSA is run "
+        "by the operator and not by ETALON, so the energy is always older than the drive that "
+        "reads it and freshness relative to the drive cannot be the test"
+    ),
+    remedy=(
+        "Re-run mmpbsa_run.sh against the rebuilt system, or delete the stale result. Do not "
+        "reconcile the dates by touching the file: the energy would then be labelled with a "
+        "system nobody computed it from, which is the same fault with its evidence removed."
+    ),
+)
+
 #: The catalogue. Ordered by phase then by how cheaply the observable decides, so a
 #: caller walking it in order spends the least before it has an answer.
 FAULTS: tuple[Fault, ...] = (
@@ -688,6 +721,7 @@ FAULTS: tuple[Fault, ...] = (
     _MAPPING_FAILED,
     _BUILD_INCOMPLETE,
     _STAGE_NEVER_RAN,
+    _RESULT_PREDATES_THE_SYSTEM,
     _CHARGE_NOT_INTEGER,
     _PROTONATION_NOT_APPLIED,
     _POSE_LOST,
