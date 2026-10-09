@@ -861,6 +861,103 @@ def test_a_library_already_on_disk_keeps_the_name_it_has(tmp_path, keyed) -> Non
     assert library_rows(other, "batch_0001", root, content_addressed=True) == fresh
 
 
+def test_an_indexed_library_whose_bytes_changed_is_not_handed_out(tmp_path, keyed) -> None:
+    """The index is a claim about file contents, so the file has to be asked, not the index.
+
+    Measured: replacing an indexed `lib-<digest>.csv` with a 31-byte wrong-content file -- wrong
+    length, so a size guard would have caught it -- still returned that file untouched, because the
+    index hit returned before any guard ran. The original observation was a request for one batch's
+    library returning a path whose first data row read `J0,N0,flowr`: another batch's molecules,
+    under this batch's id, about to be docked and recorded as this batch's measurement.
+    """
+
+    screen = FakeScreen()
+    gate = authorize_gate(calibration(), provenance=screen.provenance())
+    root = tmp_path / "libraries"
+
+    mine = Sweep(screen, Ledger(tmp_path / "a.jsonl"), tmp_path / "a.sqlite", batch_size=5, gate=gate)
+    mine.admit([(f"K{i}", f"C{i}", "flowr") for i in range(5)])
+    mine.emit(revision_id="rev-1")
+    wanted = library_rows(mine, "batch_0001", root, content_addressed=True)
+    payload = wanted.read_bytes()
+
+    # Another batch's molecules, written over the indexed name. Shorter, so the old size guard
+    # would have fired -- and did not, because the index hit returned first.
+    other = Sweep(screen, Ledger(tmp_path / "b.jsonl"), tmp_path / "b.sqlite", batch_size=5, gate=gate)
+    other.admit([(f"J{i}", f"N{i}", "flowr") for i in range(5)])
+    other.emit(revision_id="rev-1")
+    foreign = library_rows(other, "batch_0001", root, content_addressed=True).read_bytes()
+    assert foreign != payload
+    wanted.write_bytes(foreign)
+
+    again = library_rows(mine, "batch_0001", root, content_addressed=True)
+    assert again.read_bytes() == payload, "a library must hold the molecules of the batch asking for it"
+    assert "J0,N0,flowr" not in again.read_text(encoding="utf-8")
+
+    # Truncation is caught the same way, and by content rather than by length.
+    again.write_bytes(payload[: len(payload) // 2])
+    assert library_rows(mine, "batch_0001", root, content_addressed=True).read_bytes() == payload
+
+    # Same length, different bytes -- the case no size check can see.
+    swapped = bytearray(payload)
+    swapped[-2:] = b"zz"
+    again.write_bytes(bytes(swapped))
+    assert len(bytes(swapped)) == len(payload)
+    assert library_rows(mine, "batch_0001", root, content_addressed=True).read_bytes() == payload
+
+
+def test_a_stale_content_index_entry_is_repaired_rather_than_followed(tmp_path, keyed) -> None:
+    """An index naming a file that holds something else must fall through to the write path."""
+
+    import json
+
+    screen = FakeScreen()
+    gate = authorize_gate(calibration(), provenance=screen.provenance())
+    root = tmp_path / "libraries"
+    sweep = Sweep(screen, Ledger(tmp_path / "a.jsonl"), tmp_path / "a.sqlite", batch_size=5, gate=gate)
+    sweep.admit([(f"K{i}", f"C{i}", "flowr") for i in range(5)])
+    sweep.emit(revision_id="rev-1")
+
+    first = library_rows(sweep, "batch_0001", root, content_addressed=True)
+    payload = first.read_bytes()
+    digest = next(iter(json.loads((root / "by-content.json").read_text(encoding="utf-8"))))
+
+    # Point the index at a file that exists and holds the wrong thing.
+    decoy = root / "decoy.csv"
+    decoy.write_text("id,smiles,source\nQ0,X0,flowr\n", encoding="utf-8")
+    (root / "by-content.json").write_text(json.dumps({digest: decoy.name}), encoding="utf-8")
+
+    repaired = library_rows(sweep, "batch_0001", root, content_addressed=True)
+    assert repaired.read_bytes() == payload
+    assert repaired != decoy
+    # And the index now names the file that really holds these bytes.
+    index = json.loads((root / "by-content.json").read_text(encoding="utf-8"))
+    assert index[digest] == repaired.name
+
+
+def test_one_unreadable_csv_does_not_abort_library_writing(tmp_path, keyed) -> None:
+    """Measured: a dangling CSV raised out of index construction, hence out of `library_rows`.
+
+    The supervisor calls `library_rows` *after* the batch is claimed, so the batch stayed claimed
+    with no screen running and nothing retried it. The stat lived inside the sort key, which is the
+    one place the loop body's own `OSError` guard could not reach.
+    """
+
+    screen = FakeScreen()
+    gate = authorize_gate(calibration(), provenance=screen.provenance())
+    root = tmp_path / "libraries"
+    root.mkdir(parents=True)
+    (root / "dangling.csv").symlink_to(root / "nowhere.csv")
+
+    sweep = Sweep(screen, Ledger(tmp_path / "a.jsonl"), tmp_path / "a.sqlite", batch_size=5, gate=gate)
+    sweep.admit([(f"K{i}", f"C{i}", "flowr") for i in range(5)])
+    sweep.emit(revision_id="rev-1")
+
+    written = library_rows(sweep, "batch_0001", root, content_addressed=True)
+    assert written.name.startswith("lib-")
+    assert written.read_text(encoding="utf-8").startswith("id,smiles,source")
+
+
 def test_molecules_of_an_unemitted_batch_is_refused(sweep: Sweep) -> None:
     with pytest.raises(SweepError, match="never emitted"):
         sweep.molecules("batch_9999")

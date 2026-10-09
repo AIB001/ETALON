@@ -669,7 +669,7 @@ def library_rows(
     root.mkdir(parents=True, exist_ok=True)
     digest = hashlib.sha256(payload).hexdigest()
     existing = _library_index(root).get(digest)
-    if existing is not None and (root / existing).is_file():
+    if existing is not None and _holds(root / existing, digest):
         # Reuse the name this exact library already has, whatever it is. The goal is one path per
         # content, not a particular spelling of it -- and an earlier campaign that wrote these bytes
         # under its own naming scheme has cache entries keyed on *that* path. Measured on ALK2: 27
@@ -680,10 +680,59 @@ def library_rows(
         return root / existing
 
     target = root / f"lib-{digest}.csv"
-    if not (target.is_file() and target.stat().st_size == len(payload)):
-        target.write_bytes(payload)
+    if not _holds(target, digest):
+        _write_atomically(target, payload)
     _remember_library(root, digest, target.name)
     return target
+
+
+def _holds(path: Path, digest: str) -> bool:
+    """Whether ``path`` right now contains the bytes that ``digest`` names.
+
+    The index is a cache of a claim about file contents, and nothing keeps the contents from
+    changing after it was made: a batch library is a plain CSV in a campaign directory that
+    operators and harvest scripts also write to. So the digest is the question, and the file has
+    to be asked it rather than the index.
+
+    Checking the length was the measured bug. Replacing an indexed ``lib-<digest>.csv`` with a
+    31-byte wrong-content file -- wrong length, so a size guard would have caught it -- still
+    returned that file untouched, because the index hit returned before any guard ran. In the
+    original observation a request for one batch's library returned a path whose first data row
+    read ``J0,N0,flowr``: another batch's molecules, under this batch's id, about to be docked and
+    recorded as this batch's measurement.
+
+    Re-hashing costs reading a couple of megabytes against a batch costing hours, so it is paid on
+    every lookup instead of trusted.
+    """
+
+    import hashlib
+
+    try:
+        return hashlib.sha256(path.read_bytes()).hexdigest() == digest
+    except OSError:
+        return False
+
+
+def _write_atomically(target: Path, payload: bytes) -> None:
+    """Write ``payload`` to ``target`` so that no reader ever sees a partial library.
+
+    A library file is named after its own content, so a half-written one is a file whose name is a
+    lie. With the digest check above, the next lookup would reject it, write it again, and hand the
+    screen a path whose bytes changed underneath an already-running source stage. Replacing within
+    the same directory keeps the rename atomic on one filesystem.
+    """
+
+    import os
+    import tempfile
+
+    descriptor, temporary = tempfile.mkstemp(dir=str(target.parent), prefix=".lib-", suffix=".tmp")
+    try:
+        with os.fdopen(descriptor, "wb") as handle:
+            handle.write(payload)
+        os.replace(temporary, target)
+    except BaseException:
+        Path(temporary).unlink(missing_ok=True)
+        raise
 
 
 def _library_index(root: Path) -> dict[str, str]:
@@ -710,16 +759,61 @@ def _library_index(root: Path) -> dict[str, str]:
     # picking any other name indexes the content to a path the screen has never seen. Measured on
     # ALK2: 54 library files, 27 distinct contents, every v6 name shadowed by a v7 twin; keying on
     # the later name would have produced a tidy index and not one cache hit.
-    for candidate in sorted(root.glob("*.csv"), key=lambda p: (p.stat().st_mtime, p.name)):
+    for candidate in _oldest_first(root.glob("*.csv")):
         try:
             index.setdefault(hashlib.sha256(candidate.read_bytes()).hexdigest(), candidate.name)
         except OSError:
             continue
-    try:
-        index_path.write_text(json.dumps(index, indent=1, sort_keys=True), encoding="utf-8")
-    except OSError:
-        pass
+    _write_index(index_path, index)
     return index
+
+
+def _oldest_first(candidates: Iterable[Path]) -> list[Path]:
+    """Order files oldest-first, dropping any that cannot be stat'd while being ordered.
+
+    ``sorted(..., key=lambda p: (p.stat().st_mtime, p.name))`` reads the filesystem from inside the
+    sort key, which is the one place the loop body's own ``OSError`` guard cannot reach. Measured: a
+    single dangling CSV in the library directory -- a broken symlink, or a file removed between the
+    glob and the stat -- raised out of index construction and therefore out of ``library_rows``,
+    which the supervisor calls *after* the batch is already claimed. The batch stayed claimed with
+    no screen running and nothing retried it.
+    """
+
+    aged: list[tuple[float, str, Path]] = []
+    for candidate in candidates:
+        try:
+            aged.append((candidate.stat().st_mtime, candidate.name, candidate))
+        except OSError:
+            continue
+    return [candidate for _, _, candidate in sorted(aged, key=lambda item: item[:2])]
+
+
+def _write_index(index_path: Path, index: dict[str, str]) -> None:
+    """Replace the content index in one step, or leave the old one in place.
+
+    A truncated ``by-content.json`` is worse than a missing one: missing is rebuilt from the
+    directory, truncated is a ``ValueError`` that is also rebuilt but only after the half-written
+    file is read -- and a *valid* half of the index is neither. Two supervisors sharing a library
+    directory then race, and the loser's entries vanish rather than the file becoming unreadable.
+    Last writer wins, which costs a rebuild on the next miss, not a wrong path.
+    """
+
+    import os
+    import tempfile
+
+    payload = json.dumps(index, indent=1, sort_keys=True).encode("utf-8")
+    try:
+        descriptor, temporary = tempfile.mkstemp(
+            dir=str(index_path.parent), prefix=".by-content-", suffix=".tmp"
+        )
+    except OSError:
+        return
+    try:
+        with os.fdopen(descriptor, "wb") as handle:
+            handle.write(payload)
+        os.replace(temporary, index_path)
+    except OSError:
+        Path(temporary).unlink(missing_ok=True)
 
 
 def _remember_library(root: Path, digest: str, name: str) -> None:
@@ -727,12 +821,7 @@ def _remember_library(root: Path, digest: str, name: str) -> None:
     if index.get(digest) == name:
         return
     index[digest] = name
-    try:
-        (root / "by-content.json").write_text(
-            json.dumps(index, indent=1, sort_keys=True), encoding="utf-8"
-        )
-    except OSError:
-        pass
+    _write_index(root / "by-content.json", index)
 
 
 def as_json(sweep: Sweep) -> str:
