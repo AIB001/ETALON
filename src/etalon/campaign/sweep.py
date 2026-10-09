@@ -109,9 +109,15 @@ CREATE TABLE IF NOT EXISTS batch (
     run_id       TEXT,
     revision_id  TEXT,
     outcome      TEXT,               -- committed | exhausted | failed, once recorded
-    recorded_at  TEXT
+    recorded_at  TEXT,
+    gate         TEXT                -- the calibration digest this batch was *emitted* under
 );
 """
+
+# Pools written before the `gate` column existed. `CREATE TABLE IF NOT EXISTS` is a no-op on an
+# existing table, so a column added to the schema above never reaches a campaign already on disk --
+# and the campaign already on disk is the one with batches in it.
+_MIGRATIONS = (("batch", "gate", "ALTER TABLE batch ADD COLUMN gate TEXT"),)
 
 
 @dataclass(frozen=True, slots=True)
@@ -145,6 +151,15 @@ class Batch:
     revision_id: str | None = None
     outcome: str | None = None
     recorded_at: str | None = None
+    gate: str | None = None
+    """The calibration digest this batch was *emitted* under.
+
+    Carried on the row rather than re-read at record time, because the sweep that records a batch
+    is not always the sweep that carved it. Measured: a supervisor restarted mid-campaign
+    re-authorizes its gate, and ``record`` filed that new digest against batches carved under the
+    old one -- so a ledger read back afterwards attributed every batch to whichever authorization
+    happened to be live when the recorder ran. ``None`` on a row written before this column existed.
+    """
 
     @property
     def recorded(self) -> bool:
@@ -165,6 +180,7 @@ class Batch:
             "revision_id": self.revision_id,
             "outcome": self.outcome,
             "recorded_at": self.recorded_at,
+            "gate": self.gate,
         }
 
 
@@ -222,6 +238,10 @@ class Sweep:
         self.pool.parent.mkdir(parents=True, exist_ok=True)
         with closing(self._connect()) as db:
             db.executescript(_SCHEMA)
+            for table, column, statement in _MIGRATIONS:
+                present = {row[1] for row in db.execute(f"PRAGMA table_info({table})")}
+                if column not in present:
+                    db.execute(statement)
             db.commit()
 
     def _connect(self) -> sqlite3.Connection:
@@ -319,6 +339,10 @@ class Sweep:
         """
 
         require_gate(self.gate, revision_id)
+        # Read once, outside the carving loop, so every batch of one emit carries the same digest.
+        # ``require_gate`` has already refused a missing authorization, so this is not None in
+        # practice; the fallback keeps the column honest rather than inventing a digest.
+        gate_digest = None if self.gate is None else self.gate.calibration_sha256
         carved: list[Batch] = []
         with closing(self._connect()) as db:
             db.execute("BEGIN IMMEDIATE")
@@ -356,11 +380,18 @@ class Sweep:
                         (batch_id, take),
                     )
                     db.execute(
-                        "INSERT INTO batch(batch_id, size, emitted_at, revision_id) VALUES (?,?,?,?)",
-                        (batch_id, take, at, revision_id),
+                        "INSERT INTO batch(batch_id, size, emitted_at, revision_id, gate) "
+                        "VALUES (?,?,?,?,?)",
+                        (batch_id, take, at, revision_id, gate_digest),
                     )
                     carved.append(
-                        Batch(batch_id=batch_id, size=take, emitted_at=at, revision_id=revision_id)
+                        Batch(
+                            batch_id=batch_id,
+                            size=take,
+                            emitted_at=at,
+                            revision_id=revision_id,
+                            gate=gate_digest,
+                        )
                     )
                     if flush and take < self.batch_size:
                         break
@@ -433,6 +464,25 @@ class Sweep:
                 f"{batch_id} is already recorded as {recorded.outcome!r}. An outcome is append-only; "
                 "screen a new batch rather than overwriting a measurement."
             )
+        # A run that has not finished has no outcome to record, and the thing that makes this worth
+        # a guard rather than a comment is which way ``ScreenResult.outcome`` errs on one:
+        # ``outcome`` is derived from the *stages*, so a RUNNING run whose stages have not failed
+        # yet classifies as ``"committed"`` -- the same string a finished screen produces. A batch
+        # killed at stage 6 of 43 therefore files as a successful measurement of 20,000 molecules,
+        # with 37 stages that never ran, and nothing downstream can tell it from a real one: the
+        # ledger entry carries ``committed_stages`` but no reader compares it against the funnel's
+        # length. ``recover`` (:525) and the MCP record tool (mcp/sweep.py:344) each already
+        # refuse this; the invariant belongs here, where the row is actually written, so that a
+        # driver calling the campaign API directly cannot bypass it.
+        if result.status not in ("SUCCEEDED", "FAILED"):
+            raise SweepError(
+                f"{batch_id}'s run {result.run_id} is {result.status}, which is not a terminal "
+                "state. An unfinished run has committed stages and no outcome, and recording one "
+                "would file a partial screen as a complete measurement -- "
+                "ScreenResult.outcome reads 'committed' for a RUNNING run whose stages have not "
+                "failed. Poll Screen.progress, or call recover(abandoned=...) once you have "
+                "confirmed nothing is still screening it."
+            )
         # The batch keeps the revision it was emitted under, and a differing run digest is
         # provenance rather than a violation.
         #
@@ -453,11 +503,24 @@ class Sweep:
         at = _now()
         with closing(self._connect()) as db:
             db.execute("BEGIN IMMEDIATE")
-            db.execute(
+            # ``AND outcome IS NULL`` is what makes the append-only guard above actually hold. The
+            # guard is a read, the write is a separate statement, and between them is a window two
+            # recorders fit through: a supervisor's ``recover`` and an operator's MCP call both see
+            # ``outcome IS NULL``, both pass, and the second silently overwrites the first's
+            # measurement -- including overwriting ``committed`` with ``failed`` from a retry that
+            # should never have been dispatched. ``claim`` (:407-418) already had this pattern; the
+            # terminal write did not.
+            cursor = db.execute(
                 "UPDATE batch SET run_id = ?, revision_id = ?, outcome = ?, recorded_at = ? "
-                "WHERE batch_id = ?",
+                "WHERE batch_id = ? AND outcome IS NULL",
                 (result.run_id, revision, result.outcome, at, batch_id),
             )
+            if cursor.rowcount != 1:
+                db.execute("ROLLBACK")
+                raise SweepError(
+                    f"{batch_id} was recorded by someone else between this call's check and its "
+                    "write. An outcome is append-only; read batch() for the one that landed."
+                )
             db.execute("COMMIT")
         self.ledger.append(
             "batch",
@@ -474,7 +537,12 @@ class Sweep:
             committed_stages=len(result.committed),
             failed_stages=[stage.stage_id for stage in result.failed],
             infrastructure=self.screen.provenance(),
-            gate=None if self.gate is None else self.gate.calibration_sha256,
+            # The gate the batch was *emitted* under, read off its row, not this sweep's. They are
+            # the same digest for a campaign that ran in one process and different ones for a
+            # campaign that was restarted -- and the restarted campaign is the one whose ledger
+            # anybody reads. ``or`` rather than a plain read so a pool carved before the column
+            # existed still files the live digest instead of a null.
+            gate=recorded.gate or (None if self.gate is None else self.gate.calibration_sha256),
         )
         updated = self.batch(batch_id)
         assert updated is not None
@@ -555,7 +623,7 @@ class Sweep:
         with closing(self._connect()) as db:
             row = db.execute(
                 "SELECT batch_id, size, emitted_at, claimed_by, claimed_at, run_id, revision_id, "
-                "outcome, recorded_at FROM batch WHERE batch_id = ?",
+                "outcome, recorded_at, gate FROM batch WHERE batch_id = ?",
                 (batch_id,),
             ).fetchone()
         return None if row is None else Batch(*row)
@@ -564,7 +632,7 @@ class Sweep:
         with closing(self._connect()) as db:
             rows = db.execute(
                 "SELECT batch_id, size, emitted_at, claimed_by, claimed_at, run_id, revision_id, "
-                f"outcome, recorded_at FROM batch WHERE {where} ORDER BY batch_id",
+                f"outcome, recorded_at, gate FROM batch WHERE {where} ORDER BY batch_id",
                 args,
             ).fetchall()
         return tuple(Batch(*row) for row in rows)

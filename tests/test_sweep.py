@@ -664,6 +664,179 @@ def test_the_ledger_line_carries_the_revision_and_the_gate(sweep: Sweep) -> None
     assert body["infrastructure"]["tree_sha256"] == "deadbeef"
 
 
+def test_an_unfinished_run_is_not_recorded_as_a_measurement(sweep: Sweep) -> None:
+    """A screen killed mid-funnel files as ``committed``, because ``outcome`` reads the stages.
+
+    Measured shape: a supervisor was restarted while a 20,000-molecule batch was at stage 6 of 43.
+    The run record stayed RUNNING with six committed stages and none failed, and
+    ``ScreenResult.outcome`` is derived from the stages -- so it returned ``"committed"``, the same
+    string a finished screen produces. Recording that is a complete measurement of 20,000 molecules
+    with 37 stages that never ran, and nothing downstream can tell it apart: the ledger entry
+    carries ``committed_stages`` but no reader compares it against the funnel's length.
+    """
+
+    sweep.admit([(f"K{i}", "C", "f") for i in range(5)])
+    sweep.emit(revision_id="rev-1")
+    sweep.claim("batch_0001", by="gpu5")
+    midway = ScreenResult(
+        "batch_0001",
+        "rev-1",
+        "RUNNING",
+        tuple(stage(f"s{i}", "SUCCEEDED", artifact=f"a{i}") for i in range(6)),
+    )
+    # The thing being guarded against: this is not a failure that would be caught some other way.
+    assert midway.outcome == "committed"
+    with pytest.raises(SweepError, match="not a terminal"):
+        sweep.record("batch_0001", midway)
+    still = sweep.batch("batch_0001")
+    assert still is not None and still.outcome is None
+    assert [e.kind for e in sweep.ledger.entries()] == []
+
+
+def test_two_recorders_cannot_both_file_an_outcome(sweep: Sweep) -> None:
+    """The append-only guard is a read, the write is a separate statement, and that is a window.
+
+    Both a supervisor's ``recover`` and an operator's MCP ``etalon_sweep_record`` reach the same
+    pool, and both check ``recorded`` before writing. Two that interleave both pass the check, and
+    the second overwrote the first's measurement -- including overwriting ``committed`` with
+    ``failed`` from a retry that should never have been dispatched. ``claim`` already took the
+    conditional-update-plus-rowcount route; the terminal write did not.
+    """
+
+    sweep.admit([(f"K{i}", "C", "f") for i in range(5)])
+    sweep.emit(revision_id="rev-1")
+    sweep.claim("batch_0001", by="gpu5")
+    stale = sweep.batch("batch_0001")  # the row as BOTH recorders read it: claimed, unrecorded
+    assert stale is not None and not stale.recorded
+
+    sweep.record(
+        "batch_0001",
+        ScreenResult("batch_0001", "rev-1", "SUCCEEDED", (stage("s", "SUCCEEDED", artifact="a"),)),
+    )
+
+    # The loser's pre-read happened before that write. ``record`` re-reads the row, so replaying
+    # the window means handing it the row it actually had -- once.
+    real = sweep.batch
+    pre_read = iter([stale])
+    sweep.batch = lambda bid: next(pre_read, None) or real(bid)  # type: ignore[assignment]
+    try:
+        with pytest.raises(SweepError, match="recorded by someone else"):
+            sweep.record(
+                "batch_0001",
+                ScreenResult("batch_0001", "rev-1", "FAILED", (stage("s", "FAILED", code="BOOM"),)),
+            )
+    finally:
+        sweep.batch = real  # type: ignore[assignment]
+
+    landed = sweep.batch("batch_0001")
+    assert landed is not None and landed.outcome == "committed"
+    assert [e.body["outcome"] for e in sweep.ledger.entries() if e.kind == "batch"] == ["committed"]
+
+
+def test_the_ledger_records_the_gate_the_batch_was_emitted_under(tmp_path, keyed) -> None:
+    """Not the gate of whichever sweep happened to record it.
+
+    A supervisor restarted mid-campaign re-authorizes its gate before carving anything, and
+    ``record`` read ``self.gate`` -- so every batch it recovered, including ones carved hours
+    earlier under a different calibration, was filed under the live authorization. A ledger read
+    back afterwards therefore attributes the whole campaign to one gate regardless of what was
+    actually screened under what.
+    """
+
+    screen = FakeScreen()
+    emitting = authorize_gate(calibration(), provenance=screen.provenance())
+    carver = Sweep(
+        screen,
+        Ledger(tmp_path / "ledger.jsonl"),
+        tmp_path / "pool.sqlite",
+        batch_size=5,
+        gate=emitting,
+    )
+    carver.admit([(f"K{i}", "C", "f") for i in range(5)])
+    carver.emit(revision_id="rev-1")
+    carved = carver.batch("batch_0001")
+    assert carved is not None and carved.gate == emitting.calibration_sha256
+
+    # What a restart mints: the same funnel, a differently-digested calibration verdict.
+    restarted = authorize_gate(
+        replace(calibration(), run_id="panel-run-after-restart"), provenance=screen.provenance()
+    )
+    assert restarted.calibration_sha256 != emitting.calibration_sha256
+
+    recorder = Sweep(
+        screen,
+        Ledger(tmp_path / "ledger.jsonl"),
+        tmp_path / "pool.sqlite",
+        batch_size=5,
+        gate=restarted,
+    )
+    recorder.screen = screen  # type: ignore[assignment]
+    recorder.claim("batch_0001", by="gpu5")
+    recorder.record(
+        "batch_0001",
+        ScreenResult("batch_0001", "rev-1", "SUCCEEDED", (stage("s", "SUCCEEDED", artifact="a"),)),
+    )
+    body = recorder.ledger.entries()[-1].body
+    assert body["gate"] == emitting.calibration_sha256
+    assert body["gate"] != restarted.calibration_sha256
+
+
+def test_a_pool_carved_before_the_gate_column_still_records(tmp_path, keyed) -> None:
+    """``CREATE TABLE IF NOT EXISTS`` is a no-op, so a new column needs an explicit migration.
+
+    The campaign already on disk is the one with batches in it, and without the ``ALTER TABLE`` a
+    column added to the schema reaches only pools created after the change -- so the first thing
+    the new code does against a running campaign is raise ``no such column: gate`` out of
+    ``recover``, inside the supervisor tick, which kills the process driving it.
+    """
+
+    import sqlite3
+
+    pool = tmp_path / "pool.sqlite"
+    db = sqlite3.connect(pool)
+    db.executescript(
+        """
+        CREATE TABLE molecule (
+            key TEXT PRIMARY KEY, smiles TEXT NOT NULL, source TEXT NOT NULL,
+            seen_at REAL NOT NULL, batch TEXT
+        );
+        CREATE TABLE batch (
+            batch_id TEXT PRIMARY KEY, size INTEGER NOT NULL, emitted_at TEXT NOT NULL,
+            claimed_by TEXT, claimed_at TEXT, run_id TEXT, revision_id TEXT,
+            outcome TEXT, recorded_at TEXT
+        );
+        INSERT INTO batch(batch_id, size, emitted_at, revision_id)
+        VALUES ('batch_0001', 5, '2026-01-01T00:00:00Z', 'rev-1');
+        """
+    )
+    for i in range(5):
+        db.execute(
+            "INSERT INTO molecule(key, smiles, source, seen_at, batch) VALUES (?,?,?,?,?)",
+            (f"K{i}", "C", "f", float(i), "batch_0001"),
+        )
+    db.commit()
+    db.close()
+
+    screen = FakeScreen()
+    sweep = Sweep(
+        screen,
+        Ledger(tmp_path / "ledger.jsonl"),
+        pool,
+        batch_size=5,
+        gate=authorize_gate(calibration(), provenance=screen.provenance()),
+    )
+    sweep.screen = screen  # type: ignore[assignment]
+    before = sweep.batch("batch_0001")
+    assert before is not None and before.gate is None  # migrated, and honest about what it holds
+    sweep.claim("batch_0001", by="gpu5")
+    sweep.record(
+        "batch_0001",
+        ScreenResult("batch_0001", "rev-1", "SUCCEEDED", (stage("s", "SUCCEEDED", artifact="a"),)),
+    )
+    # No emitting gate on the row, so the ledger falls back to the live one rather than a null.
+    assert sweep.ledger.entries()[-1].body["gate"] == sweep.gate.calibration_sha256  # type: ignore[union-attr]
+
+
 # -- recovery: the six-hour orphan -------------------------------------------
 
 
