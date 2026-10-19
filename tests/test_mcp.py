@@ -45,15 +45,10 @@ class Collector:
 
 
 def _tools() -> dict[str, object]:
-    from etalon.mcp import active, data, execution, governance, planning, runtime
+    from etalon.mcp.server import register_tools
 
     collector = Collector()
-    planning.register(collector)
-    governance.register(collector)
-    active.register(collector)
-    execution.register(collector)
-    data.register(collector)
-    runtime.register(collector)
+    register_tools(collector)
     return collector.tools
 
 
@@ -123,12 +118,12 @@ def test_a_raising_tool_returns_the_error_shape_rather_than_a_traceback() -> Non
     assert refused["error"]["context"]["tool"] == "probe"
 
 
-def test_a_relative_path_is_refused_with_the_path_in_the_message() -> None:
+def test_a_relative_path_is_refused_with_the_path_in_the_message(tmp_path) -> None:
     """A stdio server inherits a working directory the caller cannot see."""
 
     with pytest.raises(ValueError, match="absolute path"):
         absolute_path("relative/thing.pdb", label="receptor_path")
-    assert absolute_path("/abs/thing.pdb", label="receptor_path").is_absolute()
+    assert absolute_path(str(tmp_path / "thing.pdb"), label="receptor_path").is_absolute()
 
 
 # -- the cost classification ---------------------------------------------
@@ -493,8 +488,10 @@ def test_the_skill_is_one_file_serving_both_consumers() -> None:
     assert text.startswith("---"), "a Claude Code skill needs frontmatter"
     assert "name: etalon-campaign" in text
     assert SKILL_RESOURCE == "etalon://skills/campaign"
-    # The measurements a refusal rests on have to be in the document, because a refusal quoted
-    # without its measurement looks like fussiness.
+    # Historical measurement rationale remains available on demand in the same bundle.
+    from etalon.skills import read_member
+
+    text = read_member("campaign", "references/legacy-workflow.md")["content"]
     for number in ("41 of 41", "12 kcal/mol", "110 of 120", "0.767", "37.5%"):
         assert number in text, number
 
@@ -536,9 +533,9 @@ def test_the_campaign_document_routes_to_the_other_regime() -> None:
 def test_the_sweep_document_carries_the_panel_that_justifies_its_guard() -> None:
     """The gate check is the sweep's one rule, and its argument is a table of measurements."""
 
-    from etalon.mcp.server import _skill_path
+    from etalon.skills import read_member
 
-    text = _skill_path("sweep").read_text(encoding="utf-8")
+    text = read_member("sweep", "references/legacy-workflow.md")["content"]
     for number in (
         "-8.5",  # the shipped threshold, as a literal config value: ASCII, inside inline code
         "−5.90",  # a measured score, as a numeral in prose: U+2212
@@ -771,6 +768,7 @@ def test_every_workflow_document_is_carried_into_the_wheel() -> None:
         # The source has to exist, or the wheel ships a mapping to nothing.
         assert (root / source).is_file(), f"{source} is force-included but absent"
         assert _skill_path(slug).is_file(), slug
+        assert included[f".claude/skills/{name}"] == f"etalon/mcp/skills/bundles/{slug}"
 
 
 def _sweep_tools() -> dict[str, object]:

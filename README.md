@@ -2,6 +2,29 @@
 
 A CADD campaign agent that knows how much to trust its own numbers.
 
+## Host-driven research
+
+Codex or Claude Code owns the research question and next action. ETALON supplies
+domain tools, optional skills, bounded execution and scientific evidence. Existing
+workflow graphs and numerical active policies remain available as local methods.
+
+The first thin-harness increment adds `etalon_capabilities`, `etalon_skill_read`,
+complete versioned skill bundles and project-local host adapters. Export with the
+interpreter that will run the server:
+
+```bash
+pip install -e '.[mcp]'
+python -m etalon.host export --target /absolute/new/research-project --host codex
+python -m etalon.host verify --target /absolute/new/research-project
+```
+
+Use `--host claude` for Claude Code. The target must not exist; exports never
+overwrite existing project instructions or configuration. Both adapters use the
+same skill sources, supporting references and separately versioned usage guide.
+Native host discovery must be checked in that host; an export or SDK handshake
+does not establish it. See the [host setup and migration status](src/etalon/HOST_SETUP.md)
+for usage, compatibility, validation and the source-migration gaps.
+
 Detailed reviews and validation records under `docs/` are maintained locally and excluded from Git.
 The [durable runtime guide and research references](src/etalon/runtime/README.md), this overview
 and runnable examples are tracked and included with the implementation.

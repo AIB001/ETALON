@@ -87,6 +87,14 @@ packages = ["src/etalon"]
 ".claude/skills/etalon-generation-planning/SKILL.md" = "etalon/mcp/skills/generation-planning.md"
 ".claude/skills/etalon-campaign-monitoring/SKILL.md" = "etalon/mcp/skills/monitoring.md"
 ".claude/skills/etalon-install/SKILL.md" = "etalon/mcp/skills/install.md"
+# Complete bundles retain relative references for host exports and MCP reads.
+# The flat entrypoint copies above remain available to older package consumers.
+".claude/skills/etalon-campaign" = "etalon/mcp/skills/bundles/campaign"
+".claude/skills/etalon-screening-sweep" = "etalon/mcp/skills/bundles/sweep"
+".claude/skills/etalon-gate-calibration" = "etalon/mcp/skills/bundles/gate-calibration"
+".claude/skills/etalon-generation-planning" = "etalon/mcp/skills/bundles/generation-planning"
+".claude/skills/etalon-campaign-monitoring" = "etalon/mcp/skills/bundles/monitoring"
+".claude/skills/etalon-install" = "etalon/mcp/skills/bundles/install"
 "asset" = "etalon/_assets"
 
 [tool.hatch.build]
