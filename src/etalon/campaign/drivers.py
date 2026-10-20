@@ -24,6 +24,37 @@ class RevisionChanged(RuntimeError):
     """The compiled cascade is not the one this campaign's batches belong to."""
 
 
+def _require_terminal(batch_id: str, result: ScreenResult, detail: str = "") -> ScreenResult:
+    """Refuse a run record that is not finished, rather than returning it as a result.
+
+    A driver returns when its screen is over, and both drivers established that by asking whether a
+    run record *exists*. Existence is the wrong question: MolCascade writes the record when the run
+    starts, so a subprocess killed by the OOM killer, cut off by this driver's own ``timeout``, or
+    stopped with its host leaves a record sitting in ``RUNNING`` -- and the driver read it as the
+    batch's result.
+
+    What follows from returning it is worse than the wrong status, because of how the supervisor
+    is wired. ``_reap`` sees a job that finished without raising, drops it and frees the device.
+    The batch is still claimed, so ``Sweep.recover`` finds it outstanding, asks the run record,
+    gets a non-terminal status and reports ``running`` -- which is the one recovery action
+    ``TickReport.quiet`` deliberately does not count, having been added because 27 consecutive
+    ticks each printed the same 1,200-character line listing 16 batches as running. So the batch
+    sits claimed for the rest of the campaign and no tick ever prints anything about it.
+
+    Raising instead puts it on the channel that exists for this. ``_Call`` carries the exception to
+    the poller, ``_reap`` turns it into a note, and ``notes`` makes the pass non-quiet.
+    """
+
+    if result.terminal:
+        return result
+    raise RuntimeError(
+        f"{batch_id}: its run record is {result.status}, which is not a terminal state, so this "
+        f"screen did not finish.{detail} Returning it would report an unfinished batch as a result "
+        "and leave the batch claimed with nothing running against it. Check the run's log, then "
+        "either let the next pass resume it or name it to Sweep.recover(abandoned=...)."
+    )
+
+
 @dataclass
 class MolCascadeScreening:
     """Screen one batch on one device, with the compiled revision checked before it runs.
@@ -102,6 +133,7 @@ class MolCascadeScreening:
             workers=self.workers,
             devices=(device,),
         )
+        _require_terminal(batch_id, result)
         if self.reference_library is None or result.revision_id == self.revision_id:
             return result
         # Report the funnel the batch went through, not the funnel-and-this-library digest. The
@@ -266,7 +298,14 @@ class MolCascadeProcessScreening:
                 f"stderr: {done.stderr.strip()[-600:]}"
             )
         # The run record is the authority on the outcome, not the exit code: a batch whose every
-        # molecule was gated out exits non-zero and is a measurement, not a failure.
+        # molecule was gated out exits non-zero and is a measurement, not a failure. But the record
+        # has to *be* an outcome: existing is not the same as being finished, and this driver reads
+        # the record after a subprocess that may have been killed rather than having returned.
+        _require_terminal(
+            batch_id,
+            result,
+            f" The process exited {done.returncode}; stderr: {done.stderr.strip()[-400:]}",
+        )
         return replace(result, revision_id=self.revision_id)
 
 

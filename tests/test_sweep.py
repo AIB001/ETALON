@@ -3213,6 +3213,133 @@ def test_a_batch_is_not_resumed_before_it_exists(tmp_path) -> None:
     assert "--resume" not in driver._argv(tmp_path / "panel.csv", "batch_old", dry_run=True)
 
 
+# -- a run record that exists is not the same as a screen that finished ------
+#
+# Both drivers established "the screen is over" by asking whether a run record exists. MolCascade
+# writes the record when the run *starts*, so a subprocess killed by the OOM killer, cut off by the
+# driver's own timeout, or stopped with its host leaves a record in RUNNING -- and that was returned
+# as the batch's result.
+#
+# What follows is worse than the wrong status. `_reap` sees a job that finished without raising,
+# drops it and frees the device; the batch is still claimed, so `Sweep.recover` asks the run record,
+# gets a non-terminal status and reports `running` -- the one recovery action `TickReport.quiet`
+# deliberately does not count. So the batch sits claimed for the rest of the campaign and no tick
+# prints anything about it.
+
+
+@pytest.mark.parametrize("status", ["RUNNING", "QUEUED", ""])
+def test_an_unfinished_run_record_is_not_returned_as_a_batch_result(tmp_path, monkeypatch, status) -> None:
+    """The process driver reads the record after a subprocess that may have been killed."""
+
+    import subprocess as subprocess_module
+
+    from etalon.campaign.drivers import MolCascadeProcessScreening
+
+    record = ScreenResult(
+        "batch_0001", "rev-1", status, (stage("source", "SUCCEEDED", artifact="a"),)
+    )
+
+    def fake_run(argv, **_kwargs):
+        if "--dry-run" in argv:
+            return SimpleNamespace(returncode=0, stdout='{"revision_id": "rev-1"}', stderr="")
+        # 137 is what the OOM killer leaves behind, and the run record stays where it was.
+        return SimpleNamespace(returncode=137, stdout="", stderr="Killed")
+
+    monkeypatch.setattr(subprocess_module, "run", fake_run)
+
+    driver = MolCascadeProcessScreening(
+        screen=SimpleNamespace(state=lambda run_id: record),
+        config_path=tmp_path / "c.json",
+        workspace=tmp_path / "ws",
+        revision_id="rev-1",
+        target_args=(),
+        reference_library=tmp_path / "panel.csv",
+    )
+    with pytest.raises(RuntimeError, match="not a terminal state"):
+        driver("batch_0001", tmp_path / "b.csv", "cuda:0")
+
+
+@pytest.mark.parametrize("status", ["SUCCEEDED", "FAILED"])
+def test_a_finished_run_is_returned_whichever_way_it_finished(tmp_path, monkeypatch, status) -> None:
+    """``FAILED`` is terminal, and an exhausted batch is a ``FAILED`` run that is a measurement."""
+
+    import subprocess as subprocess_module
+
+    from etalon.campaign.drivers import MolCascadeProcessScreening
+
+    record = ScreenResult(
+        "batch_0001", "per-library-digest", status,
+        (stage("docking", "SUCCEEDED", artifact="a"),),
+    )
+
+    def fake_run(argv, **_kwargs):
+        if "--dry-run" in argv:
+            return SimpleNamespace(returncode=0, stdout='{"revision_id": "rev-1"}', stderr="")
+        return SimpleNamespace(returncode=1, stdout="", stderr="")
+
+    monkeypatch.setattr(subprocess_module, "run", fake_run)
+
+    driver = MolCascadeProcessScreening(
+        screen=SimpleNamespace(state=lambda run_id: record),
+        config_path=tmp_path / "c.json",
+        workspace=tmp_path / "ws",
+        revision_id="rev-1",
+        target_args=(),
+        reference_library=tmp_path / "panel.csv",
+    )
+    result = driver("batch_0001", tmp_path / "b.csv", "cuda:0")
+    assert result.status == status
+    assert result.revision_id == "rev-1", "the funnel revision, not the per-library digest"
+
+
+def test_the_in_process_driver_also_refuses_an_unfinished_run(tmp_path) -> None:
+    """One fix in each driver, because the fault is in each driver. It has been so twice before."""
+
+    from etalon.campaign.drivers import MolCascadeScreening
+
+    class Runs:
+        def plan(self, _config, _library, target=None):
+            return SimpleNamespace(revision_id="rev-1")
+
+        def state(self, _run_id):
+            return None
+
+        def run(self, _plan, *, run_id, resume, workers, devices):
+            return ScreenResult(run_id, "rev-1", "RUNNING", ())
+
+    driver = MolCascadeScreening(
+        screen=Runs(), config_path=tmp_path / "c.json", revision_id="rev-1"
+    )
+    with pytest.raises(RuntimeError, match="not a terminal state"):
+        driver("batch_0001", tmp_path / "b.csv", "cuda:0")
+
+
+def test_terminal_is_defined_once_and_progress_reads_it(tmp_path) -> None:
+    """`progress`'s `terminal` key had the set inline while the drivers had no notion of it."""
+
+    from etalon.boundary.screen import TERMINAL_RUN_STATUSES
+
+    assert TERMINAL_RUN_STATUSES == frozenset({"SUCCEEDED", "FAILED"})
+    assert ScreenResult("r", "rev", "SUCCEEDED", ()).terminal
+    assert ScreenResult("r", "rev", "FAILED", ()).terminal
+    assert not ScreenResult("r", "rev", "RUNNING", ()).terminal
+
+    from etalon.boundary.screen import Screen
+
+    def reading(record):
+        class OneRun(Screen):
+            def __init__(self) -> None:  # noqa: D107 -- no workspace is touched
+                pass
+
+            def state(self, run_id: str):  # noqa: ARG002
+                return record
+
+        return OneRun().progress("r")
+
+    assert reading(ScreenResult("r", "rev", "RUNNING", (stage("s", "RUNNING"),)))["terminal"] is False
+    assert reading(ScreenResult("r", "rev", "FAILED", (stage("s", "FAILED", code="X"),)))["terminal"] is True
+
+
 def test_the_identity_probe_compiles_the_reference_library(tmp_path) -> None:
     """The revision check must compile the library the campaign's revision was computed from.
 

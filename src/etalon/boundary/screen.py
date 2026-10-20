@@ -59,6 +59,17 @@ from etalon.boundary.infra import Infra, load
 #: campaign's next decision depends on reading them rather than on retrying anything.
 _EXHAUSTION = re.compile(r"\A[A-Z0-9_]*EMPTY_(PARENT_)?INPUT\Z")
 
+#: The run statuses that mean the run is over, whichever way it went.
+#:
+#: One definition because two readers need the same one and they disagreed. :meth:`Screen.progress`
+#: had it inline, as the ``terminal`` key a monitor reads before deciding whether to intervene,
+#: while :mod:`etalon.campaign.drivers` had no notion of it at all and treated any run record as a
+#: finished run. ``FAILED`` is in the set: a run that failed is over, and an exhausted run -- every
+#: molecule gated out -- is a ``FAILED`` run whose error code matches :data:`_EXHAUSTION`, which is
+#: a measurement rather than a defect. Whether a terminal run succeeded is
+#: :attr:`ScreenResult.outcome`'s question, not this one's.
+TERMINAL_RUN_STATUSES = frozenset({"SUCCEEDED", "FAILED"})
+
 
 def _within(candidate: Path, root: Path) -> bool:
     try:
@@ -136,6 +147,17 @@ class ScreenResult:
     revision_id: str
     status: str
     stages: tuple[StageOutcome, ...]
+
+    @property
+    def terminal(self) -> bool:
+        """Whether the run is over. See :data:`TERMINAL_RUN_STATUSES`.
+
+        Not the same question as whether it succeeded, and not the same as whether a run record
+        exists. A record in ``RUNNING`` is a run still going, and a caller that reads it as a result
+        has a number for a batch that is not finished producing one.
+        """
+
+        return self.status in TERMINAL_RUN_STATUSES
 
     @property
     def failed(self) -> tuple[StageOutcome, ...]:
@@ -544,7 +566,7 @@ class Screen:
             "stage": reached + (1 if running else 0),
             "stages": len(result.stages),
             "current": running,
-            "terminal": result.status in ("SUCCEEDED", "FAILED"),
+            "terminal": result.terminal,
         }
 
     def recall(self, run_id: str, *, panel_size: int | None = None) -> dict[str, Any]:
@@ -964,4 +986,4 @@ class Screen:
         return self.infra.provenance()
 
 
-__all__ = ["Screen", "ScreenPlan", "ScreenResult", "StageOutcome"]
+__all__ = ["TERMINAL_RUN_STATUSES", "Screen", "ScreenPlan", "ScreenResult", "StageOutcome"]
