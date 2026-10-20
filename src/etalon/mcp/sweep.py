@@ -261,8 +261,34 @@ def register(mcp: Any) -> None:
                 yielded 6, 2 and 0 hits.
         """
 
+        from etalon.authority.grant import NotAuthorized
+
         sweep = _sweep(workspace, pool, ledger, gate_json=gate_json)
-        carved = sweep.emit(revision_id=revision_id, flush=bool(flush))
+        try:
+            carved = sweep.emit(revision_id=revision_id, flush=bool(flush))
+        except NotAuthorized as error:
+            # Caught here, with the token's own numbers, rather than left to the boundary. The
+            # boundary now classifies it correctly, but it cannot say *which* of the three causes
+            # fired, and the caller is holding the token that answers that: a revision that does
+            # not match the one it was minted for is a different mistake from a token that has
+            # expired, and they have different remedies.
+            return fail(
+                "NotAuthorized",
+                str(error),
+                hint=(
+                    "This is the refusal that stands between a calibration and a campaign's worth "
+                    "of GPU time. Compare revision_id against the gate's: if they differ, the "
+                    "cascade changed after it was calibrated and the batches would not be "
+                    "comparable. If they match, the token has expired or its signature does not "
+                    "verify -- re-screen the panel and call etalon_authorize_gates again. A token "
+                    "does not survive an MCP server restart unless ETALON_AUTHORITY_KEY is set."
+                ),
+                retryable=False,
+                requested_revision_id=revision_id,
+                gate_revision_id=None if sweep.gate is None else sweep.gate.revision_id,
+                gate_expires_at=None if sweep.gate is None else sweep.gate.expires_at,
+                gate_recall=None if sweep.gate is None else sweep.gate.recall,
+            )
         return ok(
             emitted=[batch.as_dict() for batch in carved],
             ready=sweep.ready(),

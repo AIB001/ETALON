@@ -45,15 +45,18 @@ class Collector:
 
 
 def _tools() -> dict[str, object]:
-    from etalon.mcp import active, data, execution, governance, planning, runtime
+    """Every tool the server registers, collected through the server's own module tuple.
+
+    This used to carry its own copy of the module list, and the copy was missing ``sweep`` -- the
+    same omission ``costs()`` had. So ``test_every_tool_declares_what_it_spends`` compared two
+    copies of one wrong set and passed over 12 missing tools for as long as both lists agreed.
+    """
+
+    from etalon.mcp.server import tool_modules
 
     collector = Collector()
-    planning.register(collector)
-    governance.register(collector)
-    active.register(collector)
-    execution.register(collector)
-    data.register(collector)
-    runtime.register(collector)
+    for module in tool_modules():
+        module.register(collector)
     return collector.tools
 
 
@@ -142,6 +145,59 @@ def test_every_tool_declares_what_it_spends() -> None:
     assert classification, "no tools registered"
     assert set(classification) == set(_tools())
     assert all(value in {c.value for c in Cost} for value in classification.values())
+
+
+def test_the_cost_classification_covers_every_module_the_server_registers() -> None:
+    """``costs()`` kept its own module list and it was missing one of the seven.
+
+    It reported 45 of 57 tools and omitted every tool in ``mcp/sweep.py``, including
+    ``etalon_authorize_gates`` and ``etalon_sweep_emit`` -- the two that stand between a
+    calibration and a campaign's worth of GPU time. Both readers now walk one tuple, so this
+    asserts the consequence rather than the mechanism: a namespace cannot go missing again.
+    """
+
+    from etalon.mcp.server import tool_modules
+
+    classification = costs()
+
+    assert len(tool_modules()) == 7
+    assert len(classification) == 57
+    for namespace in (
+        "etalon_sweep_", "etalon_data_", "etalon_workflow_", "etalon_active_",
+        "etalon_screen_", "etalon_executor_", "etalon_council_",
+    ):
+        assert any(name.startswith(namespace) for name in classification), namespace
+    # The two the omission actually hid.
+    assert classification["etalon_authorize_gates"] == "free"
+    assert classification["etalon_sweep_emit"] == "cheap"
+
+
+def test_the_cost_a_tool_declares_is_the_one_its_description_shows() -> None:
+    """The prefix a model reads is a hand-typed literal; nothing prepends it from the decorator.
+
+    ``tool(cost)`` only sets ``etalon_cost``, and its only reader is ``costs()``. So the
+    FREE/CHEAP/SPENDS/NEVER word at the start of every description is a convention, one typo away
+    from telling a model that a spending tool is free. Asserted here for all 57 rather than
+    trusted, which is what the decorator's own docstring used to claim the server did.
+    """
+
+    from etalon.mcp._common import Cost
+
+    expected = {
+        Cost.FREE: "FREE.",
+        Cost.CHEAP: "CHEAP.",
+        Cost.SPENDS: "SPENDS",
+        Cost.NEVER: "NEVER COMPLETED BY A MODEL.",
+    }
+    wrong: list[str] = []
+    for name, function in sorted(_tools().items()):
+        cost = getattr(function, "etalon_cost", None)
+        assert cost is not None, f"{name} carries no cost"
+        description = (function.__doc__ or "").strip()
+        if not description.startswith(expected[cost]):
+            wrong.append(f"{name}: declares {cost.value}, description starts {description[:28]!r}")
+
+    assert not wrong, "\n".join(wrong)
 
 
 def test_the_planning_tools_are_all_free() -> None:
@@ -831,3 +887,105 @@ def test_screening_capacity_counts_batches_not_cards() -> None:
         <= 1
     )
     assert two["batches_per_device"] == 2
+
+
+# -- a refusal is not a crash, and the boundary said it was ------------------
+#
+# Two governance refusals reached a model wearing the wrong clothes, in opposite directions, both
+# because the boundary classified by Python's exception hierarchy rather than by meaning.
+#
+# `NotAuthorized` subclasses `PermissionError` subclasses `OSError`, which is `_TRANSIENT`. So the
+# one refusal that stands between a calibration and a campaign's worth of GPU time was reported as
+# "it looks transient, a filesystem or device error, calling again is reasonable once." None of its
+# three causes -- no gate, expired or unverifiable signature, wrong funnel revision -- is fixed by
+# calling again.
+#
+# `SweepError` is a `RuntimeError` and so not transient, and every deliberate sweep refusal was
+# reported as "this is a defect in ETALON ... Report it with this message rather than retrying."
+# The remedy was in the message, and the hint told the reader to disregard it.
+
+
+def test_a_missing_gate_is_a_refusal_not_a_transient_filesystem_error(tmp_path) -> None:
+    (tmp_path / "ws").mkdir()
+    response = json.loads(_tools()["etalon_sweep_emit"](
+        str(tmp_path / "ws"), str(tmp_path / "p.sqlite"), str(tmp_path / "l.jsonl"),
+        "rev-1", "",
+    ))
+
+    assert response["ok"] is False
+    error = response["error"]
+    assert error["code"] == "NotAuthorized"
+    assert error["retryable"] is False, "a missing gate was reported as worth calling again"
+    # `etalon_sweep_emit` catches this itself, so the hint is the emit-specific one rather than
+    # the boundary's generic refusal text. Both say the same thing about retrying.
+    assert "Compare revision_id against the gate" in error["hint"]
+    assert "etalon_authorize_gates" in error["hint"]
+    assert "ETALON_AUTHORITY_KEY" in error["hint"]
+    # The token's own numbers, so the caller can tell which of the three causes fired.
+    assert error["context"]["requested_revision_id"] == "rev-1"
+    assert error["context"]["gate_revision_id"] is None
+
+
+def test_a_deliberate_sweep_refusal_is_not_reported_as_an_etalon_defect(tmp_path, caplog) -> None:
+    """Claiming a batch that does not exist is a `SweepError` with its remedy in the message.
+
+    It used to arrive as *"this is a defect in ETALON or in an input it did not validate. Report
+    it with this message rather than retrying"* -- and the message it told the reader to report
+    rather than read was the one naming what to do. It was also filed by `logger.exception`, so a
+    governance decision was recorded with a traceback, which is what an operator greps for when
+    something broke.
+    """
+
+    workspace, pool, ledger = tmp_path / "ws", tmp_path / "p.sqlite", tmp_path / "l.jsonl"
+    workspace.mkdir()
+
+    admitted = json.loads(_tools()["etalon_sweep_admit"](
+        str(workspace), str(pool), str(ledger),
+        json.dumps([{"key": f"K{i}", "smiles": f"C{i}", "source": "s"} for i in range(3)]),
+    ))
+    assert admitted["ok"] is True, admitted
+
+    refusal = json.loads(_tools()["etalon_sweep_claim"](
+        str(workspace), str(pool), str(ledger), "batch_0001", "cuda:0", str(tmp_path / "libs"), "",
+    ))
+    assert refusal["ok"] is False
+    error = refusal["error"]
+    assert error["code"] == "SweepError"
+    assert error["retryable"] is False
+    assert "deliberately, not a defect" in error["hint"]
+    assert "defect in ETALON" not in error["hint"]
+    # And the message's own remedy is one an MCP caller can act on.
+    assert "etalon_sweep_status" in error["message"]
+
+    # Filed as a decision, not as a crash. `logger.exception` writes a traceback, which is what an
+    # operator greps for when something broke; before the fix a batch that was simply already
+    # claimed produced one.
+    records = [r for r in caplog.records if r.name.startswith("etalon.mcp")]
+    assert records, "the refusal was not logged at all"
+    assert all(r.levelname != "ERROR" for r in records), [r.getMessage() for r in records]
+    assert any("refused" in r.getMessage() for r in records)
+    assert not any(r.exc_info for r in records), "a refusal was logged with a traceback"
+
+
+def test_the_boundary_tells_a_refusal_from_a_surprise() -> None:
+    """The classifier itself, on the two types and on a genuine surprise."""
+
+    from etalon.authority.grant import NotAuthorized
+    from etalon.campaign.sweep import SweepError
+    from etalon.mcp._common import _refusal
+
+    gate = _refusal(NotAuthorized("no gate authorization for revision abc"))
+    assert gate is not None
+    assert "not a transient failure" in gate
+    assert "etalon_authorize_gates" in gate
+    assert "ETALON_AUTHORITY_KEY" in gate
+
+    swept = _refusal(SweepError("batch_0001 was never emitted"))
+    assert swept is not None
+    assert "deliberately, not a defect" in swept
+
+    # NotAuthorized is an OSError, which is exactly why it needed naming.
+    assert isinstance(NotAuthorized("x"), OSError)
+    assert _refusal(OSError("disk went away")) is None
+    assert _refusal(RuntimeError("a real surprise")) is None
+    assert _refusal(AttributeError("'NoneType' has no attribute 'x'")) is None

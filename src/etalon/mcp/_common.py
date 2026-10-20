@@ -147,11 +147,57 @@ def absolute_path(value: str, *, label: str) -> Path:
 _TRANSIENT: tuple[type[BaseException], ...] = (OSError,)
 
 
+def _refusal(error: BaseException) -> str | None:
+    """The hint for a deliberate refusal, or ``None`` for a genuine surprise.
+
+    Two of this project's governance refusals reached a model wearing the wrong clothes, in
+    opposite directions, and both were a consequence of classifying by Python's exception
+    hierarchy rather than by what the exception means.
+
+    ``NotAuthorized`` subclasses ``PermissionError``, which subclasses ``OSError``, which is
+    :data:`_TRANSIENT`. So the one refusal that exists to stop a million-molecule mistake -- no
+    gate authorization, an expired or unverifiable signature, or a token minted for a different
+    funnel -- was reported as *"it looks transient, a filesystem or device error, calling again is
+    reasonable once."* None of its three causes is fixed by calling again.
+
+    ``SweepError`` is a ``RuntimeError`` and therefore not transient, so every deliberate sweep
+    refusal -- a prefix that disagrees with the pool, a batch id that already names a run, a batch
+    that is not claimable, an outcome already recorded, a non-terminal run -- was reported as
+    *"this is a defect in ETALON ... Report it with this message rather than retrying."* The
+    remedy was in the message the whole time, and the hint told the reader to disregard it.
+
+    The imports are deferred rather than module-scope so this module stays importable without the
+    authority and campaign layers, and so the cost is paid on the error path only.
+    """
+
+    from etalon.authority.grant import NotAuthorized
+    from etalon.campaign.sweep import SweepError
+
+    if isinstance(error, NotAuthorized):
+        return (
+            "This is a refusal, not a transient failure: a gate authorization is missing, expired "
+            "or minted for a different funnel revision, and calling again will refuse again. "
+            "Screen a known-active panel through this cascade, call etalon_calibrate_gates to see "
+            "what the gates do to it, then etalon_authorize_gates. A token also does not survive "
+            "an MCP server restart unless ETALON_AUTHORITY_KEY is set."
+        )
+    if isinstance(error, SweepError):
+        return (
+            "This is a refusal the sweep made deliberately, not a defect: read the message, which "
+            "names what to do. Calling again unchanged will refuse again."
+        )
+    return None
+
+
 def tool(cost: Cost) -> Callable[[Callable[..., str]], Callable[..., str]]:
     """Wrap a tool: redirect stdout, turn exceptions into the error shape, record the cost.
 
-    The cost is attached to the function so the server can prepend it to the description, which puts
-    the spend classification in front of a model before it chooses rather than after.
+    The cost is recorded on the function as ``etalon_cost``. It is **not** prepended to the
+    description by anything: this docstring used to say the server did that, and the server does
+    not. Every FREE/CHEAP/SPENDS/NEVER prefix a model reads is a hand-typed literal at the start of
+    the tool's own docstring, and the only reader of ``etalon_cost`` is :func:`etalon.mcp.server.costs`.
+    The agreement between the two is therefore a convention one typo away from being wrong, which
+    is why ``tests/test_mcp.py`` now asserts it for every registered tool rather than trusting it.
     """
 
     def decorate(function: Callable[..., str]) -> Callable[..., str]:
@@ -191,6 +237,15 @@ def tool(cost: Cost) -> Callable[[Callable[..., str]], Callable[..., str]]:
                     retryable=False, tool=function.__name__,
                 )
             except Exception as error:  # noqa: BLE001 -- the boundary must not leak a traceback
+                refusal = _refusal(error)
+                if refusal is not None:
+                    # A refusal is not a crash and must not be logged as one: ``logger.exception``
+                    # files a traceback, which is what an operator greps for when something broke.
+                    logger.warning("%s refused: %s", function.__name__, error)
+                    return fail(
+                        type(error).__name__, str(error),
+                        hint=refusal, retryable=False, tool=function.__name__,
+                    )
                 logger.exception("%s raised", function.__name__)
                 transient = isinstance(error, _TRANSIENT)
                 return fail(

@@ -67,21 +67,33 @@ def _skill_path(slug: str = "campaign") -> Path:
     )
 
 
-def build() -> Any:
-    """Construct the server with every tool and resource registered."""
+def tool_modules() -> tuple[Any, ...]:
+    """The tool modules in registration order, named once so two readers cannot disagree.
+
+    They did. :func:`build` registered seven and :func:`costs` kept its own list of six, missing
+    ``sweep`` -- so ``costs`` reported 45 of 57 tools and omitted every sweep tool, including
+    ``etalon_authorize_gates`` and ``etalon_sweep_emit``, in the module whose own docstring opens
+    "Step 2 is the one that did not exist." ``costs``'s docstring claimed "a tool cannot be added
+    without one"; a whole module was.
+
+    Three tests consumed the result and none caught it, because the test helper had copied the
+    same six-module list -- so the assertion compared two copies of one wrong set. That is this
+    project's own ADR 0006 applied to its test suite: a guard on the path nobody takes.
+    """
 
     from etalon.mcp import active, data, execution, governance, planning, runtime, sweep
+
+    return (planning, governance, active, execution, data, runtime, sweep)
+
+
+def build() -> Any:
+    """Construct the server with every tool and resource registered."""
 
     server_class = require_mcp()
     mcp = server_class("etalon")
 
-    planning.register(mcp)
-    governance.register(mcp)
-    active.register(mcp)
-    execution.register(mcp)
-    data.register(mcp)
-    runtime.register(mcp)
-    sweep.register(mcp)
+    for module in tool_modules():
+        module.register(mcp)
 
     @mcp.resource("etalon://skills/molquarry")
     def molquarry_workflows() -> str:
@@ -221,10 +233,10 @@ def build() -> Any:
 def costs() -> dict[str, str]:
     """Every tool's spend classification, for a caller that wants it as data.
 
-    Derived from the decorator rather than from a list, so a tool cannot be added without one.
+    Derived from the decorator, and over the same module tuple :func:`build` registers, so a tool
+    cannot be added without one and a module cannot be added to the server without appearing here.
+    See :func:`tool_modules` for why that sentence needed a second clause.
     """
-
-    from etalon.mcp import active, data, execution, governance, planning, runtime
 
     found: dict[str, str] = {}
 
@@ -238,12 +250,8 @@ def costs() -> dict[str, str]:
             return decorate
 
     collector = Collector()
-    planning.register(collector)
-    governance.register(collector)
-    active.register(collector)
-    execution.register(collector)
-    data.register(collector)
-    runtime.register(collector)
+    for module in tool_modules():
+        module.register(collector)
     return found
 
 

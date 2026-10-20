@@ -508,7 +508,9 @@ class Sweep:
                 db.execute("ROLLBACK")
                 raise SweepError(
                     f"{batch_id} is not claimable: it does not exist, is already claimed, or is "
-                    "already recorded. Call pending() for what is available."
+                    "already recorded. Read Sweep.pending(), or etalon_sweep_status from the "
+                    "tool surface, for the batches that are available -- pending() is a Python "
+                    "method and an MCP caller has no way to reach it."
                 )
             db.execute("COMMIT")
         claimed = self.batch(batch_id)
