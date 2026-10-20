@@ -777,6 +777,30 @@ class Screen:
         ligand-only round: there is no screen number, so nothing can be calibrated and the
         campaign has to say so rather than invent one.
 
+        **A docking score is used only when the run carries exactly one docking stage, and only
+        when that stage's score is in kcal/mol.** Both halves are corrections, and both were
+        measured on one real run. ``docking_score/v1`` was looked for with
+        :meth:`artifact_carrying`, which is last-wins, so a cascade running two engines had its
+        comparator chosen by stage order: on the ALK2 panel run that is KarmaDock's MDN
+        confidence, a score that rises with affinity, returned here as though it ran down like a
+        kcal/mol number. Sorted ascending -- the only reading consistent with the binding free
+        energy on the other axis -- it puts the panel's declared negative controls first and every
+        known active last: ``neg_aspirin`` 17.285, ``neg_caffeine`` 23.325, ``act_SARACATINIB``
+        around 67. An active-learning loop fed that would have learned the panel backwards.
+
+        Negating the rising score instead is not the fix. A KarmaDock MDN of -67.33 appears in no
+        artifact, carries no units, and sits in the plausible range for an MM/PBSA number, so the
+        error would survive every downstream sanity check. Refusing is what leaves the campaign
+        able to say what happened; :mod:`etalon.campaign.loop` already turns a ``ValueError`` here
+        into the note "No comparator for the screen", after which ``admissible.rule`` records
+        ``NO_CHEAP_VALUE`` and withholds the measurement instead of learning from it.
+
+        Stages are told apart by ``stage_id`` rather than by ``engine_id``, because
+        ``engine_id`` is a class attribute on each MolCascade docking plugin: two Uni-Dock stages
+        at different ``search_mode`` carry the same one, and grouping on it merged them -- 15 of
+        15 molecules silently took the later stage's score. ``stage_id`` is unique by
+        construction, with duplicates rejected when the cascade is compiled.
+
         A ``derived_metric/v1`` value is never used unless ``metric_id`` names it, even when
         the run carries exactly one. Being the only candidate is not an argument for being
         the right one.
@@ -786,18 +810,17 @@ class Screen:
                 several metrics present, this refuses rather than picking: which of a
                 demerit total and a predicted affinity a campaign is calibrating is a
                 decision, and silently taking the first to appear would make it invisibly.
+
+        Raises:
+            ValueError: If the run carries more than one docking stage, if its docking score is
+                not in kcal/mol, or if it has no docking score and its derived metrics are
+                unnamed.
         """
 
-        docking = self.artifact_carrying(result, "docking_score/v1")
-        if docking is not None and metric_id is None:
-            rows = self.read(docking, contract_id="docking_score/v1")
-            # Rank 0 only: a lower-ranked pose is a different hypothesis about the same
-            # molecule, and averaging hypotheses is not a score.
-            return {
-                str(row["parent_id"]): float(row["score"])
-                for row in rows
-                if row.get("score") is not None and int(row.get("pose_rank") or 0) == 0
-            }
+        if metric_id is None:
+            docking = self._docking_metrics(result)
+            if docking is not None:
+                return docking
 
         # Every artifact that carries the contract, not the last one. Taking the last was
         # the first implementation and it silently chose a metric: a cascade commits a
@@ -844,6 +867,64 @@ class Screen:
                 f"{', '.join(sorted(available))}"
             )
         return dict(available[metric_id])
+
+    #: The subset of ``docking_score/v1.score_kind`` that has kcal/mol units, mirroring
+    #: MolCascade's own ``_SUPPORTED_SCORE_KINDS`` in its normalized-docking-score plugin. Every
+    #: other kind -- ``KARMADOCK_MDN``, ``CNN_SCORE``, ``CNN_AFFINITY`` -- is a confidence or a
+    #: classifier output, on no energy scale and in some cases pointing the other way.
+    _KCAL_MOL_KINDS = frozenset({"VINA_KCAL_MOL", "VINARDO_KCAL_MOL", "AD4_KCAL_MOL"})
+
+    def _docking_metrics(self, result: ScreenResult) -> dict[str, float] | None:
+        """The run's one docking score per molecule, or ``None`` when it has no docking stage.
+
+        Separate from :meth:`metrics` so the refusals have somewhere to be read. See that
+        method's docstring for what each one is about.
+        """
+
+        carrying = set(self.artifacts_carrying(result, "docking_score/v1"))
+        if not carrying:
+            return None
+
+        # Keyed on stage_id, not engine_id: see metrics(). Grouped by artifact so two stages
+        # that resolved to one cache key -- the same table under two names -- are one score
+        # table rather than an ambiguity. Stage order is preserved, so a refusal names the
+        # stages in the order the cascade ran them.
+        staged: dict[str, list[str]] = {}
+        for stage in result.committed:
+            if stage.artifact_id in carrying:
+                assert stage.artifact_id is not None
+                staged.setdefault(stage.artifact_id, []).append(stage.stage_id)
+        if len(staged) > 1:
+            named = ", ".join("/".join(names) for names in staged.values())
+            raise ValueError(
+                f"this run carries docking scores from {len(staged)} stages ({named}), and which "
+                "one a binding free energy is being calibrated against is a decision rather than "
+                "a lookup. Taking the last to commit is what reported a KarmaDock confidence as "
+                "a kcal/mol score. Name a derived metric with metric_id, or screen with one "
+                "docking stage."
+            )
+
+        artifact_id, stage_ids = next(iter(staged.items()))
+        rows = self.read(artifact_id, contract_id="docking_score/v1")
+        kinds = {str(row.get("score_kind") or "").strip().upper() for row in rows}
+        foreign = sorted(kind for kind in kinds if kind not in self._KCAL_MOL_KINDS)
+        if foreign:
+            shown = ", ".join(kind or "an unnamed score" for kind in foreign)
+            raise ValueError(
+                f"the docking stage {'/'.join(stage_ids)} writes {shown}, which is not in "
+                "kcal/mol and so is not comparable with a binding free energy. Negating it would "
+                "put a number on no scale into the range a real one occupies, where nothing "
+                "downstream could catch it; name a derived metric with metric_id instead, or add "
+                "a docking stage whose score is an energy."
+            )
+
+        # Rank 0 only: a lower-ranked pose is a different hypothesis about the same
+        # molecule, and averaging hypotheses is not a score.
+        return {
+            str(row["parent_id"]): float(row["score"])
+            for row in rows
+            if row.get("score") is not None and int(row.get("pose_rank") or 0) == 0
+        }
 
     def durability(self) -> dict[str, object]:
         """Whether this workspace will still exist tomorrow, and why it might not.

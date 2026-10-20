@@ -24,7 +24,7 @@ from etalon.authority.gate import (
 )
 from etalon.authority.grant import NotAuthorized
 from etalon.boundary.infra import etalon_revision
-from etalon.boundary.screen import ScreenResult, StageOutcome
+from etalon.boundary.screen import Screen, ScreenResult, StageOutcome
 from etalon.campaign.calibrate import (
     Calibration,
     calibrate,
@@ -787,6 +787,293 @@ def test_a_run_that_registered_nothing_has_no_recall() -> None:
     assert any("registered no molecules at all" in reason for reason in verdict.refusals())
     with pytest.raises(NotAuthorized):
         authorize_gate(verdict)
+
+
+# -- the comparator: which of two engines a free energy is calibrated against ---
+#
+# Measured on both real ALK2 panel runs, panel009 and panel_v7. Each committed two artifacts on
+# ``docking_score/v1``: ``docking_score`` from ``docking.unidock@0.2.0`` writing VINA_KCAL_MOL /
+# LOWER_STRONGER, and ``docking_score_2`` from ``docking.karmadock@0.3.0`` writing KARMADOCK_MDN /
+# HIGHER_STRONGER. ``Screen.metrics`` looked for the contract with ``artifact_carrying``, which is
+# last-wins, so the comparator was chosen by stage order and the chosen one was the confidence.
+#
+# Both tables, ascending, on panel_v7 -- the ordering an active-learning loop reads as
+# strongest-first because a binding free energy is on the other axis:
+#
+#   unidock   LDN-193189_cocrystal_3Q4U -11.481, act_CHEMBL4526828 -11.323, ... neg_aspirin -6.322
+#   karmadock neg_aspirin 17.285, neg_caffeine 23.325, ... act_SARACATINIB 67.329
+#
+# The first is right way round: the co-crystal ligand strongest, a negative control weakest. The
+# second is exactly inverted, with all four weakest-scoring molecules being declared negative
+# controls and six of seven known actives in the worst eight positions.
+
+#: The two docking tables panel_v7 really committed, one row per molecule, pose_rank 0 only --
+#: which is all those runs carry. Scores are the measured values.
+_UNIDOCK_V7 = (
+    ("LDN-193189_cocrystal_3Q4U", -11.481),
+    ("act_CHEMBL4526828", -11.323),
+    ("act_CHEMBL4575655", -11.209),
+    ("act_CHEMBL1996702", -10.412),
+    ("neg_aspirin", -6.322),
+)
+_KARMADOCK_V7 = (
+    ("neg_aspirin", 17.285),
+    ("neg_caffeine", 23.325),
+    ("act_CHEMBL3818173", 56.560),
+    ("act_PD-0166285", 61.527),
+    ("act_SARACATINIB", 67.329),
+)
+
+
+def _docking_rows(values, *, engine, kind, direction, poses=1):
+    """``docking_score/v1`` rows as MolCascade writes them, every field the contract requires."""
+
+    return [
+        {
+            "parent_id": f"parent:sha256:{parent}",
+            "engine_id": engine,
+            "receptor_id": "receptor:sha256:33b3b8aa2e615717",
+            "pose_rank": rank,
+            "score": score if rank == 0 else score + rank,
+            "score_kind": kind,
+            "direction": direction,
+            "method_id": f"{engine}@test",
+        }
+        for parent, score in values
+        for rank in range(poses)
+    ]
+
+
+class MetricScreen(Screen):
+    """A real :class:`Screen` reading stubbed artifacts, so ``metrics`` can be read on its own.
+
+    ``infra`` is supplied so nothing loads the vendored tree, and ``artifacts_carrying``/``read``
+    are overridden so no artifact store is touched. Everything else is the real method.
+    """
+
+    def __init__(self, workspace, tables) -> None:  # noqa: ANN001
+        super().__init__(workspace, infra=SimpleNamespace(name="molcascade"))
+        #: ``artifact_id -> (contract_id, rows)``.
+        self.tables = dict(tables)
+
+    def artifacts_carrying(self, result, contract_id: str) -> tuple[str, ...]:  # noqa: ANN001
+        carrying = {name for name, (held, _) in self.tables.items() if held == contract_id}
+        return tuple(
+            stage.artifact_id for stage in result.committed if stage.artifact_id in carrying
+        )
+
+    def read(self, artifact_id: str, *, contract_id: str | None = None) -> list[dict[str, object]]:
+        held, rows = self.tables[artifact_id]
+        if contract_id is not None and contract_id != held:
+            raise KeyError(contract_id)
+        return [dict(row) for row in rows]
+
+
+def _two_engine_screen(tmp_path, **kinds):
+    """The panel_v7 shape: unidock then karmadock, in the order the cascade committed them."""
+
+    unidock = _docking_rows(
+        _UNIDOCK_V7, engine="unidock", kind="VINA_KCAL_MOL", direction="LOWER_STRONGER", **kinds
+    )
+    karmadock = _docking_rows(
+        _KARMADOCK_V7, engine="karmadock", kind="KARMADOCK_MDN", direction="HIGHER_STRONGER"
+    )
+    screen = MetricScreen(
+        tmp_path,
+        {
+            "artifact:sha256:c6bc7099": ("docking_score/v1", unidock),
+            "artifact:sha256:e4d7a441": ("docking_score/v1", karmadock),
+        },
+    )
+    result = ScreenResult(
+        run_id="panel_v7",
+        revision_id="rev-alk2",
+        status="SUCCEEDED",
+        stages=(
+            stage("docking_score", "SUCCEEDED", artifact="artifact:sha256:c6bc7099"),
+            stage("docking_score_2", "SUCCEEDED", artifact="artifact:sha256:e4d7a441"),
+        ),
+    )
+    return screen, result
+
+
+def test_two_docking_engines_do_not_let_stage_order_pick_the_comparator(tmp_path) -> None:
+    """The panel_v7 defect: last-wins returned KarmaDock's confidence as a kcal/mol score."""
+
+    screen, result = _two_engine_screen(tmp_path)
+
+    # This is what the predecessor did, and it is still reachable -- the method is the one that
+    # must not use it.
+    last_wins = screen.artifact_carrying(result, "docking_score/v1")
+    inverted = {
+        str(row["parent_id"]): float(row["score"])
+        for row in screen.read(last_wins, contract_id="docking_score/v1")
+    }
+    assert max(inverted.values()) == 67.329, "last-wins really is the karmadock table"
+
+    with pytest.raises(ValueError) as refusal:
+        screen.metrics(result)
+    message = str(refusal.value)
+    assert "docking_score" in message and "docking_score_2" in message, "both stages are named"
+    assert "2 stages" in message
+    # And the refusal is a ValueError specifically, because that is what the round already
+    # catches: loop.py turns it into "No comparator for the screen" and records NO_CHEAP_VALUE.
+    assert isinstance(refusal.value, ValueError)
+
+
+def test_a_rising_confidence_is_refused_even_as_the_only_docking_score(tmp_path) -> None:
+    """Being the only candidate is not an argument. KARMADOCK_MDN is on no energy scale.
+
+    Negating it is not the remedy either: -67.329 "kcal/mol" appears in no artifact, and it sits
+    in the range a real MM/PBSA number occupies, so nothing downstream could catch it.
+    """
+
+    screen, result = _two_engine_screen(tmp_path)
+    alone = replace(
+        result, stages=tuple(s for s in result.stages if s.stage_id == "docking_score_2")
+    )
+
+    with pytest.raises(ValueError) as refusal:
+        screen.metrics(alone)
+    message = str(refusal.value)
+    assert "KARMADOCK_MDN" in message and "not in kcal/mol" in message
+    assert "docking_score_2" in message
+
+
+def test_the_kcal_mol_engine_alone_is_the_comparator_and_is_not_negated(tmp_path) -> None:
+    """The other half: with one energy-scale stage, the sign is left exactly as measured."""
+
+    screen, result = _two_engine_screen(tmp_path, poses=3)
+    alone = replace(
+        result, stages=tuple(s for s in result.stages if s.stage_id == "docking_score")
+    )
+
+    cheap = screen.metrics(alone)
+    assert cheap == {
+        f"parent:sha256:{parent}": score for parent, score in _UNIDOCK_V7
+    }, "every value is the signed kcal/mol number, unnegated and unscaled"
+    # Rank 0 only. A lower-ranked pose is a different hypothesis about the same molecule, and the
+    # stubbed rows carry three poses each precisely so a leak would change the numbers.
+    assert min(cheap.values()) == -11.481 and max(cheap.values()) == -6.322
+    assert len(cheap) == len(_UNIDOCK_V7)
+
+
+def test_one_table_committed_by_two_stages_is_one_measurement(tmp_path) -> None:
+    """Two stage ids resolving to one artifact is one score table, not an ambiguity.
+
+    ``artifacts_carrying`` appends per committed stage, so a cache key shared by two stages put
+    the same artifact in the list twice. Refusing that would refuse a run carrying exactly one
+    docking score.
+    """
+
+    rows = _docking_rows(
+        _UNIDOCK_V7, engine="unidock", kind="VINA_KCAL_MOL", direction="LOWER_STRONGER"
+    )
+    screen = MetricScreen(tmp_path, {"artifact:sha256:c6bc7099": ("docking_score/v1", rows)})
+    result = ScreenResult(
+        run_id="cached",
+        revision_id="rev-alk2",
+        status="SUCCEEDED",
+        stages=(
+            stage("docking_score", "SUCCEEDED", artifact="artifact:sha256:c6bc7099"),
+            stage("docking_score_again", "SUCCEEDED", artifact="artifact:sha256:c6bc7099"),
+        ),
+    )
+
+    assert screen.metrics(result) == {
+        f"parent:sha256:{parent}": score for parent, score in _UNIDOCK_V7
+    }
+
+
+def test_a_run_with_no_docking_stage_still_reaches_the_derived_metrics(tmp_path) -> None:
+    """The refusals must not swallow the path below them.
+
+    ``_docking_metrics`` returns ``None`` -- not an empty mapping -- for a run carrying no
+    docking artifact, because an empty mapping short-circuits and a ligand-only round would stop
+    reporting its derived metrics at all.
+    """
+
+    screen = MetricScreen(
+        tmp_path,
+        {
+            "artifact:sha256:dd": (
+                "derived_metric/v1",
+                [
+                    {
+                        "parent_id": "parent:sha256:a",
+                        "metric_id": "lilly_demerit_total",
+                        "value": 40.0,
+                        "status": "OK",
+                    }
+                ],
+            )
+        },
+    )
+    result = ScreenResult(
+        run_id="ligands-only",
+        revision_id="rev-x",
+        status="SUCCEEDED",
+        stages=(stage("demerits", "SUCCEEDED", artifact="artifact:sha256:dd"),),
+    )
+
+    # Unnamed, it still refuses -- but for the derived-metric reason, naming the metric it has.
+    with pytest.raises(ValueError) as refusal:
+        screen.metrics(result)
+    assert "lilly_demerit_total" in str(refusal.value)
+    assert "no docking score" in str(refusal.value)
+    # Named, it answers.
+    assert screen.metrics(result, metric_id="lilly_demerit_total") == {"parent:sha256:a": 40.0}
+
+
+def test_a_named_derived_metric_is_not_blocked_by_two_docking_stages(tmp_path) -> None:
+    """An operator who named a comparator has made the decision the refusal asks for.
+
+    So the two-stage refusal must not fire ahead of them: ``metric_id`` skips the docking path
+    entirely, which is also how a campaign screening two engines stays able to calibrate at all.
+    """
+
+    screen, result = _two_engine_screen(tmp_path)
+    screen.tables["artifact:sha256:dd"] = (
+        "derived_metric/v1",
+        [
+            {
+                "parent_id": "parent:sha256:a",
+                "metric_id": "qed",
+                "value": 0.71,
+                "status": "OK",
+            }
+        ],
+    )
+    named = ScreenResult(
+        run_id=result.run_id,
+        revision_id=result.revision_id,
+        status=result.status,
+        stages=(*result.stages, stage("qed", "SUCCEEDED", artifact="artifact:sha256:dd")),
+    )
+
+    assert screen.metrics(named, metric_id="qed") == {"parent:sha256:a": 0.71}
+
+
+def test_a_refused_comparator_makes_a_round_that_measures_without_learning(tmp_path) -> None:
+    """What the refusal costs, end to end: the round still runs and the screen learns nothing.
+
+    This is why the refusal is a ``ValueError`` rather than a new exception type. ``loop.py``
+    already catches ``(ValueError, KeyError)`` around ``metrics`` and turns it into a note, so a
+    campaign that would have learned the panel backwards instead records that it could not
+    compare -- and ``admissible.rule`` withholds the measurement rather than fitting to it.
+    """
+
+    import inspect
+
+    from etalon.campaign import loop
+
+    source = inspect.getsource(loop)
+    assert "except (ValueError, KeyError) as no_comparator" in source
+    assert "No comparator for the screen" in source
+
+    screen, result = _two_engine_screen(tmp_path)
+    with pytest.raises((ValueError, KeyError)):
+        screen.metrics(result)
 
 
 # -- gate authorization ------------------------------------------------------
