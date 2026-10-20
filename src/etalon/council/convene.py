@@ -44,7 +44,7 @@ import json
 from collections.abc import Mapping, Sequence
 from typing import Any
 
-from etalon.council.ballot import Ballot, Finding, Outcome, Vote
+from etalon.council.ballot import Ballot, Finding, Outcome, Vote, outcome_for
 from etalon.council.seat import Seat, composition
 from etalon.faults.attribution import Observation
 from etalon.faults.taxonomy import BY_CODE
@@ -208,8 +208,10 @@ def adjudicate(
         clearing = [b for b in ballots if b.vote is Vote.CLEAR]
         errored = [b for b in ballots if b.error]
 
-        if refusing and clearing:
-            outcome = Outcome.SPLIT
+        # The member comes from ``outcome_for``; the note is this caller's own prose. Having the
+        # mapping in one function is the point -- see that function's docstring.
+        outcome = outcome_for(ballots)
+        if outcome is Outcome.SPLIT:
             note = (
                 f"{len(refusing)} seat(s) refuse and {len(clearing)} clear. Routed to a person "
                 "rather than resolved by majority: a quorum that outvotes a dissent records one "
@@ -217,14 +219,12 @@ def adjudicate(
                 "worth reading. The molecule is neither spent on nor discarded until somebody "
                 "rules."
             )
-        elif refusing:
-            outcome = Outcome.REFUSED
+        elif outcome is Outcome.REFUSED:
             note = (
                 f"{len(refusing)} seat(s) refuse and none clears. The check moves from "
                 "unevaluable to fired, which is the only direction a council may move one."
             )
-        elif clearing:
-            outcome = Outcome.CLEARED_BUT_STILL_UNCHECKED
+        elif outcome is Outcome.CLEARED_BUT_STILL_UNCHECKED:
             note = (
                 f"{len(clearing)} seat(s) see no problem and none refuses. Recorded, and the "
                 "check stays unevaluable: an advisor saying it looks fine is not the check having "
@@ -232,7 +232,6 @@ def adjudicate(
                 "spent finding that out."
             )
         else:
-            outcome = Outcome.UNDECIDED
             note = (
                 "Every seat abstained. The evidence each holds does not decide this cause, which "
                 "is a fact about the record rather than about the council -- and it is the "

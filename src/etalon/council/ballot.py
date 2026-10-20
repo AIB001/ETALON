@@ -26,6 +26,7 @@ the second.
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from dataclasses import dataclass, field
 from enum import StrEnum
 from typing import Any
@@ -157,4 +158,44 @@ class Finding:
         }
 
 
-__all__ = ["Ballot", "Finding", "Outcome", "Vote"]
+def outcome_for(ballots: Sequence[Ballot], *, qualified: bool = True) -> Outcome:
+    """The one place a set of votes becomes an outcome.
+
+    This mapping *is* the bound: a council may move a check from unevaluable to fired and may
+    never move one to cleared. Two structures enforce it -- :class:`Outcome` has no ``CLEARED``
+    member, and :func:`etalon.council.convene.as_observations` emits ``fired=True`` only for
+    ``REFUSED`` -- but the step that turns votes into one of those members was written twice:
+    once inside :func:`etalon.council.adjudicate`, and once inline in ``etalon_council_adjudicate``,
+    which collects the votes itself and therefore could not reuse the first.
+
+    Both were correct. Having two was the defect. The MCP tool's own docstring explains the
+    factoring it chose -- "the transport is your business, and the bound on what agreement is
+    allowed to do is the part that has to be identical everywhere, so it lives in one function
+    with one test suite" -- and the bound was living in two functions with two test suites. This
+    is that function.
+
+    The note a caller prints is deliberately *not* here. The wording is prose aimed at a reader,
+    and the two callers legitimately say it differently; what has to be identical is which member
+    comes back.
+
+    Args:
+        ballots: Every seat's vote for one fault code, including abstentions and errors.
+        qualified: Whether the council established that it is a measuring instrument. ``False``
+            short-circuits to ``COUNCIL_NOT_QUALIFIED`` without reading a vote, because an
+            unmeasured council's agreement is not evidence and aggregating it would imply it was.
+    """
+
+    if not qualified:
+        return Outcome.COUNCIL_NOT_QUALIFIED
+    refusing = any(ballot.vote is Vote.REFUSE for ballot in ballots)
+    clearing = any(ballot.vote is Vote.CLEAR for ballot in ballots)
+    if refusing and clearing:
+        return Outcome.SPLIT
+    if refusing:
+        return Outcome.REFUSED
+    if clearing:
+        return Outcome.CLEARED_BUT_STILL_UNCHECKED
+    return Outcome.UNDECIDED
+
+
+__all__ = ["Ballot", "Finding", "Outcome", "Vote", "outcome_for"]

@@ -577,7 +577,7 @@ def register(mcp: Any) -> None:
             parent_id: The molecule, for the record.
         """
 
-        from etalon.council.ballot import Ballot, Finding, Outcome, Vote
+        from etalon.council.ballot import Ballot, Finding, Outcome, Vote, outcome_for
         from etalon.council.convene import as_observations, report
         from etalon.faults.taxonomy import BY_CODE
 
@@ -610,28 +610,31 @@ def register(mcp: Any) -> None:
 
         refusing = [b for b in ballots if b.vote is Vote.REFUSE]
         clearing = [b for b in ballots if b.vote is Vote.CLEAR]
-        if not reliability_qualified:
-            outcome, note = Outcome.COUNCIL_NOT_QUALIFIED, (
+        # The mapping from votes to an outcome is `council.ballot.outcome_for`, not re-derived
+        # here. It used to be written out inline, so the bound this tool's own docstring calls
+        # "the part that has to be identical everywhere" lived in two functions with two test
+        # suites. The note below is this caller's prose and is deliberately still its own.
+        outcome = outcome_for(ballots, qualified=bool(reliability_qualified))
+        if outcome is Outcome.COUNCIL_NOT_QUALIFIED:
+            note = (
                 "The council has not been shown to be an instrument, so its votes are not "
                 "aggregated. Measure it with etalon_council_reliability first. The check stays "
                 "exactly as unevaluable as it was, which is the state the campaign was already in."
             )
-        elif refusing and clearing:
-            outcome, note = Outcome.SPLIT, (
+        elif outcome is Outcome.SPLIT:
+            note = (
                 f"{len(refusing)} refuse and {len(clearing)} clear. Routed to a person: a quorum "
                 "that outvotes a dissent records one number where there were two readings."
             )
-        elif refusing:
-            outcome, note = Outcome.REFUSED, (
+        elif outcome is Outcome.REFUSED:
+            note = (
                 f"{len(refusing)} refuse and none clears. The check moves from unevaluable to "
                 "fired, which is the only direction a council may move one."
             )
-        elif clearing:
-            outcome, note = Outcome.CLEARED_BUT_STILL_UNCHECKED, (
-                "No seat refuses, and the check stays unevaluable. Nothing was cleared."
-            )
+        elif outcome is Outcome.CLEARED_BUT_STILL_UNCHECKED:
+            note = "No seat refuses, and the check stays unevaluable. Nothing was cleared."
         else:
-            outcome, note = Outcome.UNDECIDED, (
+            note = (
                 "Every seat abstained. That is a fact about the record rather than about the "
                 "council, and it is the correct answer often enough that a council which never "
                 "returns it should be suspected of answering an easier question."

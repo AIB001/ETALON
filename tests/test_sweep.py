@@ -4954,3 +4954,27 @@ def test_the_supervisor_contains_an_unreadable_run_state_as_a_note(tmp_path, key
     assert any("recovery raised and was contained" in note for note in report.notes), report.notes
     assert not report.quiet
     assert [b.batch_id for b in sweep.outstanding()] == [batch.batch_id]
+
+
+def test_the_terminal_status_set_is_defined_once() -> None:
+    """Three readers, one definition. Two of them had re-typed the tuple beside the constant.
+
+    `boundary/screen.py` declares `TERMINAL_RUN_STATUSES`, `campaign/sweep.py` imports it at the
+    top of the file and then compared against its own `("SUCCEEDED", "FAILED")` 650 lines later,
+    and `mcp/sweep.py` carried a third copy. Re-typing a set that agrees is harmless until it does
+    not: `screening.py` held a fourth notion of terminality and classified an exhausted run as a
+    failure for exactly as long as nobody compared them.
+    """
+
+    import inspect
+
+    import etalon.campaign.sweep as campaign_sweep
+    import etalon.mcp.sweep as mcp_sweep
+    from etalon.boundary.screen import TERMINAL_RUN_STATUSES
+
+    assert set(TERMINAL_RUN_STATUSES) == {"SUCCEEDED", "FAILED"}
+    for module in (campaign_sweep, mcp_sweep):
+        source = inspect.getsource(module)
+        assert '("SUCCEEDED", "FAILED")' not in source, module.__name__
+        assert '{"SUCCEEDED", "FAILED"}' not in source, module.__name__
+        assert "TERMINAL_RUN_STATUSES" in source, module.__name__

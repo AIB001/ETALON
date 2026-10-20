@@ -15,7 +15,7 @@ Four modules and one direction of travel.
 ``ballot.py``       votes, with abstention as a first-class answer rather than a missing one
 """
 
-from etalon.council.ballot import Ballot, Finding, Outcome, Vote
+from etalon.council.ballot import Ballot, Finding, Outcome, Vote, outcome_for
 from etalon.council.convene import adjudicate, as_observations, for_a_person, report
 from etalon.council.reliability import (
     REDUNDANT_ABOVE,
@@ -46,6 +46,7 @@ __all__ = [
     "composition",
     "effective_votes",
     "fleiss_kappa",
+    "outcome_for",
     "for_a_person",
     "report",
     "rule",

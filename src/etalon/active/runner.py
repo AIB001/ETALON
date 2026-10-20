@@ -13,7 +13,7 @@ from pathlib import Path
 from time import perf_counter
 from typing import Any, Protocol
 
-from etalon.active.budget import cost_quote
+from etalon.active.budget import cost_quote, fits_budget
 from etalon.active.model import MultiEndpointGP
 from etalon.active.policy import Choice, choose
 from etalon.active.schema import Action, Candidate, Endpoint, Evaluation
@@ -72,12 +72,19 @@ class ActiveCampaign:
             executable = [endpoint for endpoint in endpoints.values() if endpoint.queryable]
             if not executable:
                 reason = "no_executable_endpoints"
+            # Through ``fits_budget``, not a raw ``<``. These two pick the reason string a
+            # campaign records for why it stopped, and a bare comparison disagrees with the
+            # predicate every actual spend is gated on at the roundoff boundary and for a
+            # negative balance -- so a campaign that really had run out could be recorded as
+            # having had "no eligible actions", which is a different diagnosis with a different
+            # remedy.
             elif (spec.policy == "decision_aware" and spec.confirmation_reserve
                     and endpoints[spec.objective].queryable
-                    and remaining < cost_quote(endpoints[spec.objective], observations)):
+                    and not fits_budget(cost_quote(endpoints[spec.objective], observations), remaining)):
                 reason = "confirmation_unaffordable"
             else:
-                reason = "budget_exhausted" if remaining < min(cost_quote(e, observations) for e in executable) else "no_eligible_actions"
+                cheapest = min(cost_quote(e, observations) for e in executable)
+                reason = "budget_exhausted" if not fits_budget(cheapest, remaining) else "no_eligible_actions"
             return model, [], reason
         choices = [replace(choice, evidence={**choice.evidence, "planning_event_cutoff": state["event_cutoff"]})
                    for choice in choices]

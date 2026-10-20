@@ -428,7 +428,9 @@ def register(mcp: Any) -> None:
         result = Screen(absolute_path(workspace, label="workspace")).state(run_id)
         if result is None:
             return fail("RunNotFound", f"no run {run_id!r}", hint="Check the run id.")
-        if result.status not in ("SUCCEEDED", "FAILED"):
+        from etalon.boundary.screen import TERMINAL_RUN_STATUSES
+
+        if result.status not in TERMINAL_RUN_STATUSES:
             return fail(
                 "NotTerminal",
                 f"run {run_id} is {result.status}; nothing to record yet",

@@ -713,7 +713,7 @@ class Sweep:
             state = None if batch.run_id is None else self.screen.state(batch.run_id)
             if state is None:
                 state = self.screen.state(batch.batch_id)  # the conventional run id is the batch id
-            if state is not None and state.status in ("SUCCEEDED", "FAILED"):
+            if state is not None and state.status in TERMINAL_RUN_STATUSES:
                 self.record(batch.batch_id, state)
                 actions.append(
                     Recovery(batch.batch_id, "recorded", f"run finished as {state.outcome}")
