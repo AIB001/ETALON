@@ -345,6 +345,26 @@ def register(mcp: Any) -> None:
                 "library_dir and library_path name two different files for one batch",
                 hint="Pass library_dir alone unless you need a specific file name.",
             )
+        # Refused before the claim, because a presence check needs nothing from the pool and the
+        # reservation is irrevocable once taken. Only ambiguity was checked here, so passing
+        # neither argument reserved the batch, left ``written`` at None, raised nothing, and
+        # returned ``ok(batch=..., library=None)``: a batch committed to a screener with no library
+        # to screen it, reported as success, with no pointer to etalon_sweep_recover. That is the
+        # exact state the LibraryNotWritten block below exists to warn about, reached by the one
+        # path that does not go through it.
+        if not library_dir.strip() and not library_path.strip():
+            return fail(
+                "NoLibraryRequested",
+                f"a claim for {batch_id} with neither library_dir nor library_path would reserve "
+                "the batch and write nothing to screen it",
+                hint=(
+                    "Pass library_dir: the batch's library is written inside it, named after its "
+                    "own bytes so two identical libraries are one cache key. Nothing has been "
+                    "reserved, so this call is safe to repeat with the argument."
+                ),
+                retryable=False,
+                batch_id=batch_id,
+            )
         sweep = _sweep(workspace, pool, ledger)
         batch = sweep.claim(batch_id, by=by)
         # The claim is committed from here on, so a failure writing the library leaves the batch

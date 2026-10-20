@@ -509,8 +509,31 @@ class Screen:
         runner = LocalRunner(self.workspace, plugins=create_builtin_registry())
         try:
             state = runner.load_run(run_id)
-        except Exception:  # noqa: BLE001 -- RUN_NOT_FOUND and an unreadable state are both "no answer"
-            return None
+        except Exception as error:
+            # Only a run that does not exist is "no answer". This used to swallow every exception
+            # and return ``None`` for all of them, on the reasoning that RUN_NOT_FOUND and an
+            # unreadable state are both "no answer" -- and for the caller that matters they are
+            # opposite answers.
+            #
+            # ``Sweep.recover`` acts on the difference. ``None`` means "claimed but no run was
+            # ever started", and its action is ``requeued``: release the claim and re-offer the
+            # batch. A state file that exists and cannot be read belongs to a run that *did*
+            # start, may have committed stages, and may still be committing them -- so requeueing
+            # it re-screens committed work and puts a second writer on one run id, which is the
+            # case ``_start_screens`` has a whole paragraph about containing. A truncated write, a
+            # state file over MolCascade's size limit, or one failing validation all took that
+            # path silently.
+            #
+            # It also made a mistyped run id read as ``exists: false`` through
+            # ``Screen.progress``, which a reader takes for "no progress yet".
+            #
+            # MolCascade raises ``PipelineError`` with ``code="RUN_NOT_FOUND"`` for the one case
+            # that really is absence, and something else for every other failure. Anything else
+            # propagates: ``Supervisor.tick`` contains it as a note, which is loud and survivable,
+            # and the alternative was a silent re-screen.
+            if str(getattr(error, "code", "")) == "RUN_NOT_FOUND":
+                return None
+            raise
         return ScreenResult(
             run_id=run_id,
             revision_id=str(state.revision_id),

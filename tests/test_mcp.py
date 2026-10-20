@@ -989,3 +989,83 @@ def test_the_boundary_tells_a_refusal_from_a_surprise() -> None:
     assert _refusal(OSError("disk went away")) is None
     assert _refusal(RuntimeError("a real surprise")) is None
     assert _refusal(AttributeError("'NoneType' has no attribute 'x'")) is None
+
+
+@pytest.fixture()
+def keyed_gate(tmp_path, monkeypatch):
+    """A workspace, pool and ledger with molecules admitted and a real gate token minted.
+
+    The signing key is fixed so a token minted here verifies here: without it
+    ``_campaign_secret`` is per-process random and the token is unverifiable the moment it is
+    handed back through ``gate_json``.
+    """
+
+    from etalon.authority.gate import authorize_gate
+    from etalon.campaign.calibrate import Calibration, PanelMember, TierVerdict, separation
+
+    monkeypatch.setenv("ETALON_AUTHORITY_KEY", "test-key")
+    workspace, pool, ledger = tmp_path / "ws", tmp_path / "p.sqlite", tmp_path / "l.jsonl"
+    workspace.mkdir()
+
+    admitted = json.loads(_tools()["etalon_sweep_admit"](
+        str(workspace), str(pool), str(ledger),
+        json.dumps([{"key": f"K{i}", "smiles": f"C{i}", "source": "s"} for i in range(5)]),
+    ))
+    assert admitted["ok"] is True, admitted
+
+    panel = (
+        PanelMember("act_1", True, "co-crystal"),
+        PanelMember("neg_1", False, "negative control"),
+    )
+    scores = (
+        {"parent_id": "act_1", "engine_id": "unidock", "score": -11.0,
+         "score_kind": "VINA_KCAL_MOL", "direction": "LOWER_STRONGER"},
+        {"parent_id": "neg_1", "engine_id": "unidock", "score": -6.0,
+         "score_kind": "VINA_KCAL_MOL", "direction": "LOWER_STRONGER"},
+    )
+    verdict = Calibration(
+        revision_id="rev-1", run_id="panel", outcome="committed",
+        panel_size=2, actives=1, registered=2,
+        tiers=(TierVerdict("t9", "docking", 2, 2, (), ("neg_1",)),),
+        finalize=(), separation=separation(scores, panel),
+    )
+    token = authorize_gate(verdict, provenance={"name": "molcascade", "tree_sha256": "d", "pinned": True})
+    return workspace, pool, ledger, token.as_dict()
+
+
+def test_a_claim_with_no_library_reserves_nothing(tmp_path, keyed_gate) -> None:
+    """Only ambiguity was checked, so passing neither library argument succeeded and wrote nothing.
+
+    The reservation is irrevocable once taken: `Sweep.claim` refuses a second claim on the same
+    batch. So this returned `ok(batch=..., library=None)` for a batch now committed to a screener
+    with nothing to screen, with no pointer to `etalon_sweep_recover` -- which is the exact state
+    the tool's own LibraryNotWritten block exists to warn about, reached by the one path that does
+    not go through it. Refused before the claim now, because a presence check needs nothing from
+    the pool.
+    """
+
+    workspace, pool, ledger, gate = keyed_gate
+    # flush, because five molecules is under any batch size: a short batch is the end-of-campaign
+    # case and the only way to carve one deliberately.
+    emitted = json.loads(_tools()["etalon_sweep_emit"](
+        str(workspace), str(pool), str(ledger), "rev-1", json.dumps(gate), True,
+    ))
+    assert emitted["ok"] is True, emitted
+    batch_id = emitted["emitted"][0]["batch_id"]
+
+    refusal = json.loads(_tools()["etalon_sweep_claim"](
+        str(workspace), str(pool), str(ledger), batch_id, "cuda:0", "", "",
+    ))
+    assert refusal["ok"] is False
+    error = refusal["error"]
+    assert error["code"] == "NoLibraryRequested"
+    assert error["retryable"] is False
+    assert "library_dir" in error["hint"]
+    assert "Nothing has been reserved" in error["hint"]
+
+    # The proof that nothing was reserved: the same claim succeeds once given a directory.
+    claimed = json.loads(_tools()["etalon_sweep_claim"](
+        str(workspace), str(pool), str(ledger), batch_id, "cuda:0", str(tmp_path / "libs"), "",
+    ))
+    assert claimed["ok"] is True, claimed
+    assert claimed["library"], "a claim that was refused for no library had taken the batch anyway"

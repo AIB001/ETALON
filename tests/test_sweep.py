@@ -4859,3 +4859,98 @@ def test_a_claim_whose_library_cannot_be_written_names_the_reservation_it_is_hol
     assert Sweep(screen, Ledger(ledger), pool, batch_size=5, gate=gate).state()["batches"][
         "outstanding"
     ] == 1
+
+
+# -- a run that cannot be read is not a run that does not exist --------------
+
+
+def test_an_unreadable_run_state_is_not_reported_as_an_absent_run(tmp_path) -> None:
+    """`Screen.state` swallowed every exception and returned None for all of them.
+
+    The reasoning was that RUN_NOT_FOUND and an unreadable state are both "no answer", and for the
+    caller that matters they are opposite answers. MolCascade raises `PipelineError` with
+    `code="RUN_NOT_FOUND"` only for a run that genuinely does not exist, and something else for a
+    state file that exists and will not parse, is over its size limit, or fails validation.
+    """
+
+    from etalon.boundary.screen import Screen
+
+    screen = Screen(tmp_path / "ws")
+    assert screen.state("batch_0001") is None, "an absent run must still read as absent"
+
+    from molcascade.plugins import create_builtin_registry
+    from molcascade.runtime import LocalRunner
+
+    runner = LocalRunner(tmp_path / "ws", plugins=create_builtin_registry())
+    state_file = runner.runs_root / "batch_0002.json"
+    state_file.parent.mkdir(parents=True, exist_ok=True)
+    state_file.write_text("{not json", encoding="utf-8")
+
+    with pytest.raises(Exception) as unreadable:
+        screen.state("batch_0002")
+    assert getattr(unreadable.value, "code", "") == "RUNTIME_STATE_INVALID"
+
+    # A malformed run id is a caller error, and used to read as "no such run".
+    with pytest.raises(Exception) as bad_id:
+        screen.state("../escape")
+    assert getattr(bad_id.value, "code", "") == "RUN_ID_INVALID"
+
+
+def test_a_batch_whose_run_state_is_corrupt_is_not_requeued(tmp_path, keyed) -> None:
+    """The consequence, and it is a re-screen of committed work.
+
+    `Sweep.recover` reads `None` as "claimed but no run was ever started" and its action is
+    `requeued`: release the claim and re-offer the batch. A state file that exists and cannot be
+    read belongs to a run that *did* start, may have committed stages, and may still be committing
+    them -- so requeueing it re-screens work already paid for and puts a second writer on one run
+    id, which is the case `_start_screens` has a paragraph about containing.
+    """
+
+    class Unreadable(FakeScreen):
+        """Readable until armed: ``emit`` also asks ``state`` to refuse a run-id collision."""
+
+        armed = False
+
+        def state(self, run_id: str):
+            if self.armed:
+                raise RuntimeError(f"state file for {run_id} will not parse")
+            return super().state(run_id)
+
+    screen = Unreadable()
+    sweep = Sweep(
+        screen,
+        Ledger(tmp_path / "l.jsonl"),
+        tmp_path / "p.sqlite",
+        batch_size=5,
+        gate=authorize_gate(calibration(), provenance=screen.provenance()),
+    )
+    sweep.admit([(f"K{i}", f"C{i}", "s") for i in range(5)])
+    batch = sweep.emit(revision_id="rev-1")[0]
+    sweep.claim(batch.batch_id, by="cuda:0")
+    assert sweep.outstanding(), "the batch is not outstanding, so recovery has nothing to say"
+
+    screen.armed = True
+    with pytest.raises(RuntimeError, match="will not parse"):
+        sweep.recover()
+
+    # Still claimed. Before the fix this call returned `requeued` and released it.
+    assert [b.batch_id for b in sweep.outstanding()] == [batch.batch_id]
+    assert not sweep.pending(), "the batch was re-offered for screening"
+
+
+def test_the_supervisor_contains_an_unreadable_run_state_as_a_note(tmp_path, keyed, monkeypatch) -> None:
+    """Loud and survivable, which is the trade the containment exists to make."""
+
+    supervisor, sweep, _ = _campaign(tmp_path, keyed, monkeypatch, batch_size=10)
+    sweep.admit([(f"K{i}", f"C{i}", "s") for i in range(10)])
+    batch = sweep.emit(revision_id="rev-1")[0]
+    sweep.claim(batch.batch_id, by="cuda:0")
+
+    def unreadable(_run_id):
+        raise RuntimeError("state file will not parse")
+
+    monkeypatch.setattr(sweep.screen, "state", unreadable)
+    report = supervisor.tick()
+    assert any("recovery raised and was contained" in note for note in report.notes), report.notes
+    assert not report.quiet
+    assert [b.batch_id for b in sweep.outstanding()] == [batch.batch_id]
