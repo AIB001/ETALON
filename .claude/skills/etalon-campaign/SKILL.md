@@ -1,6 +1,6 @@
 ---
 name: etalon-campaign
-description: Operate ETALON CADD campaigns with bounded database acquisition, composable screening, registered active executors, scientific admission and durable LLM-controlled workflows. Use for campaign execution, database-to-screening integration, compute-budget planning, artifact inspection and recovery; includes planning guidance for MD/MM-PBSA/FEP while distinguishing installed execution capabilities.
+description: Operate ETALON CADD campaigns where each expensive measurement — MD, MM-PBSA, FEP — costs GPU-hours and is worth authorising one molecule at a time. Use for campaign execution, database-to-screening integration, compute-budget planning, artifact inspection and recovery, waivers and the fault taxonomy, the council of advisors, and registered active executors. For a screening-only campaign with no simulation stage, where throughput is the limit and no single measurement is worth authorising, use etalon-screening-sweep instead.
 ---
 
 # Running a CADD campaign with ETALON

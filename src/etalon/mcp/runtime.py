@@ -84,7 +84,7 @@ def register(mcp: Any) -> None:
 
         May run real data acquisition, screening, active learning or registered PRISM execution.
         Same job ID and plan return the existing job. External mode waits for explicit decisions.
-        Use workflow_status/observe/artifact; client disconnection does not stop the worker.
+        Use etalon_workflow_status, etalon_workflow_observe and etalon_workflow_artifact; client disconnection does not stop the worker.
         """
         from etalon.runtime.service import submit
 
@@ -104,7 +104,7 @@ def register(mcp: Any) -> None:
     def etalon_workflow_observe(workspace: str, job_id: str) -> str:
         """FREE. Read the identified controller observation with ready nodes and verified result summaries.
 
-        External controllers submit exactly observation_id/node_id/reason through workflow_advance.
+        External controllers submit exactly observation_id/node_id/reason through etalon_workflow_advance.
         A model's finish request cannot replace verification of every required node.
         """
         from etalon.runtime.service import observe

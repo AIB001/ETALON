@@ -1,6 +1,6 @@
 ---
 name: etalon-screening-sweep
-description: Run a large screening campaign with no simulation stage — a generated library of 10^5 to 10^7 molecules swept through a MolCascade cascade. Use for throughput-limited screening where generation and screening overlap, batches are supervised across many GPUs, and no single measurement is worth authorising. Covers gate authorization, batch reservations, zero-hit outcomes, crash recovery and revision provenance. For the regime where each measurement costs GPU-hours, use etalon-campaign instead.
+description: Run a large screening campaign with no simulation stage — a generated library of 10^5 to 10^7 molecules swept through a MolCascade cascade. Use for throughput-limited screening where generation and screening overlap, batches are supervised across many GPUs, and no single measurement is worth authorising. Covers the Supervisor loop that drives it, gate authorization, batch reservations, choosing a docking cut as a share of the population rather than an absolute score, zero-hit outcomes, crash recovery, revision provenance, and why adding a GPU may buy nothing when the docking tier is CPU-bound. For the regime where each measurement costs GPU-hours, use etalon-campaign instead.
 ---
 
 # Sweeping a large library, with no expensive stage
@@ -270,7 +270,11 @@ end-to-end survival. Use `flush=true` only at the very end.
 ### 4. Claim, screen, record — one batch at a time
 
 ```
-etalon_sweep_claim(batch_id=..., by="gpu5", library_path=<absolute .csv>)
+etalon_sweep_claim(batch_id=..., by="gpu5", library_dir=<absolute directory>)
+   # library_dir, not library_path: the batch's library is named after its own bytes, so two
+   # identical libraries are one cache key. Measured: two byte-identical 20,000-molecule
+   # libraries under two names re-ran all 43 stages, docking included, for identical scores.
+   # Passing neither is refused before the batch is reserved.
    -> screen that CSV with etalon_screen_submit / molcascade
 etalon_sweep_record(batch_id=..., run_id=...)
 ```

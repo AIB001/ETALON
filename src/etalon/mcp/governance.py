@@ -4,13 +4,19 @@ A model driving a campaign cannot be asked to confirm every action -- there are 
 the governance is not per-action confirmation. It is that the expensive actions are guarded by cheap
 checks the model is expected to call, and that the guards refuse rather than warn.
 
-Each tool here answers one question and costs nothing:
+Each tool here answers one question. Eight of them, and the list used to name five:
 
-``etalon_check_handoff``     would a simulation of this molecule be about this molecule?
-``etalon_check_stability``   what did the trajectory establish, and what did it not?
-``etalon_rule_admissible``   may this measurement update the screen?
+``etalon_check_handoff``      would a simulation of this molecule be about this molecule?
+``etalon_check_stability``    what did the trajectory establish, and what did it not?
+``etalon_rule_admissible``    may this measurement update the screen?
 ``etalon_design_fep_network`` which of these molecules can a relative method relate at all?
-``etalon_recommend_waiver``  -- and this one cannot grant, whatever the caller asks.
+``etalon_authorize_spend``    -- and may a GPU-hour be spent on this exact row?
+``etalon_council_reliability`` is this panel of advisors a measuring instrument?
+``etalon_council_adjudicate`` what did it decide, under the bound on what agreement may do?
+``etalon_recommend_waiver``   -- and this one cannot grant, whatever the caller asks.
+
+Seven cost nothing. ``etalon_design_fep_network`` is CHEAP -- about 34 ms per pair, which on 120
+pairs is a real four seconds -- and the old sentence said all of them were free.
 
 The last is the only tool in the server a model may not complete. A waiver lets a campaign spend past
 a fault that would otherwise refuse a molecule, and its entire value is that a named person accepted
@@ -395,12 +401,18 @@ def register(mcp: Any) -> None:
     ) -> str:
         """FREE. Rule on handoff records and issue the tokens the expensive stage requires.
 
-        This is etalon_check_handoff with the one thing that check was missing: a result the next
-        step cannot proceed without. ADR 0006 says a guard on the path nobody takes is not a guard,
-        and it was written about one tool. The larger case is this server: seven free tools, one
-        cheap one, one no model may complete, and **nothing that spends** -- so every refusal
-        check_handoff produces is advice offered beside an action it has no relationship with, and
-        the governance rests on you choosing to be governed nine rounds into a campaign.
+        This is ``etalon_check_handoff`` with the one thing that check was missing: a result the
+        next step cannot proceed without. ADR 0006 says a guard on the path nobody takes is not a
+        guard, and it was written about one tool.
+
+        The larger case was this server, when it had nine tools and none of them spent: every
+        refusal ``etalon_check_handoff`` produced was advice offered beside an action it had no
+        relationship with. The server now has 57 tools and five that spend, so the sentence is
+        history rather than description -- but the half that matters here has not changed. No tool
+        on this surface accepts a spend token, and none of the five that spend is the expensive
+        stage. So the governance of a GPU-hour still rests on you choosing to be governed nine
+        rounds into a campaign, and the token below is still the only thing that makes it
+        structural.
 
         A token is minted only for a record that survives the preflight, and it is bound to a
         SHA-256 of that exact row. ``PrismStage`` and anything else implementing the campaign's
@@ -714,8 +726,9 @@ def register(mcp: Any) -> None:
                 "Show this to the operator. If they agree, they grant it under their own name, and "
                 "the granted waiver -- "
                 + _WAIVER_SHAPE
-                + " -- is what goes in the waived argument of etalon_check_handoff or "
-                "etalon_rule_admissible. Both tools refuse a bare code, and both echo the grantor "
+                + " -- is what goes in the waived argument of etalon_authorize_spend, "
+                "etalon_check_handoff or "
+                "etalon_rule_admissible. All three refuse a bare code, and all three echo the grantor "
                 "back in their result so the operator can see whose name is on it. Do not write "
                 "your own name into granted_by: a waiver nobody granted is a disabled check wearing "
                 "a decision's clothes."

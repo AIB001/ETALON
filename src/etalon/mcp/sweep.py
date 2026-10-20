@@ -140,12 +140,23 @@ def register(mcp: Any) -> None:
         The refusal is the product. A token is minted only for a configuration that kept every known
         active, and the error otherwise names which ones it deleted.
 
-        Pass the returned ``gate`` object to every ``etalon_sweep_*`` call as ``gate_json``.
+        Pass the returned ``gate`` object verbatim to ``etalon_sweep_emit`` as ``gate_json``. To
+        one tool, not to every ``etalon_sweep_*`` call as this said: emit is the only one with a
+        ``gate_json`` parameter, because emit is where molecules become committed to a
+        configuration and the others operate on batches already carved.
 
         Args:
             lifetime_hours: 168 (seven days) by default -- a campaign's timescale. A configuration
                 does not drift on its own; what invalidates a calibration is a new panel member or a
                 rebuilt engine, and two of those are caught by digest rather than by time.
+
+        Note:
+            Seven days is the nominal lifetime and the practical one is shorter. Tokens are signed
+            under a per-process key unless ``ETALON_AUTHORITY_KEY`` is set in the server's
+            environment, so an MCP server restart invalidates every outstanding gate regardless of
+            ``expires_at`` -- and re-minting means re-screening the panel. The sibling
+            ``etalon_authorize_spend`` documents this for its 24-hour tokens; the longer lifetime
+            needs it more, not less.
         """
 
         from etalon.authority.gate import authorize_gate
@@ -418,8 +429,22 @@ def register(mcp: Any) -> None:
         batch held 7,545 of them. Recording it as a failure would invite a retry of work that already
         did what it was asked.
 
-        Refuses a revision that disagrees with the one the batch was carved under -- the provenance
-        hole that 56 hand-recorded batches had.
+        **This no longer refuses a revision that disagrees with the one the batch was carved
+        under, and this docstring used to say it did.** The guard was removed from ``Sweep.record``
+        because it was unusable where it stood: a compiled revision covers the library as well as
+        the funnel, so a run's own digest is a function of which molecules were in it, and five
+        batches of one ALK2 campaign compiled to five digests from one unchanged config file. The
+        check refused all five, from inside ``recover``, so the exception left the supervisor's
+        tick and killed the process driving the campaign.
+
+        The guard did not disappear; it moved to the only place it can be performed, and that place
+        is not reachable from here. ``MolCascadeProcessScreening`` compiles the current config
+        against a fixed reference library before every batch and refuses to run one whose funnel is
+        not the campaign's -- a Python driver an MCP caller never touches. So an agent screening
+        through ``etalon_screen_submit`` has no revision check at all, and believing one is running
+        is worse than knowing there is none, because it is the reason not to add your own: compile
+        the cascade with ``etalon_screen_plan`` before each batch and compare ``revision_id``
+        yourself.
         """
 
         from etalon.boundary.screen import Screen

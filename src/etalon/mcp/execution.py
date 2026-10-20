@@ -27,7 +27,7 @@ def register(mcp: Any) -> None:
         """CHEAP. Check installed dependencies, MCP and optional PRISM build executables.
 
         Reports capabilities separately. Does not install software, call an LLM API,
-        or run a simulation. For a specific docking cascade also use screen_plan.
+        or run a simulation. For a specific docking cascade also use etalon_screen_plan.
         """
         from etalon.doctor import diagnose
 
@@ -59,7 +59,7 @@ def register(mcp: Any) -> None:
 
         Launches REAL screening, potentially including docking. Use only within the user's
         authorized compute scope. Repeating the same run_id/input/settings does not resubmit.
-        Poll screen_status; client disconnects do not stop the worker. No automatic retry,
+        Poll etalon_screen_status; client disconnects do not stop the worker. No automatic retry,
         MD, PMF, FEP, active-learning budget debit or cost cap is implied by this tool.
         """
         from etalon.screening import submit_screen

@@ -1069,3 +1069,46 @@ def test_a_claim_with_no_library_reserves_nothing(tmp_path, keyed_gate) -> None:
     ))
     assert claimed["ok"] is True, claimed
     assert claimed["library"], "a claim that was refused for no library had taken the batch anyway"
+
+
+def test_every_tool_a_description_names_is_a_tool_that_exists() -> None:
+    """Six descriptions cited siblings by names that resolve to nothing.
+
+    `active_status`, `check_handoff`, `screen_plan`, `screen_status`, `workflow_advance` and the
+    compound `workflow_status/observe/artifact` all appear without the `etalon_` prefix that
+    registers them. A model told to call `screen_status` has no such tool, and the hint that names
+    the remedy is the part of a refusal that makes it useful.
+
+    The check is deliberately loose about punctuation and strict about resolution: any
+    `etalon_*`-shaped word in a description must be a registered tool, and any bare `*_status` /
+    `*_plan` / `*_handoff` word must not be one of ours in disguise.
+    """
+
+    import re
+
+    #: ``etalon_``-prefixed identifiers that are deliberately not tools: result fields and the
+    #: environment variable that fixes the token-signing key. Listed rather than pattern-matched,
+    #: so adding one is a decision.
+    not_tools = {"etalon_revisions", "etalon_cost", "ETALON_AUTHORITY_KEY"}
+
+    registered = set(_tools())
+    tails = {name.removeprefix("etalon_") for name in registered}
+
+    unresolved: list[str] = []
+    bare: list[str] = []
+    functions = _tools()
+    for name in sorted(registered):
+        description = functions[name].__doc__ or ""
+        for cited in re.findall(r"etalon_[a-z_]+", description):
+            # A trailing underscore is a namespace glob in prose -- "every etalon_sweep_* call" --
+            # with the star eaten by the pattern, not a tool anybody can call.
+            if cited.endswith("_") or cited in not_tools:
+                continue
+            if cited not in registered:
+                unresolved.append(f"{name} cites {cited}, which is not registered")
+        for word in re.findall(r"(?<![\w_])([a-z]+(?:_[a-z]+)+)(?![\w_])", description):
+            if word in tails and f"etalon_{word}" in registered:
+                bare.append(f"{name} cites {word}, which registers as etalon_{word}")
+
+    assert not unresolved, "\n".join(unresolved)
+    assert not bare, "\n".join(bare)

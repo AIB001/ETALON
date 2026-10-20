@@ -1,6 +1,6 @@
 ---
 name: etalon-gate-calibration
-description: Prove a screening cascade's gates do not delete known binders, before spending compute on them. Use when setting or changing any hard threshold — docking score, ADMET, pose strain, ligand efficiency, scaffold cap — or when a screen returned an empty shortlist, or when deciding whether a score column may be reported as a ranking. Covers panel construction, what a small panel can and cannot support, and the two independent verdicts.
+description: Prove a screening cascade's gates do not delete known binders, before spending compute on them. Use when changing any hard threshold — ADMET, pose strain, ligand efficiency, scaffold cap, or a docking cut — or when a screen returned an empty shortlist, or when deciding whether a score column may be reported as a ranking. Covers panel construction, negative controls, what a small panel can and cannot support, and the two independent verdicts. For choosing a docking cut as a share of the population rather than checking one you already have, read etalon-screening-sweep, which holds the percentile-versus-absolute measurement.
 ---
 
 # Calibrating the gates against molecules you already know about
@@ -75,7 +75,16 @@ numbers.
 
 **Include negative controls.** A panel drawn only from binders cannot distinguish a discriminating gate
 from one that keeps everything. `known_active` is refused unless it is an explicit boolean for every
-member, precisely so that omitting the negatives is impossible rather than merely discouraged.
+member, so that declaring a member without deciding is impossible.
+
+That is weaker than it used to read here, and the correction matters because the weaker thing is what
+the code does. The check is on the *type*, not on the panel having both classes: `PanelMember`
+requires an explicit `true` or `false`, and nothing requires that any member be `false`. An
+all-actives panel — even a one-member panel — calibrates, comes back `admissible`, and mints a gate
+token. The only trace is `SCORE_NOT_SHOWN_TO_RANK` in `unchecked`, and `separates` comes back `None`
+rather than `True`, because a separation with one class empty is unevaluable. So the negatives are
+load-bearing and unenforced: read `separates` and `rankable_engines`, and treat a `None` there as the
+panel telling you it could not answer.
 
 **Carry the evidence.** A co-crystal structure and a 279 µM binding constant are both "active" and are
 not the same claim. `evidence` is free text and a reader a year later has only that sentence.

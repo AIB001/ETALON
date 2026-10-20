@@ -16,7 +16,7 @@ def register(mcp: Any) -> None:
 
         Supply scientific quantity, units, protocol and cost for each endpoint. Imported assays
         use queryable=false and requires_handoff=false. Existing journals are never overwritten;
-        use active_status to inspect a previous creation. Then import candidates through data tools.
+        use etalon_active_status to inspect a previous creation. Then import candidates through data tools.
         """
         from etalon.active.setup import create_campaign
 
