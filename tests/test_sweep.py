@@ -29,6 +29,7 @@ from etalon.campaign.calibrate import (
     Calibration,
     calibrate,
     HIGHER_STRONGER,
+    LOWER_STRONGER,
     MIXED,
     PanelMember,
     Separation,
@@ -4570,6 +4571,87 @@ def test_a_threshold_is_refused_for_a_direction_that_is_no_convention() -> None:
     assert percentile_threshold(
         (*_POPULATION, float("nan")), 0.10
     ) == pytest.approx(-9.6, abs=0.01)
+
+
+def test_a_direction_nobody_recognises_is_mixed_not_the_default() -> None:
+    """A declared direction that is neither convention fell through to the fail-open default.
+
+    `etalon.active.schema` validates an endpoint's direction against `{"minimize", "maximize"}` and
+    has no MIXED at all, while this module declares LOWER_STRONGER / HIGHER_STRONGER / MIXED. Two
+    vocabularies for one concept in one repository with no translation, so a row arriving from the
+    active side declared its convention in words this module did not know, and was treated as
+    though it had declared nothing: `_DIRECTION_BY_KIND.get(..., LOWER_STRONGER)`.
+
+    Measured on the 15 KarmaDock MDN rows of the live `panel_v7` run, which declare
+    HIGHER_STRONGER. Relabelled `maximize` with the score kind untouched the answer came out right
+    by luck, because the kind table happens to list KARMADOCK_MDN. Relabelled `maximize` with any
+    score kind the table does not list, `best_inactive` moved from 67.329 to 17.285 -- the two
+    opposite ends of one panel, the best-scoring molecule swapped for the worst.
+
+    The same fallthrough discarded an explicitly declared MIXED, which is the one value whose whole
+    purpose is to fail closed, and read it as LOWER_STRONGER.
+    """
+
+    from etalon.campaign.calibrate import _direction
+
+    # The two conventions, verbatim.
+    assert _direction({"direction": "LOWER_STRONGER"}) == LOWER_STRONGER
+    assert _direction({"direction": "HIGHER_STRONGER"}) == HIGHER_STRONGER
+
+    # The active layer's spelling is translated, not guessed: these are the same two conventions.
+    assert _direction({"direction": "minimize", "score_kind": "ANYTHING"}) == LOWER_STRONGER
+    assert _direction({"direction": "maximize", "score_kind": "ANYTHING"}) == HIGHER_STRONGER
+    assert _direction({"direction": "MAXIMIZE"}) == HIGHER_STRONGER
+
+    # Anything else that was declared fails closed.
+    assert _direction({"direction": "MIXED", "score_kind": "KARMADOCK_MDN"}) == MIXED
+    assert _direction({"direction": "ascending", "score_kind": "VINA_KCAL_MOL"}) == MIXED
+
+    # Only an omitted direction reaches the score-kind table, which is the documented path.
+    assert _direction({"score_kind": "KARMADOCK_MDN"}) == HIGHER_STRONGER
+    assert _direction({"score_kind": "VINA_KCAL_MOL"}) == LOWER_STRONGER
+    assert _direction({}) == LOWER_STRONGER
+    assert _direction({"direction": None, "score_kind": "CNN_SCORE"}) == HIGHER_STRONGER
+
+
+def test_the_panel_ends_do_not_swap_under_an_unknown_direction() -> None:
+    """The consequence of the fallthrough, on the shape the measurement was taken on.
+
+    A rising score read as Vina-family makes the weakest molecule the best one. Before the fix this
+    returned a separation with the extremes reversed and nothing said so; now the engine declares
+    MIXED and publishes no verdict at all.
+    """
+
+    panel = (
+        PanelMember("a1", True),
+        PanelMember("a2", True),
+        PanelMember("i1", False),
+        PanelMember("i2", False),
+    )
+    rising = {"a1": 67.3, "a2": 56.6, "i1": 23.3, "i2": 17.3}
+
+    def rows(direction: str, kind: str):
+        return tuple(
+            {"parent_id": p, "engine_id": "karmadock", "score": v,
+             "score_kind": kind, "direction": direction}
+            for p, v in rising.items()
+        )
+
+    honest = separation(rows("HIGHER_STRONGER", "KARMADOCK_MDN"), panel)[0]
+    assert honest.direction == HIGHER_STRONGER
+    assert honest.best_active == 67.3 and honest.best_inactive == 23.3
+    assert honest.separates is True
+
+    # The active layer's word, translated, gives the same verdict rather than the inverted one.
+    translated = separation(rows("maximize", "SOME_NEW_ENGINE"), panel)[0]
+    assert translated.direction == HIGHER_STRONGER
+    assert translated.best_active == 67.3 and translated.best_inactive == 23.3
+    assert translated.separates is True
+
+    # Anything unrecognised publishes no verdict instead of an inverted one.
+    refused = separation(rows("ascending", "SOME_NEW_ENGINE"), panel)[0]
+    assert refused.direction == MIXED
+    assert refused.separates is None
 
 
 def test_a_mixed_direction_engine_publishes_no_percentiles() -> None:

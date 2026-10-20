@@ -78,10 +78,55 @@ _DIRECTION_BY_KIND = {
 }
 
 
+#: The other spelling of the same two conventions, and the reason it has to be here.
+#:
+#: :mod:`etalon.active.schema` validates an endpoint's ``direction`` against
+#: ``{"minimize", "maximize"}`` and has no ``MIXED`` at all, while this module declares
+#: ``LOWER_STRONGER`` / ``HIGHER_STRONGER`` / ``MIXED``. Two vocabularies for one concept, in one
+#: repository, with no translation between them -- so a row that reached :func:`_direction` from the
+#: active side declared its convention in words this module did not recognise, and fell through to
+#: the ``score_kind`` table as though it had declared nothing.
+_DIRECTION_SYNONYMS = {
+    "MINIMIZE": LOWER_STRONGER,
+    "MAXIMIZE": HIGHER_STRONGER,
+}
+
+
 def _direction(row: Mapping[str, Any]) -> str:
+    """The convention one row's score runs under, or ``MIXED`` when it cannot be established.
+
+    Three cases, and the middle two are corrections.
+
+    A row that **declares one of this module's two conventions** is taken at its word.
+
+    A row that **declares the active layer's spelling** is translated. ``minimize`` and
+    ``maximize`` are the same two conventions under different names, so reading them is a
+    translation rather than a guess -- and it is the translation whose absence caused the defect
+    below.
+
+    A row that **declares something else** is ``MIXED``. It used to fall through to the
+    ``score_kind`` table and then to the ``LOWER_STRONGER`` default, which is the fail-open
+    direction. Measured on the 15 KarmaDock MDN rows of the live ``panel_v7`` run, which declare
+    ``HIGHER_STRONGER``: relabelled ``maximize`` with the score kind left alone the answer is right
+    by luck, because the kind table happens to know ``KARMADOCK_MDN``; relabelled ``maximize`` with
+    any score kind the table does not list, ``best_inactive`` moves from **67.329 to 17.285** --
+    the two opposite ends of the same panel, the best-scoring molecule swapped for the worst. The
+    same fallthrough also discarded an explicitly declared ``MIXED``, which is the one value whose
+    entire purpose is to fail closed, and read it as ``LOWER_STRONGER``.
+
+    Only a row that **omits** ``direction`` reaches :data:`_DIRECTION_BY_KIND`. That path is
+    deliberate and documented there: the contract declares the field non-nullable, so an absent one
+    is already irregular, and deriving from the score kind beats assuming. Declaring a direction
+    nobody recognises is a different thing from declaring none, and it is now treated as one.
+    """
+
     declared = str(row.get("direction") or "").strip().upper()
     if declared in (LOWER_STRONGER, HIGHER_STRONGER):
         return declared
+    if declared in _DIRECTION_SYNONYMS:
+        return _DIRECTION_SYNONYMS[declared]
+    if declared:
+        return MIXED
     return _DIRECTION_BY_KIND.get(str(row.get("score_kind") or "").strip().upper(), LOWER_STRONGER)
 
 

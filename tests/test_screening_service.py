@@ -147,3 +147,107 @@ def test_actual_mcp_stdio_session_can_plan_submit_poll_and_read_workflow(prepare
             pytest.fail("MCP screen did not finish within the test limit")
 
     asyncio.run(asyncio.wait_for(roundtrip(), timeout=60))
+
+
+# -- three outcomes, read as two ---------------------------------------------
+#
+# MolCascade reports a run in which every molecule was gated out as FAILED with a failed stage --
+# correctly, a stage did raise -- and `ScreenResult.outcome` exists to classify that as
+# "exhausted" rather than "failed". `_worker` held the ScreenResult and asked `status`/`failed`
+# instead, so every exhausted batch became a failed job while its own `result` payload carried
+# `"outcome": "exhausted"`. An exhausted batch's docking scores are all committed (one measured
+# batch held 7,545 of them), so filing it as failed invites a retry of work that already did what
+# it was asked, and a campaign whose alarm condition is "a batch failed" fires on a measurement.
+
+
+def _queued_job(workspace, run_id, inputs):
+    """One queued job owned by this process, so `_worker` can claim it."""
+
+    import etalon.screening as screening
+
+    workspace.mkdir(parents=True, exist_ok=True)
+    request = {
+        "config": str(inputs[0]), "library": str(inputs[1]), "workspace": str(workspace),
+        "allow_copyleft": False, "revision_id": "rev-1",
+        "inputs": {str(p): screening._file_hash(p) for p in inputs},
+        "infrastructure": {"name": "molcascade"}, "workers": 1, "devices": [],
+    }
+    encoded = json.dumps(request, sort_keys=True, allow_nan=False)
+    now = "2026-10-20T00:00:00+00:00"
+    with screening._journal(workspace, create=True) as db:
+        db.execute("INSERT INTO screen_jobs VALUES (?,?,?,?,?,?,?,?,?,?)",
+                   (run_id, "plan-1", encoded, "queued", os.getpid(), now, now, None, None,
+                    str(workspace / f"etalon-screen-{run_id}.log")))
+        db.commit()
+    return request
+
+
+def _stage(stage_id, status, *, artifact=None, code=None):
+    from etalon.boundary.screen import StageOutcome
+
+    return StageOutcome(stage_id=stage_id, plugin="p@1", status=status, attempts=1,
+                        artifact_id=artifact,
+                        error=None if code is None else {"code": code, "message": "no rows"})
+
+
+@pytest.mark.parametrize(
+    ("status", "stages", "state", "outcome"),
+    [
+        # Every molecule gated out: MolCascade's own code family for it, on a FAILED run.
+        ("FAILED",
+         (lambda s: (s("docking", "SUCCEEDED", artifact="a"),
+                     s("pose_strain", "FAILED", code="POSE_STRAIN_EMPTY_PARENT_INPUT"))),
+         "succeeded", "exhausted"),
+        # A second code from the same family, measured on the same campaign.
+        ("FAILED",
+         (lambda s: (s("evidence", "FAILED", code="EVIDENCE_GATE_EMPTY_PARENT_INPUT"),)),
+         "succeeded", "exhausted"),
+        # A real defect stays a failure.
+        ("FAILED",
+         (lambda s: (s("docking", "FAILED", code="CUDA_OOM"),)),
+         "failed", "failed"),
+        # An ordinary finished screen.
+        ("SUCCEEDED",
+         (lambda s: (s("shortlist", "SUCCEEDED", artifact="a"),)),
+         "succeeded", "committed"),
+        # Not terminal: `outcome` reads "committed" for a run whose stages have not failed yet.
+        ("RUNNING",
+         (lambda s: (s("docking", "SUCCEEDED", artifact="a"),)),
+         "failed", "committed"),
+    ],
+)
+def test_an_exhausted_run_is_a_measurement_not_a_failed_job(
+    tmp_path, monkeypatch, status, stages, state, outcome
+) -> None:
+    import etalon.screening as screening
+    from etalon.boundary.screen import ScreenResult
+
+    config = tmp_path / "cascade.json"
+    config.write_text("{}", encoding="utf-8")
+    library = tmp_path / "library.csv"
+    library.write_text("id,smiles\nethanol,CCO\n", encoding="utf-8")
+    workspace = tmp_path / "ws"
+    _queued_job(workspace, "batch_0001", (config, library))
+
+    record = ScreenResult("batch_0001", "rev-1", status, stages(_stage))
+    assert record.outcome == outcome, "the fixture does not produce the outcome it claims"
+
+    class Runs:
+        workspace = None
+
+        def run(self, _plan, *, run_id, workers, devices):  # noqa: ARG002
+            return record
+
+    def fake_prepare(_config, _library, _workspace, *, allow_copyleft=False):  # noqa: ARG001
+        return {"plan_id": "plan-1"}, Runs(), object()
+
+    monkeypatch.setattr(screening, "_prepare", fake_prepare)
+    code = screening._worker(str(workspace), "batch_0001")
+
+    job = screen_status(workspace, "batch_0001")
+    assert job["state"] == state, job
+    assert job["result"]["outcome"] == outcome
+    assert code == (0 if state == "succeeded" else 1)
+    if state == "succeeded":
+        assert job["error"] is None
+    assert "result.outcome is the three-way answer" in job["outcome_semantics"]
