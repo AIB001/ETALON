@@ -1192,6 +1192,96 @@ def test_an_outcome_is_append_only(sweep: Sweep) -> None:
         sweep.record("batch_0001", done)
 
 
+def test_a_ledger_row_lost_after_the_pool_commit_can_be_filled(sweep: Sweep) -> None:
+    """The pool's outcome commits first and the ledger row is appended after, with no transaction.
+
+    So anything that makes the append fail leaves the batch recorded in the pool and absent from
+    the ledger -- and this module's premise is that the ledger is the authority and everything else
+    is a derivative, so a batch with no ledger row did not happen as far as any audit is concerned,
+    while ``state()`` reads the pool and goes on reporting it as recorded.
+
+    Measured by contending the ledger with a shared lock, which is what a status tool reading it
+    holds: ``record`` raised ``BlockingIOError``, the pool reported ``recorded: 1`` and
+    ``by_outcome: {'committed': 1}``, and the ledger file had zero lines. The retry then hit the
+    append-only guard and raised, permanently, so nothing could ever fill the hole. The lock is one
+    of several ways in: a full disk is another, and so is any non-finite float anywhere in
+    ``screen.provenance()``, which ``json.dumps(..., allow_nan=False)`` refuses.
+    """
+
+    sweep.admit([(f"K{i}", f"C{i}", "f") for i in range(5)])
+    sweep.emit(revision_id="rev-1")
+    sweep.claim("batch_0001", by="gpu5")
+    done = ScreenResult(
+        "batch_0001", "rev-1", "SUCCEEDED", (stage("shortlist", "SUCCEEDED", artifact="a"),)
+    )
+
+    def lines() -> int:
+        path = sweep.ledger.path
+        return len(path.read_text(encoding="utf-8").splitlines()) if path.exists() else 0
+
+    before = lines()
+    with sweep.ledger._locked(exclusive=False):
+        with pytest.raises(BlockingIOError, match="ledger is busy"):
+            sweep.record("batch_0001", done)
+    assert lines() == before, "the ledger row was never written"
+    assert sweep.state()["batches"]["recorded"] == 1, "but the pool says the batch was recorded"
+
+    # The same measurement again fills the hole rather than raising.
+    sweep.record("batch_0001", done)
+    assert lines() == before + 1
+    rows = [e for e in sweep.ledger.entries() if e.kind == "batch" and e.round_id == "batch_0001"]
+    assert len(rows) == 1
+    assert rows[0].body["outcome"] == "committed"
+
+    # And once the row is there, append-only applies again: there is nothing left to repair.
+    with pytest.raises(SweepError, match="already recorded"):
+        sweep.record("batch_0001", done)
+    assert lines() == before + 1, "a repair that had nothing to repair appended a duplicate"
+
+
+def test_a_repair_does_not_let_a_second_outcome_in(sweep: Sweep) -> None:
+    """The repair is keyed on the measurement being the same one, not on the batch being the same.
+
+    Overwriting ``committed`` with ``failed`` from a retry that should never have been dispatched is
+    exactly what the append-only guard exists to refuse, and a repair path that admitted any result
+    for an already-recorded batch would have reopened it.
+    """
+
+    sweep.admit([(f"K{i}", f"C{i}", "f") for i in range(5)])
+    sweep.emit(revision_id="rev-1")
+    sweep.claim("batch_0001", by="gpu5")
+    done = ScreenResult(
+        "batch_0001", "rev-1", "SUCCEEDED", (stage("shortlist", "SUCCEEDED", artifact="a"),)
+    )
+    with sweep.ledger._locked(exclusive=False):
+        with pytest.raises(BlockingIOError):
+            sweep.record("batch_0001", done)
+
+    # The hole is open, which is the only state in which a repair is allowed at all.
+    failed = ScreenResult(
+        "batch_0001", "rev-1", "FAILED", (stage("docking", "FAILED", code="BOOM"),)
+    )
+    with pytest.raises(SweepError, match="already recorded"):
+        sweep.record("batch_0001", failed)
+
+    other_run = ScreenResult(
+        "someone_elses_run", "rev-1", "SUCCEEDED", (stage("shortlist", "SUCCEEDED", artifact="a"),)
+    )
+    with pytest.raises(SweepError, match="already recorded"):
+        sweep.record("batch_0001", other_run)
+
+    unfinished = ScreenResult(
+        "batch_0001", "rev-1", "RUNNING", (stage("shortlist", "SUCCEEDED", artifact="a"),)
+    )
+    with pytest.raises(SweepError, match="already recorded"):
+        sweep.record("batch_0001", unfinished)
+
+    # The hole is still a hole, and still fillable by the measurement that made it.
+    sweep.record("batch_0001", done)
+    rows = [e for e in sweep.ledger.entries() if e.kind == "batch" and e.round_id == "batch_0001"]
+    assert len(rows) == 1 and rows[0].body["outcome"] == "committed"
+
+
 def test_a_batch_keeps_the_revision_it_was_emitted_under(sweep: Sweep) -> None:
     """The ledger's ``revision_id`` is the funnel, and a differing run digest is provenance.
 

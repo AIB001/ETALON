@@ -57,7 +57,7 @@ from typing import Any
 
 from etalon.authority.gate import GateAuthorization, require_gate
 from etalon.boundary.infra import etalon_revision
-from etalon.boundary.screen import Screen, ScreenResult
+from etalon.boundary.screen import TERMINAL_RUN_STATUSES, Screen, ScreenResult
 from etalon.campaign.ledger import Ledger
 
 #: Molecules per batch. Twenty thousand, and the number is a scheduling decision rather than a
@@ -532,6 +532,38 @@ class Sweep:
         if recorded is None:
             raise SweepError(f"{batch_id} was never emitted")
         if recorded.recorded:
+            # One exception to append-only, and it is a repair rather than a relaxation.
+            #
+            # The pool's outcome is committed to SQLite and the ledger row is appended *after* it,
+            # as two writes with no transaction around them. So anything that makes the append fail
+            # -- the ledger's nonblocking lock held by a status tool reading it, a full disk, or a
+            # non-finite float anywhere in ``screen.provenance()``, which ``json.dumps(...,
+            # allow_nan=False)`` refuses -- leaves the batch recorded in the pool and absent from
+            # the ledger. Measured: contend the ledger with a shared lock, call ``record``, and the
+            # pool reports ``recorded: 1`` and ``by_outcome: {'committed': 1}`` while the ledger
+            # file has zero lines. The retry then hit this guard and raised, permanently, so the
+            # hole could never be filled by anything.
+            #
+            # That is the worst shape a failure can take here, because this module's whole premise
+            # is that the ledger is the authority and everything else is a derivative. A batch with
+            # no ledger row did not happen as far as any audit is concerned, while ``state()``
+            # reads the pool and goes on reporting it as recorded -- so the two disagree and
+            # nothing says so.
+            #
+            # Re-recording the *same* outcome for the *same* run is therefore allowed, and does
+            # nothing except append the row that is missing. Re-recording a different outcome, or
+            # the same one from a different run, is the measurement-overwrite this guard exists to
+            # refuse and still raises.
+            same_measurement = (
+                recorded.outcome == result.outcome
+                and recorded.run_id == result.run_id
+                and result.status in TERMINAL_RUN_STATUSES
+            )
+            if same_measurement and not self._ledger_has_batch(batch_id):
+                self._append_batch_entry(
+                    batch_id, recorded, result, recorded.revision_id or result.revision_id
+                )
+                return recorded
             raise SweepError(
                 f"{batch_id} is already recorded as {recorded.outcome!r}. An outcome is append-only; "
                 "screen a new batch rather than overwriting a measurement."
@@ -546,7 +578,7 @@ class Sweep:
         # length. ``recover`` (:525) and the MCP record tool (mcp/sweep.py:344) each already
         # refuse this; the invariant belongs here, where the row is actually written, so that a
         # driver calling the campaign API directly cannot bypass it.
-        if result.status not in ("SUCCEEDED", "FAILED"):
+        if result.status not in TERMINAL_RUN_STATUSES:
             raise SweepError(
                 f"{batch_id}'s run {result.run_id} is {result.status}, which is not a terminal "
                 "state. An unfinished run has committed stages and no outcome, and recording one "
@@ -594,6 +626,33 @@ class Sweep:
                     "write. An outcome is append-only; read batch() for the one that landed."
                 )
             db.execute("COMMIT")
+        self._append_batch_entry(batch_id, recorded, result, revision)
+        updated = self.batch(batch_id)
+        assert updated is not None
+        return updated
+
+    def _ledger_has_batch(self, batch_id: str) -> bool:
+        """Whether the ledger already carries this batch's row.
+
+        Only consulted on the repair path in :meth:`record`, so the cost of reading every entry is
+        paid once per hole rather than once per batch.
+        """
+
+        return any(
+            entry.kind == "batch" and entry.round_id == batch_id
+            for entry in self.ledger.entries()
+        )
+
+    def _append_batch_entry(
+        self, batch_id: str, recorded: Batch, result: ScreenResult, revision: str
+    ) -> None:
+        """The batch's ledger row, written from one place.
+
+        Factored out because :meth:`record` writes it on two paths -- once after committing the
+        pool's outcome, and once to fill a hole left by an append that failed after that commit --
+        and a row built twice is a row that eventually differs between the two.
+        """
+
         self.ledger.append(
             "batch",
             batch_id,
@@ -620,9 +679,6 @@ class Sweep:
             # with the same fallback the gate uses for a batch with no row value to read.
             etalon=recorded.etalon or (etalon_revision() or None),
         )
-        updated = self.batch(batch_id)
-        assert updated is not None
-        return updated
 
     # -- recovery -----------------------------------------------------------
 
