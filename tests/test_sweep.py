@@ -6,6 +6,8 @@ standard for this file: a test whose failure mode was never observed is a test o
 
 from __future__ import annotations
 
+import json
+import math
 import os
 from types import SimpleNamespace
 from dataclasses import replace
@@ -516,6 +518,275 @@ def test_calibrate_says_so_when_the_scores_could_not_be_joined() -> None:
     assert measured.separation == ()
     # The note must name the cause, because "unevaluable" and "nobody looked" read alike otherwise.
     assert any("none belong to a declared panel member" in note for note in measured.notes)
+
+
+# -- separation: a verdict a degenerate score must not earn -------------------
+
+
+def _flat(value, direction: str = "LOWER_STRONGER", *, engine: str = "e"):
+    """Four molecules, two declared active, all carrying the same score."""
+
+    panel = (
+        PanelMember("a1", True),
+        PanelMember("a2", True),
+        PanelMember("i1", False),
+        PanelMember("i2", False),
+    )
+    scores = tuple(
+        {"parent_id": p, "engine_id": engine, "score": value, "direction": direction}
+        for p in ("a1", "a2", "i1", "i2")
+    )
+    return scores, panel
+
+
+def test_a_constant_score_does_not_separate_the_panel() -> None:
+    """The degenerate case of a score that ranks nothing, reported as one that ranks perfectly.
+
+    Measured: four molecules all scoring exactly -8.0 came back
+    ``actives_below_best_inactive=0, separates=True`` -- while the sibling count in the same row,
+    which has always included its tie, read ``inactives_above_best_active=2``. One row, two
+    tie-handling policies, and the strict one decided the verdict.
+    """
+
+    scores, panel = _flat(-8.0)
+    row = separation(scores, panel)[0]
+    assert row.inactives_above_best_active == 2
+    assert row.actives_below_best_inactive == 2, "the tie is not an ordering"
+    assert row.separates is False
+
+    # Same failure on a higher-is-stronger engine, where the constant was KarmaDock's 40.0.
+    rising = separation(*_flat(40.0, "HIGHER_STRONGER"))[0]
+    assert rising.direction == HIGHER_STRONGER
+    assert rising.separates is False
+
+
+def test_an_active_tied_with_the_best_inactive_is_not_ordered_ahead_of_it() -> None:
+    panel = (PanelMember("a1", True), PanelMember("a2", True), PanelMember("i1", False))
+    scores = tuple(
+        {"parent_id": p, "engine_id": "e", "score": v, "direction": "LOWER_STRONGER"}
+        for p, v in (("a1", -9.0), ("a2", -7.0), ("i1", -7.0))
+    )
+    row = separation(scores, panel)[0]
+    assert row.actives_below_best_inactive == 1
+    assert row.separates is False
+
+
+def test_a_score_that_came_back_nan_ranked_nothing() -> None:
+    """NaN is an instance of ``float``, so the old intake check let it through.
+
+    Measured on four molecules whose every score was NaN: ``best_active`` and ``best_inactive`` both
+    came back NaN, both counters came back 0, and ``separates`` reported ``True`` -- which reached
+    the operator as "Rankable engines: ['unidock']".
+    """
+
+    assert separation(*_flat(float("nan"))) == ()
+    assert separation(*_flat(float("inf"))) == ()
+    assert separation(*_flat(float("-inf"))) == ()
+
+
+def test_one_unorderable_row_cannot_decide_the_verdict_by_its_position() -> None:
+    """``sorted`` over a list holding a NaN is insertion-order dependent.
+
+    Measured with actives at -5.0 and -6.0 against inactives at -9.0 and NaN: the NaN row first
+    gave ``separates True``, the finite row first gave ``False``, from the same four facts.
+    """
+
+    panel = (PanelMember("a1", True), PanelMember("a2", True),
+             PanelMember("i1", False), PanelMember("i2", False))
+    finite = {"parent_id": "i1", "engine_id": "e", "score": -9.0, "direction": "LOWER_STRONGER"}
+    broken = {"parent_id": "i2", "engine_id": "e", "score": float("nan"), "direction": "LOWER_STRONGER"}
+    actives = tuple(
+        {"parent_id": p, "engine_id": "e", "score": v, "direction": "LOWER_STRONGER"}
+        for p, v in (("a1", -5.0), ("a2", -6.0))
+    )
+    first = separation((*actives, broken, finite), panel)[0]
+    second = separation((*actives, finite, broken), panel)[0]
+    assert first.separates is second.separates is False
+    assert first.best_inactive == second.best_inactive == -9.0
+    assert first.inactives == second.inactives == 1
+
+
+def test_an_engine_whose_rows_disagree_about_direction_reports_no_numbers() -> None:
+    """``shown`` was chosen from one heading and a mixture has no single un-flip.
+
+    The fall-through arm was the ``v -> v`` one -- the Vina-family convention -- so a rising
+    KarmaDock MDN was reported as though it were kcal/mol.
+    """
+
+    panel = (PanelMember("a1", True), PanelMember("a2", True), PanelMember("i1", False))
+    scores = (
+        {"parent_id": "a1", "engine_id": "e", "score": -9.0, "direction": "LOWER_STRONGER"},
+        {"parent_id": "a2", "engine_id": "e", "score": 40.0, "direction": "HIGHER_STRONGER"},
+        {"parent_id": "i1", "engine_id": "e", "score": -6.0, "direction": "LOWER_STRONGER"},
+    )
+    row = separation(scores, panel)[0]
+    assert row.direction == MIXED
+    assert row.actives == 2 and row.inactives == 1, "the counts are still real"
+    assert row.best_active is None and row.worst_active is None
+    assert row.median_active is None and row.best_inactive is None
+    # These two were computed from the canonical locals and never passed through ``shown``, so they
+    # read like cross-convention numbers and are not.
+    assert row.inactives_above_best_active is None
+    assert row.actives_below_best_inactive is None
+    assert row.separates is None
+
+
+# -- calibrate: a number that never came back is not a measured negative ------
+
+
+class UnorderableScreen(ScoredScreen):
+    """Every score this run committed is NaN."""
+
+    def read(self, artifact_id: str, *, contract_id: str | None = None):  # noqa: ARG002
+        return [
+            dict(row, parent_id=self.digest[row["parent_id"]], score=float("nan"))
+            for row in KARMADOCK_ALK2
+        ]
+
+
+class PartlyUnorderableScreen(ScoredScreen):
+    """One active's score is NaN; the rest are real."""
+
+    def read(self, artifact_id: str, *, contract_id: str | None = None):  # noqa: ARG002
+        rows = [dict(row, parent_id=self.digest[row["parent_id"]]) for row in KARMADOCK_ALK2]
+        rows[0]["score"] = float("nan")
+        return rows
+
+
+def test_an_engine_with_no_orderable_score_says_so_rather_than_vanishing() -> None:
+    """Silence here was read downstream as a measured negative.
+
+    ``separation`` dropped the engine, ``notes`` stayed empty, and the operator was told "no
+    engine's score ordered the panel, so the shortlist's score column is a filter and not a
+    ranking" -- where the truth was that no number came back at all.
+    """
+
+    measured = calibrate(UnorderableScreen(), _alk2_result(), ALK2_PANEL)
+    assert measured.separation == ()
+    assert measured.rankable == ()
+    note = next(n for n in measured.notes if "orderable" in n)
+    assert "8 of 8" in note
+    assert "does not appear in the separation at all" in note
+    assert "rather than because its score failed to rank" in note
+    # The rows stay in the evidence table even though they are excluded from the verdict.
+    assert len(measured.scores) == 8
+    assert all(math.isnan(row["score"]) for row in measured.scores)
+
+
+def test_a_partly_unorderable_engine_reports_the_panel_it_shrank() -> None:
+    """``Separation.actives`` falls while ``Calibration.actives`` does not, and the two disagree."""
+
+    measured = calibrate(PartlyUnorderableScreen(), _alk2_result(), ALK2_PANEL)
+    assert measured.actives == 6
+    assert measured.separation[0].actives == 5
+    note = next(n for n in measured.notes if "orderable" in n)
+    assert "1 of 8" in note
+    assert "fewer panel molecules than the calibration declares" in note
+
+
+def test_a_calibration_carrying_an_unorderable_score_is_still_json() -> None:
+    """``NaN`` is a bare token in Python's JSON output and no JSON parser accepts it.
+
+    ``Calibration.as_dict`` goes through ``etalon.mcp._common.dumps`` straight into a tool
+    response, so one NaN made the whole response unparseable to the client reading it.
+    """
+
+    body = calibrate(UnorderableScreen(), _alk2_result(), ALK2_PANEL).as_dict()
+    text = json.dumps(body)
+
+    def refuse(token: str) -> None:
+        raise AssertionError(f"{token} is not JSON")
+
+    json.loads(text, parse_constant=refuse)
+
+
+# -- calibrate: recall over molecules the run never had -----------------------
+
+
+def _bare(parent_id: str) -> str:
+    """The library's own id for a declared panel member, under the mismatch that was measured."""
+
+    return "lib_" + parent_id.removeprefix("act_").removeprefix("neg_")
+
+
+class UnregisteredPanelScreen(ScoredScreen):
+    """The funnel deleted every molecule it was given, under ids the panel does not declare.
+
+    Reproduced from the real convention mismatch: the panel declares ``act_SARACATINIB`` and
+    ``neg_aspirin``, and the panel library's id column carried the bare ``SARACATINIB`` and
+    ``aspirin``.
+    """
+
+    def recall(self, run_id: str, *, panel_size: int | None = None) -> dict[str, object]:
+        return {
+            "registered": 8,
+            "tiers": [
+                {
+                    "tier_id": "t9_docking",
+                    "title": "Docking",
+                    "entering": 8,
+                    "surviving": 0,
+                    "lost": [_bare(m.parent_id) for m in ALK2_PANEL],
+                }
+            ],
+            "finalize": [],
+            "notes": [],
+        }
+
+    def parent_names(self, result):  # noqa: ANN001, ARG002
+        return {v: _bare(k) for k, v in self.digest.items()}
+
+
+def test_a_panel_the_run_never_registered_is_not_full_recall() -> None:
+    """Recall is computed from names, so a name nothing matches counts as surviving every gate.
+
+    Measured: a tier reporting ``entering 3, surviving 0, lost [...]`` -- a funnel that deleted
+    every molecule it was given -- calibrated to ``recall 1.0``, ``admissible True``,
+    ``refusals ()``, and minted a signed authorization that carves the whole pool.
+    """
+
+    measured = calibrate(UnregisteredPanelScreen(), _alk2_result(), ALK2_PANEL)
+    assert measured.deleted_actives == (), "the names never matched, which is the point"
+    assert measured.recall is None, "1.0 here is a product over molecules that were not there"
+    assert not measured.admissible
+    reason = next(r for r in measured.refusals() if "panel_identity" in r or "declared panel" in r)
+    assert "surviving every gate" in reason
+    with pytest.raises(NotAuthorized):
+        authorize_gate(measured)
+
+
+def test_a_panel_whose_molecules_are_all_present_is_not_withheld() -> None:
+    """The guard must not fire on the real campaign, where 15 of 15 declared members are observable."""
+
+    measured = calibrate(ScoredScreen(), _alk2_result(), ALK2_PANEL)
+    assert all(tier.tier_id != "panel_identity" for tier in measured.all_tiers)
+    assert measured.recall == 1.0
+    assert measured.admissible
+
+
+def test_a_run_that_registered_nothing_has_no_recall() -> None:
+    """MolCascade's own end-to-end retention is null here and this reported 1.0.
+
+    ``TierRecall.retention`` nulls on ``entering == 0``, and its ``registered and not names``
+    refusal cannot fire on an empty set.
+    """
+
+    verdict = Calibration(
+        revision_id="rev-1",
+        run_id="r",
+        outcome="committed",
+        panel_size=8,
+        actives=5,
+        registered=0,
+        tiers=(TierVerdict("t9", "docking", 0, 0, (), ()),),
+        finalize=(),
+        separation=(),
+    )
+    assert verdict.recall is None
+    assert not verdict.admissible
+    assert any("registered no molecules at all" in reason for reason in verdict.refusals())
+    with pytest.raises(NotAuthorized):
+        authorize_gate(verdict)
 
 
 # -- gate authorization ------------------------------------------------------
@@ -2662,6 +2933,24 @@ def test_a_restarted_supervisor_does_not_dispatch_on_top_of_live_screens(tmp_pat
 _POPULATION = tuple(-6.0 - i * 0.004 for i in range(1000))  # -6.000 down to -9.996, strongest last
 
 
+def _pool(engine: str, values, direction: str = "LOWER_STRONGER", *, parents=None):
+    """The screened library as ``docking_score/v1`` rows, which is what ``enrichment`` takes.
+
+    One row per pose is what a docking artifact really holds, and ``enrichment`` used to take one
+    number per molecule -- a shape a caller holding rows satisfies wrongly in two different ways.
+    """
+
+    return tuple(
+        {
+            "parent_id": (parents[i] if parents else f"pool{i:05d}"),
+            "engine_id": engine,
+            "score": v,
+            "direction": direction,
+        }
+        for i, v in enumerate(values)
+    )
+
+
 def test_a_score_threshold_is_a_percentile_nobody_measured(tmp_path) -> None:  # noqa: ARG001
     from etalon.campaign.calibrate import enrichment
 
@@ -2674,9 +2963,10 @@ def test_a_score_threshold_is_a_percentile_nobody_measured(tmp_path) -> None:  #
         {"parent_id": p, "engine_id": "unidock", "score": v, "direction": "LOWER_STRONGER"}
         for p, v in (("strong", -9.99), ("weak", -7.0), ("decoy", -6.5))
     )
-    row = enrichment(scores, panel, {"unidock": _POPULATION})[0]
+    row = enrichment(scores, panel, _pool("unidock", _POPULATION))[0]
 
     assert row.population == 1000
+    assert row.population_unit == "molecules"
     # -9.99 is at the strong end of a -6.0 to -10.0 ramp; -7.0 is three quarters of the way in.
     assert row.best is not None and row.best < 0.01
     assert 0.70 < row.worst < 0.80
@@ -2715,8 +3005,113 @@ def test_a_score_that_orders_neither_class_is_not_informative() -> None:
         {"parent_id": p, "engine_id": "e", "score": v, "direction": "LOWER_STRONGER"}
         for p, v in (("a1", -9.0), ("i1", -8.9), ("a2", -6.9), ("i2", -7.0))
     )
-    row = enrichment(scores, panel, {"e": _POPULATION})[0]
+    row = enrichment(scores, panel, _pool("e", _POPULATION))[0]
     assert row.informative is False
+
+
+def test_the_population_is_collapsed_per_molecule_not_per_pose() -> None:
+    """A percentile is a share of molecules, and a docking artifact holds one row per pose.
+
+    ``docking_score/v1`` is keyed on ``(parent_id, engine_id, receptor_id, pose_rank)``, so the old
+    ``Mapping[str, Sequence[float]]`` signature had three readings a caller could satisfy it with --
+    every row, the best pose per molecule, or a dict comprehension that is last-wins over a
+    best-first pose list -- and they are different quantiles.
+
+    On the ALK2 v7 campaign all three agree: 274,072 kcal/mol rows pooled over 27 batches, every one
+    at ``pose_rank`` 0, covering 274,043 molecules, with the best-2% cut at -11.385 under each
+    reading. No threshold that campaign set changes. The multi-pose case is constructed here instead
+    of measured, because the failure needs a cascade committing more than one mode and this one
+    committed one.
+    """
+
+    from etalon.campaign.calibrate import enrichment
+
+    panel = (PanelMember("a1", True), PanelMember("i1", False))
+    scores = (
+        {"parent_id": "a1", "engine_id": "e", "score": -9.0, "direction": "LOWER_STRONGER"},
+        {"parent_id": "i1", "engine_id": "e", "score": -6.0, "direction": "LOWER_STRONGER"},
+    )
+    # Ten molecules, but the two strongest contribute nine poses each: 26 rows for 10 molecules.
+    values, parents = [], []
+    for index in range(10):
+        poses = 9 if index < 2 else 1
+        for pose in range(poses):
+            values.append(-10.0 + index * 0.5 + pose * 0.01)
+            parents.append(f"m{index}")
+    rows = _pool("e", values, parents=parents)
+    assert len(rows) == 26
+
+    row = enrichment(scores, panel, rows)[0]
+    assert row.population == 10, "poses were counted as molecules"
+    assert row.population_unit == "molecules"
+    # -9.0 is the third strongest of the ten molecules' best poses, so it sits at 0.3 -- not at the
+    # 0.46 a pose-level denominator reports, where the two strong molecules fill the head.
+    assert row.best == pytest.approx(0.3)
+
+
+def test_a_population_value_that_cannot_be_ordered_is_not_counted() -> None:
+    from etalon.campaign.calibrate import enrichment
+
+    panel = (PanelMember("a1", True),)
+    scores = ({"parent_id": "a1", "engine_id": "e", "score": -9.0, "direction": "LOWER_STRONGER"},)
+    rows = _pool("e", (*_POPULATION, float("nan"), float("inf")), )
+    row = enrichment(scores, panel, rows)[0]
+    assert row.population == 1000
+    assert row.population_dropped == 2
+
+
+def test_a_threshold_is_refused_for_a_direction_that_is_no_convention() -> None:
+    """``MIXED`` reached ``percentile_threshold`` and was read as a Vina-family score.
+
+    Measured on the KarmaDock MDN scores of all 27 ALK2 v7 batches, 299,805 rows declaring
+    ``HIGHER_STRONGER``: the best-2% cut is 59.359 and keeps 2.00% of them, while the same call read
+    as Vina-family returns 20.200, which keeps 98.00%. Both are a bare float, so the gate that had
+    stopped gating would have been recorded as a 2% gate.
+    """
+
+    from etalon.campaign.calibrate import percentile_threshold
+
+    rising = tuple(-v for v in _POPULATION)
+    assert percentile_threshold(rising, 0.10, MIXED) is None
+    assert percentile_threshold(rising, 0.10, "lower_stronger") is None
+    # And a population with nothing orderable left in it.
+    assert percentile_threshold((float("nan"), float("inf")), 0.10) is None
+    # A NaN among real values is dropped rather than corrupting the sort.
+    assert percentile_threshold(
+        (*_POPULATION, float("nan")), 0.10
+    ) == pytest.approx(-9.6, abs=0.01)
+
+
+def test_a_mixed_direction_engine_publishes_no_percentiles() -> None:
+    """And is reported rather than dropped, which is why the branch sits above the population check.
+
+    ``Enrichment.actives`` returned ``len(percentiles)``, so a ``MIXED`` engine published
+    ``"actives": 0`` for a panel that declares six of them.
+    """
+
+    from etalon.campaign.calibrate import enrichment
+
+    panel = (PanelMember("a1", True), PanelMember("a2", True), PanelMember("i1", False))
+    scores = (
+        {"parent_id": "a1", "engine_id": "e", "score": -9.0, "direction": "LOWER_STRONGER"},
+        {"parent_id": "a2", "engine_id": "e", "score": 40.0, "direction": "HIGHER_STRONGER"},
+        {"parent_id": "i1", "engine_id": "e", "score": -6.0, "direction": "LOWER_STRONGER"},
+    )
+    row = enrichment(scores, panel, _pool("e", _POPULATION))[0]
+    assert row.direction == MIXED
+    assert row.percentiles == ()
+    assert row.actives is None, "0 reads as a panel that declares no binders"
+    assert row.best is None and row.worst is None and row.median is None
+    assert row.recall_at(0.01) is None and row.keep_for(1.0) is None
+    assert row.informative is None
+    body = row.as_dict()
+    assert body["actives"] is None
+    assert body["best_percentile"] is None and body["worst_percentile"] is None
+    assert body["inactive_median_percentile"] is None
+
+    # The row survives an engine with no population at all: the mixture is a fact about the scores.
+    orphan = enrichment(scores, panel, ())[0]
+    assert orphan.direction == MIXED and orphan.population == 0
 
 
 def test_a_pose_quality_tier_is_not_offered_as_droppable() -> None:

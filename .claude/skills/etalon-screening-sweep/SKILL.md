@@ -219,9 +219,21 @@ you are in. The sharper statement: **an absolute threshold is a percentile gate 
 measured.** Against the 274,097 molecules ALK2 actually screened, that -8.0 was "keep the best 81%".
 
 ```
-etalon.campaign.calibrate.enrichment(scores, panel, population)   # where the panel sits
-etalon.campaign.calibrate.percentile_threshold(population, 0.01)  # the number a gate takes
+# population is docking_score/v1 ROWS, not a list of numbers per engine. enrichment collapses
+# poses per molecule itself, so the denominator is molecules -- read Enrichment.population_unit.
+etalon.campaign.calibrate.enrichment(scores, panel, population_rows)
+
+# direction is the engine's own, verbatim from the rows. It is not optional in practice: the
+# default is LOWER_STRONGER, and a rising score read that way returns the wrong tail.
+etalon.campaign.calibrate.percentile_threshold(population, 0.01, direction)
 ```
+
+`percentile_threshold` returns `None` rather than a number for a `direction` that is neither
+convention, for a `keep` outside `(0, 1]`, and for a population with nothing orderable left in it.
+Measured on the KarmaDock MDN scores of all 27 ALK2 v7 batches, 299,805 rows declaring
+`HIGHER_STRONGER`: the best-2% cut is 59.359 and keeps 2.00% of them, while the same call read as
+Vina-family returns 20.200, which keeps 98.00%. Both are a bare float. A gate that had stopped
+gating would have been recorded as a 2% gate.
 
 Choose the share first -- 1% of a 540,000-molecule sweep is 5,400 molecules, a number a campaign can
 act on -- then read what it costs. `Enrichment.recall_at(keep)` says how much of the known chemistry

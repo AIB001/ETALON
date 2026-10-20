@@ -106,13 +106,22 @@ actives resolves 0.10 and no better.
 `etalon_calibrate_gates` therefore reports counts and extremes, and exactly one boolean:
 
 - `best_active`, `median_active`, `worst_active`, `best_inactive`
-- `actives_below_best_inactive` — how many known binders an inactive beats. This is what `separates`
-  turns on.
+- `actives_below_best_inactive` — known actives scoring **at or below** the best inactive. The tie
+  counts. This is what `separates` turns on.
 - `inactives_above_best_active` — whether a top-N cut would be contaminated. A weaker question.
 
 The first implementation of `separates` used the second number and reported the SND1 panel as
 separating, while imatinib was outscoring two of the five known binders. If you write your own version
 of this check, the predicate is *every active outscores every inactive*.
+
+Both halves of that predicate are corrections, and the tie is the second one. A strict `>` said four
+molecules all scoring exactly -8.0 separated the panel — `inactives_above_best_active: 2` and
+`actives_below_best_inactive: 0` in one row — so a score that is a constant reported that it ranks.
+An active scoring what the best inactive scores has not been ordered ahead of it.
+
+`separates` is `None`, not `False`, when either class is empty or when the engine's rows declare both
+direction conventions (`MIXED`). Unevaluable is not the same as answered, and a campaign that reads
+`None` as falsey turns "nobody checked" into "the check failed".
 
 ## When a screen returns an empty shortlist
 
