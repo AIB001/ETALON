@@ -452,6 +452,13 @@ class Supervisor:
                 # improvement on recording that it was empty.
                 self._ingest.retire(chunk)
                 self.barren[tag] = self.barren.get(tag, 0) + 1
+                # A barren chunk still gets a uniqueness count, and leaving it out is what broke
+                # ``productivity``. ``self.chunks`` grows for every chunk the generator produced and
+                # ``self.unique`` only grew for chunks that produced rows, so one barren chunk made
+                # the two lists permanently unequal in length and ``productivity`` skipped that
+                # generator for the rest of the campaign. Zero is also the honest count: nothing
+                # new reached the library.
+                self.unique.setdefault(tag, []).append(0)
                 continue
             self.barren[tag] = 0
             # Admit first, retire second, and the order is the whole point. `Ingest.retire` writes
@@ -716,13 +723,42 @@ class Supervisor:
         from etalon.generate.productivity import allocate
 
         profiles = []
+        skipped: dict[str, str] = {}
         for tag, generator in self.generators.items():
             results = self.chunks.get(tag, [])
             counts = self.unique.get(tag, [])
-            if not results or len(results) != len(counts):
+            if not results:
+                skipped[tag] = "no chunk of this generator has finished in this process yet"
+                continue
+            if len(results) != len(counts):
+                # Said rather than skipped in silence. A generator dropped here used to vanish from
+                # the reading with no trace, and when every generator was dropped the reading came
+                # back as "no finished chunks yet" -- which on the campaign that exposed this would
+                # have been printed over 239 finished chunks.
+                skipped[tag] = (
+                    f"{len(results)} chunk results against {len(counts)} uniqueness counts, so "
+                    "they cannot be paired: either a chunk this process generated has not been "
+                    "ingested yet, which resolves on a later pass, or this process was restarted "
+                    "and the ingest state outlived the chunk results, which does not"
+                )
                 continue
             profiles.append(chunk_measurements(generator, results, counts))
-        return allocate(profiles) if profiles else {"loops": [], "retire": {}, "note": "no finished chunks yet"}
+        reading = (
+            allocate(profiles)
+            if profiles
+            else {
+                "loops": [],
+                "retire": {},
+                "note": (
+                    "no generator has a pairable chunk record; see skipped"
+                    if skipped
+                    else "no finished chunks yet"
+                ),
+            }
+        )
+        if skipped:
+            reading["skipped"] = skipped
+        return reading
 
 
 class _Call:

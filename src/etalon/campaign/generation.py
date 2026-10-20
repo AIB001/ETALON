@@ -433,6 +433,25 @@ def chunk_measurements(generator: Generator, results: Sequence[ChunkResult], uni
 
     if len(results) != len(unique):
         raise ValueError("one uniqueness count per chunk result")
+    # A chunk that delivered nothing is kept, and dropping it was the other half of a defect.
+    #
+    # Viability is delivered over requested, so a chunk that delivered 0 of 5,000 is not a missing
+    # measurement -- it is the strongest viability measurement there is, and the one this module's
+    # whole doctrine is about: TargetDiff returning 2 of 100 on a 28 A box says the box is wrong,
+    # which is cheap to fix, and the number that says so is the low one. ``Chunk`` accepts
+    # ``delivered=0`` deliberately, ``Productivity.uniqueness`` returns ``(0.0, (0.0, 0.0))`` for a
+    # loop that delivered nothing, and ``cost_multiplier`` returns ``None`` rather than a large
+    # finite number. Nothing downstream needed protecting from these rows.
+    #
+    # Measured on the ALK2 v7 generation tree: 19 of 239 chunks delivered zero candidates, spread
+    # over three of the six generators -- and ``targetdiff_g2`` delivered zero in 8 chunks out of 8,
+    # which is exactly the case ``viable`` exists to catch and was being filtered out of its input.
+    #
+    # The fabricated fallback chunk went with it. It existed because the filter could empty the
+    # tuple, and it invented a ``seconds=1.0`` that no loop measured. With nothing filtered, a
+    # non-empty ``results`` always yields a non-empty ``chunks``, and an empty one is refused by
+    # ``Productivity`` itself with "productivity over no chunks measures nothing" -- which is the
+    # right answer rather than a profile built from a made-up row.
     return Productivity(
         tag=generator.tag,
         model=generator.model,
@@ -441,13 +460,11 @@ def chunk_measurements(generator: Generator, results: Sequence[ChunkResult], uni
             Chunk(
                 requested=result.requested,
                 delivered=max(result.delivered, 0),
-                unique=max(min(count, result.delivered), 0),
+                unique=max(min(count, max(result.delivered, 0)), 0),
                 seconds=max(result.seconds, 1e-6),
             )
             for result, count in zip(results, unique, strict=True)
-            if result.delivered > 0
-        )
-        or (Chunk(requested=generator.chunk, delivered=0, unique=0, seconds=1.0),),
+        ),
     )
 
 

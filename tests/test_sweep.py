@@ -2150,6 +2150,120 @@ def test_a_chunk_cannot_be_more_unique_than_delivered() -> None:
         Chunk(100, 10, 11, 60)
 
 
+def test_a_chunk_that_delivered_nothing_reaches_the_viability_measurement(tmp_path) -> None:
+    """``chunk_measurements`` dropped every chunk with ``delivered == 0`` before measuring.
+
+    Viability is delivered over requested, so a chunk that delivered 0 of 5,000 is not a missing
+    measurement -- it is the strongest one there is, and the one this module's doctrine is about.
+    Measured on the ALK2 v7 generation tree: 19 of 239 chunks delivered zero candidates, over three
+    of the six generators, and ``targetdiff_g2`` delivered zero in 8 chunks out of 8. That is
+    exactly the case ``viable`` exists to catch, and it was being filtered out of its input.
+    """
+
+    from etalon.campaign.generation import ChunkResult, chunk_measurements
+
+    generator = _generator(tmp_path)
+    results = [
+        ChunkResult(generator.tag, i, generator.chunk_path(i), 5000, 0, 600.0, 0, barren="nothing")
+        for i in range(1, 9)
+    ]
+    profile = chunk_measurements(generator, results, [0] * 8)
+
+    assert len(profile.chunks) == 8, "the eight measurements were filtered out of the measurement"
+    assert profile.requested == 40_000
+    assert profile.delivered == 0
+    assert not profile.viable, "eight empty chunks out of eight did not read as unviable"
+    assert profile.cost_multiplier is None
+    assert profile.uniqueness == (0.0, (0.0, 0.0))
+
+
+def test_a_mixed_loop_keeps_its_empty_chunks_in_the_denominator(tmp_path) -> None:
+    """The fabricated fallback chunk is gone, and a real low delivery rate is now visible.
+
+    ``pocket2mol_g3`` ran 108 chunks against a 5,000-molecule request and its best chunk delivered
+    273. Dropping its three empty chunks moved the delivery rate in the one direction that matters.
+    """
+
+    from etalon.campaign.generation import ChunkResult, chunk_measurements
+
+    generator = _generator(tmp_path)
+    delivered = [273, 0, 190, 0, 240]
+    results = [
+        ChunkResult(generator.tag, i, generator.chunk_path(i), 5000, n, 600.0, 0)
+        for i, n in enumerate(delivered, start=1)
+    ]
+    profile = chunk_measurements(generator, results, [n // 2 for n in delivered])
+
+    assert len(profile.chunks) == len(delivered)
+    assert profile.requested == 25_000
+    assert profile.delivered == sum(delivered)
+    assert not profile.viable
+
+
+def test_one_barren_chunk_does_not_hide_a_generator_from_productivity(tmp_path, keyed, monkeypatch) -> None:
+    """``self.chunks`` grew for every chunk and ``self.unique`` only for chunks that had rows.
+
+    So one barren chunk made the two lists permanently unequal in length and ``productivity``
+    skipped that generator for the rest of the campaign -- silently, and when every generator had
+    been skipped the reading came back as "no finished chunks yet". On the campaign that exposed
+    this, three of six generators had a barren chunk and there were 239 finished chunks.
+
+    ``BARREN_LIMIT`` is five, so up to four barren chunks are explicitly normal: the design expects
+    the thing that was disabling the readout.
+    """
+
+    import time
+
+    supervisor, sweep, _ = _campaign(tmp_path, keyed, monkeypatch)
+    tag = next(iter(supervisor.generators))
+
+    # One barren chunk, ingested the way a real one is.
+    import etalon.campaign.generation as generation_module
+
+    monkeypatch.setattr(generation_module, "read_chunk", lambda path, tag=None: [])
+    supervisor._start_generation([])
+    deadline = time.monotonic() + 15.0
+    while any(job.process.poll() is None for job in supervisor.jobs):
+        if time.monotonic() >= deadline:
+            break
+        time.sleep(0.01)
+    supervisor._reap()
+    assert supervisor._ingest_chunks()[0] >= 1, "no chunk was ingested"
+
+    assert supervisor.barren[tag] >= 1, "the chunk was not barren, so this proves nothing"
+    assert len(supervisor.chunks[tag]) == len(supervisor.unique[tag]), "the lists drifted apart"
+
+    reading = supervisor.productivity()
+    assert reading.get("skipped", {}) == {}, reading.get("skipped")
+    assert [row["tag"] for row in reading["loops"]] == [tag]
+
+
+def test_a_generator_skipped_from_the_productivity_reading_says_why(tmp_path, keyed, monkeypatch) -> None:
+    """A silent `continue` reported "no finished chunks yet" over a campaign's whole chunk record.
+
+    The lists can still be unequal for a reason this does not fix -- a restarted process loads the
+    ingest state and starts with no chunk results -- so the reading now names the generator it
+    could not pair and says which of the two cases it is.
+    """
+
+    supervisor, sweep, _ = _campaign(tmp_path, keyed, monkeypatch)
+    tag = next(iter(supervisor.generators))
+
+    from etalon.campaign.generation import ChunkResult
+
+    supervisor.chunks[tag] = [
+        ChunkResult(tag, 1, tmp_path / "c1", 5000, 4800, 600.0, 0),
+        ChunkResult(tag, 2, tmp_path / "c2", 5000, 4700, 600.0, 0),
+    ]
+    supervisor.unique[tag] = [4000]
+
+    reading = supervisor.productivity()
+    assert reading["loops"] == []
+    assert tag in reading["skipped"]
+    assert "2 chunk results against 1 uniqueness counts" in reading["skipped"][tag]
+    assert reading["note"] != "no finished chunks yet"
+
+
 # -- the supervisor: the loop that replaces a person checking every five minutes ----------
 
 
