@@ -2309,6 +2309,87 @@ def test_an_already_ingested_chunk_is_not_ingested_twice(tmp_path, keyed, monkey
     assert sweep.state()["pool"]["unique"] == before
 
 
+@pytest.mark.parametrize(
+    ("step", "label", "on_sweep"),
+    [
+        ("_reap", "reaping", False),
+        ("_ingest_chunks", "chunk ingest", False),
+        ("recover", "recovery", True),
+        ("_emit", "batch emission", False),
+        ("_migrate", "device migration", False),
+        ("_start_screens", "screen dispatch", False),
+        ("_start_generation", "generation dispatch", False),
+    ],
+)
+def test_a_raise_from_any_piece_of_a_pass_is_contained(
+    tmp_path, keyed, monkeypatch, step, label, on_sweep
+) -> None:
+    """The containment an outage bought was wrapped around one of the seven pieces.
+
+    Measured on ALK2: a revision check inside ``Sweep.recover`` raised on a single batch, the
+    exception left ``tick``, and the process driving 470,651 molecules through 23 batches exited
+    with every GPU idle. ``recover`` was then wrapped, which fixed that instance and left the class
+    alone -- and ``_emit`` has three raises that are certainties rather than hypotheses:
+    ``require_gate`` refuses on every tick once the authorization's 168-hour lifetime passes and
+    again if the compiled funnel stops matching it, and ``Sweep.emit`` raises ``SweepError`` for a
+    batch id that already names a run, which was measured when a second sweep over one pool carved
+    ``batch_0001..0027`` into a fresh ledger.
+    """
+
+    supervisor, sweep, _ = _campaign(tmp_path, keyed, monkeypatch)
+    owner = sweep if on_sweep else supervisor
+    assert hasattr(owner, step), f"{step} is not where this test thinks it is"
+
+    def boom(*_args, **_kwargs):
+        raise RuntimeError(f"{step} is broken")
+
+    monkeypatch.setattr(owner, step, boom)
+    report = supervisor.tick()
+    assert any(
+        note.startswith(f"{label} raised and was contained") for note in report.notes
+    ), report.notes
+    assert not report.quiet, "a pass whose only product was a contained failure reported as quiet"
+
+
+def test_a_campaign_that_stops_with_a_part_batch_says_so(tmp_path, keyed, monkeypatch) -> None:
+    """``complete`` was true over molecules that were generated, admitted and never screened.
+
+    ``Sweep.emit`` carves full batches only, so a pool holding fewer than ``batch_size`` unbatched
+    molecules yields nothing and ``complete`` is satisfied by it. Measured on the finished ALK2 v7
+    campaign: 27 batches of 20,000 all recorded ``committed``, nothing pending, nothing outstanding,
+    and 883 molecules sitting unbatched in the pool with ``complete`` true -- and 27 batch rows in
+    the ledger with no row for them.
+
+    The predicate stays true, because the campaign genuinely cannot carve them without a decision
+    nobody has made, and a predicate answering false would make ``run`` loop to its deadline. What
+    changes is that the silence ends.
+    """
+
+    supervisor, sweep, _ = _campaign(tmp_path, keyed, monkeypatch, chunk=8, total=8, batch_size=10)
+    assert _drain(supervisor), "the campaign did not reach its own completion condition"
+
+    assert sweep.ready() == 8, "this test needs a pool holding less than one batch"
+    assert supervisor.unscreened_remainder() == 8
+    assert supervisor.complete() is True
+    assert supervisor.state()["unscreened_remainder"] == 8
+
+    # Already complete, so this runs no ticks at all and the closing note is the whole product.
+    report = supervisor.run(interval=0.0)
+    assert any("no batch was carved from" in note for note in report.notes), report.notes
+    assert not report.quiet
+
+
+def test_a_campaign_that_screened_its_whole_pool_adds_no_such_note(tmp_path, keyed, monkeypatch) -> None:
+    """The counterpart: a remainder of zero must not produce a warning about nothing."""
+
+    supervisor, sweep, _ = _campaign(tmp_path, keyed, monkeypatch, chunk=10, total=20, batch_size=10)
+    assert _drain(supervisor), "the campaign did not reach its own completion condition"
+    assert sweep.ready() == 0
+    assert supervisor.unscreened_remainder() == 0
+    report = supervisor.run(interval=0.0)
+    assert not any("no batch was carved from" in note for note in report.notes), report.notes
+
+
 def test_a_pool_that_refuses_an_admission_does_not_cost_the_chunk(tmp_path, keyed, monkeypatch) -> None:
     """The retirement is durable and the molecules were not, so the order was the wrong way round.
 
