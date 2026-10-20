@@ -366,14 +366,24 @@ class Supervisor:
             return 0, 0, 0
         count = admitted = duplicates = 0
         for chunk in list(self._ingest.pending()):
-            rows = self._ingest.consume(chunk)
+            rows = self._ingest.read(chunk)
             count += 1
             tag = chunk.parent.name
             if not rows:
+                # Nothing to admit, so nothing to wait for: a barren chunk is dealt with by being
+                # counted, and re-reading it on every tick for the rest of the campaign is not an
+                # improvement on recording that it was empty.
+                self._ingest.retire(chunk)
                 self.barren[tag] = self.barren.get(tag, 0) + 1
                 continue
             self.barren[tag] = 0
+            # Admit first, retire second, and the order is the whole point. `Ingest.retire` writes
+            # a file that stops `pending()` ever offering this chunk again, and an `admit` that
+            # raises after that write has thrown the chunk's molecules away: PRISM is not
+            # re-invoked for a chunk whose directory exists, so the SDF on disk is the only copy
+            # the campaign has and nothing re-reads it.
             report = self.sweep.admit(rows)
+            self._ingest.retire(chunk)
             admitted += report.accepted
             duplicates += report.duplicates
             self.unique.setdefault(tag, []).append(report.accepted)

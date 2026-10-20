@@ -2127,16 +2127,14 @@ def _campaign(
             return []
         return [(s, s, source) for s in json.loads(payload.read_text())]
 
-    def consume(self, chunk):
-        self.consumed.add(str(chunk))
-        self.state.parent.mkdir(parents=True, exist_ok=True)
-        self.state.write_text(json.dumps(sorted(self.consumed)))
-        return read(chunk)
-
     # Through ``monkeypatch`` rather than by assignment: a bare assignment here is never undone, so
     # every later test in the process read chunks through this fake and saw no rows.
+    #
+    # Only ``read_chunk`` is faked. ``Ingest`` used to be faked too, with a ``consume`` that wrote
+    # the consumed-state file and then read the chunk -- the same order as the real one, so the
+    # fixture reproduced the defect rather than exposing it. ``Ingest.read`` and ``Ingest.retire``
+    # are now exercised for real, and they reach the fake through this module global.
     monkeypatch.setattr(generation_module, "read_chunk", read)
-    monkeypatch.setattr(generation_module.Ingest, "consume", consume)
 
     def screen_batch(batch_id, library, device):
         result = ScreenResult(
@@ -2311,6 +2309,47 @@ def test_an_already_ingested_chunk_is_not_ingested_twice(tmp_path, keyed, monkey
     assert sweep.state()["pool"]["unique"] == before
 
 
+def test_a_pool_that_refuses_an_admission_does_not_cost_the_chunk(tmp_path, keyed, monkeypatch) -> None:
+    """The retirement is durable and the molecules were not, so the order was the wrong way round.
+
+    ``_ingest_chunks`` read a chunk through a call that retired it, then offered the rows to the
+    pool. An admission that raised therefore left a chunk permanently retired with none of its
+    molecules admitted, which no later tick and no re-run recovers.
+    """
+
+    import time
+
+    supervisor, sweep, _ = _campaign(tmp_path, keyed, monkeypatch)
+
+    # Generate one chunk without ingesting it: generation runs on its own thread, so wait for the
+    # thread rather than for a tick, which would ingest what it had just produced.
+    supervisor._start_generation([])
+    deadline = time.monotonic() + 15.0
+    while any(job.process.poll() is None for job in supervisor.jobs):
+        if time.monotonic() >= deadline:
+            break
+        time.sleep(0.01)
+    supervisor._reap()
+
+    waiting = [path.name for path in supervisor._ingest.pending()]
+    assert waiting, "no chunk was generated, so this test would prove nothing"
+
+    def refuse(_rows):
+        raise OSError("the pool is read-only")
+
+    original, sweep.admit = sweep.admit, refuse
+    with pytest.raises(OSError):
+        supervisor._ingest_chunks()
+    assert [path.name for path in supervisor._ingest.pending()] == waiting, "the chunk was retired"
+    assert sweep.state()["pool"]["unique"] == 0
+
+    sweep.admit = original
+    count, admitted, _duplicates = supervisor._ingest_chunks()
+    assert count == len(waiting)
+    assert admitted > 0, "the chunk the pool refused never reached it on the retry"
+    assert list(supervisor._ingest.pending()) == []
+
+
 def test_consecutive_barren_chunks_stop_a_loop_but_one_does_not(tmp_path, keyed, monkeypatch) -> None:
     """One empty chunk is a sampler discarding reconstruction failures; five is the model."""
 
@@ -2346,14 +2385,7 @@ def test_consecutive_barren_chunks_stop_a_loop_but_one_does_not(tmp_path, keyed,
         (path / "manifest.json").write_text(json.dumps({"candidate_count": 0}))
         return ChunkResult(gen.tag, index, path, gen.chunk, 0, 1.0, 0, barren="model returned nothing")
 
-    def consume(self, chunk):
-        self.consumed.add(str(chunk))
-        self.state.parent.mkdir(parents=True, exist_ok=True)
-        self.state.write_text(json.dumps(sorted(self.consumed)))
-        return []
-
     monkeypatch.setattr(generation_module, "read_chunk", lambda path, tag=None: [])
-    monkeypatch.setattr(generation_module.Ingest, "consume", consume)
 
     supervisor = Supervisor(
         sweep,
@@ -2475,6 +2507,66 @@ def test_a_failed_chunk_reads_as_empty_rather_than_raising(tmp_path) -> None:
     assert read_chunk(chunk) == []
 
 
+def test_a_chunk_the_reader_cannot_parse_is_barren_rather_than_fatal(tmp_path, monkeypatch) -> None:
+    """The guard was on ``OSError`` alone, which is one of the types the reader raises.
+
+    ``SDMolSupplier`` is a C++ extension reached through a Boost wrapper. A zero-byte file comes
+    back as ``OSError`` and that is the one the twelve-hour outage was found on, so that is the one
+    the guard was written for. A record truncated mid-block or a property block the parser cannot
+    close comes back as ``RuntimeError``, and a wrapper-level argument error as a Boost
+    ``ArgumentError``; neither subclasses ``OSError``, so neither was caught, and a single
+    unparseable chunk took the ingest loop out exactly as the zero-byte file had.
+    """
+
+    from rdkit import Chem
+
+    from etalon.campaign.generation import read_chunk
+
+    chunk = tmp_path / "flowr" / "chunk_001"
+    chunk.mkdir(parents=True)
+    (chunk / "manifest.json").write_text("{}")
+    (chunk / "candidates.sdf").write_text("not an SDF")
+
+    def raise_runtime(*_args, **_kwargs):
+        raise RuntimeError("Pre-condition Violation: bad counts line")
+
+    monkeypatch.setattr(Chem, "SDMolSupplier", raise_runtime)
+    assert read_chunk(chunk) == []
+
+
+def test_reading_a_chunk_does_not_retire_it(tmp_path) -> None:
+    """``Ingest`` recorded a chunk as consumed before its molecules reached the pool.
+
+    The write that retires a chunk is durable and ``pending()`` never offers a retired chunk
+    again, so anything that made the admission fail after that write -- a ledger whose lock was
+    held, a full disk, a pool opened read-only -- threw the chunk's molecules away permanently.
+    They cannot be re-derived: PRISM is not re-invoked for a chunk whose directory already exists,
+    and the SDF on disk is the only copy of what the sampler produced.
+    """
+
+    import json
+
+    from etalon.campaign.generation import Ingest
+
+    root = tmp_path / "gen"
+    chunk = root / "flowr" / "chunk_001"
+    chunk.mkdir(parents=True)
+    (chunk / "manifest.json").write_text("{}")
+    (chunk / "candidates.sdf").write_bytes(b"")
+
+    state = tmp_path / "consumed.json"
+    ingest = Ingest(root=root, state=state)
+    assert [path.name for path in ingest.pending()] == ["chunk_001"]
+
+    ingest.read(chunk)
+    assert [path.name for path in ingest.pending()] == ["chunk_001"], "reading retired the chunk"
+    assert not state.exists(), "reading wrote the consumed-state file"
+
+    ingest.retire(chunk)
+    assert list(ingest.pending()) == []
+    assert json.loads(state.read_text(encoding="utf-8")) == [str(chunk)]
+
+
 # One real PocketXMol candidate, 24 atoms, whose two stereo perceivers disagree: RDKit assigns a
 # chiral tag from the signed volume and writes `[C@H]` into the canonical SMILES, while the InChI
 # library reads the same coordinates, declares the centre undefined, and returns the flat
@@ -2592,6 +2684,61 @@ def test_a_generator_resumes_at_the_first_unwritten_chunk(tmp_path) -> None:
     for index in (1, 2):
         generator.chunk_path(index).mkdir(parents=True)
     assert generator.next_index() == 3
+
+
+def _generator(tmp_path):
+    from etalon.campaign.generation import Generator, Pocket
+
+    return Generator(
+        tag="flowr",
+        model="flowr",
+        pocket=Pocket("A", "reference", tmp_path / "r.sdf"),
+        device="cuda:0",
+        protein=tmp_path / "p.pdb",
+        output_root=tmp_path / "gen",
+        generation_config=tmp_path / "g.yaml",
+    )
+
+
+def test_a_chunk_log_does_not_advance_the_chunk_index(tmp_path) -> None:
+    """``PrismGeneration`` writes each chunk's log beside the chunk, and ``chunk_*`` matched both.
+
+    ``log = path.with_suffix(self.log_suffix)`` puts ``chunk_001.log`` next to ``chunk_001/`` in the
+    generator's own directory, so a glob-and-count read one finished chunk as two and every
+    resumption advanced the index by two instead of one.
+
+    Measured on the ALK2 v7 generation tree, which ran this way from end to end: 270 chunk
+    directories, 270 sidecar logs, and **every one of the 270 indices is odd -- not one even index
+    across six generators.** 264 index values were never written. ``pocket2mol_g3`` delivered 110
+    chunks and reached ``chunk_219``.
+
+    Nothing was lost, and that is why it went unnoticed for the whole campaign. What broke is that
+    the chunk index stopped counting chunks: ``Productivity`` is measured per chunk and
+    :func:`finished_chunks` enumerates what is on disk, so a readout taken from the highest index
+    was wrong by a factor of two. The seed went with it -- ``seed(index)`` is linear in the index,
+    so the campaign drew only odd-multiple seeds and no record anywhere says why.
+    """
+
+    generator = _generator(tmp_path)
+    generator.chunk_path(1).mkdir(parents=True)
+    generator.chunk_path(1).with_suffix(".log").write_text("prism said things\n")
+    assert generator.next_index() == 2
+
+
+def test_a_resumed_generator_does_not_write_into_a_finished_chunk(tmp_path) -> None:
+    """A count collides with an existing directory as soon as there is a gap.
+
+    With ``chunk_001`` and ``chunk_003`` on disk -- a middle chunk moved aside after a crash, which
+    is a thing an operator does -- the count is two, so the next invocation was told to write
+    ``chunk_003``: a second sampling of the pocket, under a different seed, landing in a finished
+    chunk's directory and under its manifest.
+    """
+
+    generator = _generator(tmp_path)
+    generator.chunk_path(1).mkdir(parents=True)
+    generator.chunk_path(3).mkdir(parents=True)
+    assert generator.next_index() == 4
+    assert generator.seed(4) != generator.seed(3), "a reused index would also reuse the seed"
 
 
 def test_the_generation_command_sets_no_cuda_mask() -> None:
