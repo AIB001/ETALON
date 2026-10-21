@@ -95,6 +95,7 @@
       }
     ],
     "errors": [],
-    "sha256": "22abe14175b9be798684443c516e98b742ed42ac87151d2fe290bb347185982c"
+    "sha256": "63755d2615d9a7ac74589fcce1a70f974cd758442e804aeed855f775a6882374",
+    "publication_update": "GitHub branch link updated to codex/refactor-thin-harness; tab logic and diagrams unchanged."
   }
 }
