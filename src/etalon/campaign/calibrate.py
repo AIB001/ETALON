@@ -50,6 +50,7 @@ import math
 import statistics
 from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import Any
 
 from etalon.boundary.screen import Screen, ScreenResult
@@ -171,7 +172,28 @@ def _finite(value: Any) -> float | None:
 #: minimum-distance-to-protein check, and the score could not see the difference -- its correlation
 #: with the closest protein contact is +0.014. The check is the only thing between a shortlist and
 #: ligands packed into the receptor.
-STRUCTURAL_TIERS = frozenset({"t9_redock", "t10_docking_metrics"})
+#: The pose-judging backends. A tier is structural because of what it *contains*, not because of
+#: what it is called.
+#:
+#: This used to be ``STRUCTURAL_TIERS = frozenset({"t9_redock", "t10_docking_metrics"})`` -- the
+#: two tier ids the shipped cascade happens to use. A cascade is free to name its tiers anything,
+#: and naming them anything else silently removed the protection. Measured on a CRBN tri-Trp
+#: fragment campaign whose tiers were called ``f7_redock`` and ``f8_pose_metrics``: the redock tier
+#: deleted six known actives, four of them at 5.78, 6.02, 6.18 and 6.97 A, and ``refusals()``
+#: answered "widen it or drop the tier" -- the one remedy this check exists to forbid. A legitimate
+#: rename turned the guard off, which is this project's own ADR 0006 with a different subject.
+#:
+#: Matched on the plugin id before ``@``, so a version bump does not turn the guard off either.
+STRUCTURAL_BACKENDS = frozenset({
+    "docking.redock_consistency",
+    "derived.pose_strain",
+    "derived.normalized_docking_score",
+})
+
+#: The tier ids the shipped cascade uses for its pose tiers, kept only as the fallback for a run
+#: whose revision cannot be read. Judging by name is what this fix replaced; it is still better
+#: than judging by nothing, and :func:`calibrate` says in a note when it had to.
+LEGACY_STRUCTURAL_TIERS = frozenset({"t9_redock", "t10_docking_metrics"})
 
 #: Fraction of the panel's known actives that must survive the funnel for the configuration to be
 #: admissible. One, and the default is not a round number chosen for neatness.
@@ -221,6 +243,10 @@ class TierVerdict:
     lost_actives: tuple[str, ...]
     lost_inactives: tuple[str, ...]
     unavailable: str | None = None
+    #: Whether this tier judges the *pose* rather than the *molecule*, decided from the backends
+    #: its criteria actually compiled to rather than from its id. ``False`` for an ordinary tier
+    #: and for one whose backends could not be read -- see :data:`STRUCTURAL_BACKENDS`.
+    structural: bool = False
 
     @property
     def deletes_actives(self) -> bool:
@@ -236,6 +262,11 @@ class TierVerdict:
             "lost_inactives": list(self.lost_inactives),
             "unavailable": self.unavailable,
             "deletes_actives": self.deletes_actives,
+            # Recorded, because it decides which remedy the refusal offers and a reader of a
+            # stored calibration otherwise cannot tell "widen this" from "keep this check".
+            # Adding it changes the calibration digest, which is correct: a verdict that knows
+            # which of its tiers judged the pose is a different verdict from one that did not.
+            "structural": self.structural,
         }
 
 
@@ -462,7 +493,7 @@ class Calibration:
             if tier.unavailable:
                 reasons.append(f"tier {tier.tier_id} could not be read: {tier.unavailable}")
             if tier.deletes_actives:
-                if tier.tier_id in STRUCTURAL_TIERS:
+                if tier.structural:
                     reasons.append(
                         f"tier {tier.tier_id} deleted known actives {list(tier.lost_actives)}. "
                         "This tier judges the pose, not the molecule, so do NOT drop it: a known "
@@ -817,16 +848,66 @@ def enrichment(
     return tuple(rows)
 
 
-def _verdict(row: Mapping[str, Any], actives: frozenset[str]) -> TierVerdict:
+def structural_tiers(screen: Screen, result: ScreenResult) -> tuple[frozenset[str], str | None]:
+    """Which of this run's tiers judge the pose, read from the run's own recorded revision.
+
+    Returns the tier ids and, when they could not be established, the reason -- so a caller can
+    say "could not be read" rather than "not structural", which are opposite answers for a guard
+    whose whole purpose is to refuse one particular remedy.
+
+    The revision a run records carries ``metadata.tiers`` with each tier's criteria, and
+    ``stages`` with each stage's plugin. Composing them gives tier to backend, which is the
+    question :data:`STRUCTURAL_BACKENDS` is about. Reading it from the revision rather than from
+    the cascade file on disk matters for the same reason the revision exists: the file may have
+    changed since the run.
+    """
+
+    import json
+
+    # Never raises. A caller asking "which tiers judge the pose" is deciding which remedy to
+    # offer, and an exception out of here would be caught upstream as "per-tier retention
+    # unreadable" -- turning a question about one field into the loss of the whole measurement.
+    try:
+        revision = Path(screen.workspace) / "revisions" / f"{result.revision_id}.json"
+        if not revision.is_file():
+            return frozenset(), f"no recorded revision at {revision.name}"
+        config = json.loads(revision.read_text(encoding="utf-8"))["config"]
+        plugin_of = {str(s["id"]): str(s.get("plugin", "")) for s in config.get("stages", ())}
+        tiers = config.get("metadata", {}).get("tiers", ())
+    except Exception as error:  # noqa: BLE001 -- an unreadable revision is reported, not guessed
+        return frozenset(), f"the run's revision could not be read: {error!r}"
+    if not tiers:
+        return frozenset(), f"{revision.name} records no tier structure"
+
+    found: set[str] = set()
+    for tier in tiers:
+        if not isinstance(tier, Mapping):
+            continue
+        for criterion in tier.get("criteria", ()):
+            name = str(criterion)
+            # A criterion compiles to a stage of its own name and, where it has a threshold, a
+            # ``__gate`` beside it. Either carrying a pose-judging backend makes the tier one.
+            for stage_id in (name, f"{name}__gate"):
+                head = plugin_of.get(stage_id, "").split("@", 1)[0]
+                if head in STRUCTURAL_BACKENDS:
+                    found.add(str(tier.get("id", "")))
+    return frozenset(found), None
+
+
+def _verdict(
+    row: Mapping[str, Any], actives: frozenset[str], structural: frozenset[str] = frozenset()
+) -> TierVerdict:
     lost = tuple(str(name) for name in row.get("lost", ()))
+    tier_id = str(row.get("tier_id", ""))
     return TierVerdict(
-        tier_id=str(row.get("tier_id", "")),
+        tier_id=tier_id,
         title=str(row.get("title", "")),
         entering=row.get("entering"),
         surviving=row.get("surviving"),
         lost_actives=tuple(name for name in lost if name in actives),
         lost_inactives=tuple(name for name in lost if name not in actives),
         unavailable=row.get("unavailable"),
+        structural=tier_id in structural,
     )
 
 
@@ -979,8 +1060,22 @@ def calibrate(
 
     try:
         report = screen.recall(result.run_id, panel_size=len(panel))
-        tiers = tuple(_verdict(row, actives) for row in report["tiers"])
-        finalize = tuple(_verdict(row, actives) for row in report["finalize"])
+        structural, why_not = structural_tiers(screen, result)
+        if why_not is not None:
+            # Judging by name is what this replaced, and it is still better than judging by
+            # nothing. The note is withheld unless a tier actually deleted an active, because
+            # which remedy a refusal would offer is only worth reporting when one is offered.
+            structural = LEGACY_STRUCTURAL_TIERS
+        tiers = tuple(_verdict(row, actives, structural) for row in report["tiers"])
+        finalize = tuple(_verdict(row, actives, structural) for row in report["finalize"])
+        if why_not is not None and any(t.deletes_actives for t in (*tiers, *finalize)):
+            notes.append(
+                f"which tiers judge the pose could not be read from the run's revision "
+                f"({why_not}), so it was decided from the shipped tier names "
+                f"{sorted(LEGACY_STRUCTURAL_TIERS)}. A cascade that names its pose tiers "
+                "anything else is told to widen or drop them, which is the one remedy a pose "
+                "check must never be given."
+            )
         registered = int(report["registered"])
         notes.extend(str(note) for note in report["notes"])
     except Exception as error:  # noqa: BLE001 -- an unreadable panel is a result, reported as one
@@ -1130,7 +1225,8 @@ __all__ = [
     "LOWER_STRONGER",
     "MIXED",
     "REQUIRED_RECALL",
-    "STRUCTURAL_TIERS",
+    "LEGACY_STRUCTURAL_TIERS",
+    "STRUCTURAL_BACKENDS",
     "Calibration",
     "PanelMember",
     "Separation",

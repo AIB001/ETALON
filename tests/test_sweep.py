@@ -4703,13 +4703,29 @@ def test_a_pose_quality_tier_is_not_offered_as_droppable() -> None:
         panel_size=len(PANEL),
         actives=sum(1 for m in PANEL if m.known_active),
         registered=len(PANEL),
-        tiers=(TierVerdict("t9_redock", "redock", 8, 7, ("C-26-A2",), ()),),
+        # Named anything -- the protection is keyed on `structural`, which `calibrate` decides
+        # from the backends the tier's criteria compiled to, not on the tier's id.
+        tiers=(TierVerdict("f7_redock", "redock", 8, 7, ("C-26-A2",), (), structural=True),),
         finalize=(),
         separation=(),
     )
     reason = " ".join(structural.refusals())
     assert "do NOT drop it" in reason
     assert "judges the pose, not the molecule" in reason
+
+    # And the name alone no longer earns it. This is the defect: `STRUCTURAL_TIERS` was
+    # `frozenset({"t9_redock", "t10_docking_metrics"})`, so a cascade free to name its tiers
+    # anything turned the guard off by naming them anything else. Measured on a CRBN tri-Trp
+    # fragment campaign whose tiers were `f7_redock` and `f8_pose_metrics`: the redock tier
+    # deleted six known actives, four of them at 5.78, 6.02, 6.18 and 6.97 A, and the refusal
+    # read "widen it or drop the tier" -- the one remedy this check exists to forbid.
+    by_name_only = replace(
+        structural,
+        tiers=(TierVerdict("t9_redock", "redock", 8, 7, ("C-26-A2",), ()),),
+    )
+    named = " ".join(by_name_only.refusals())
+    assert "do NOT drop it" not in named, "the tier id alone still earns the protection"
+    assert "widen it or drop the tier" in named
 
     selective = Calibration(
         revision_id="rev-1",
@@ -4978,3 +4994,136 @@ def test_the_terminal_status_set_is_defined_once() -> None:
         assert '("SUCCEEDED", "FAILED")' not in source, module.__name__
         assert '{"SUCCEEDED", "FAILED"}' not in source, module.__name__
         assert "TERMINAL_RUN_STATUSES" in source, module.__name__
+
+
+# -- which tiers judge the pose, decided from what they contain ---------------
+
+
+def _revision_file(workspace, revision_id, tiers, stages):
+    """One run's recorded revision, in the shape MolCascade writes."""
+
+    import json
+
+    out = workspace / "revisions"
+    out.mkdir(parents=True, exist_ok=True)
+    (out / f"{revision_id}.json").write_text(json.dumps({
+        "revision_id": revision_id,
+        "revision_schema_version": 1,
+        "config": {
+            "name": "c", "schema_version": 2,
+            "metadata": {"tiers": tiers},
+            "stages": stages,
+        },
+    }), encoding="utf-8")
+
+
+def test_a_pose_tier_is_recognised_by_its_backend_not_its_name(tmp_path) -> None:
+    """`STRUCTURAL_TIERS` was a set of two tier ids, so a rename turned the guard off.
+
+    Measured on a CRBN tri-Trp fragment campaign: its pose tiers were named `f7_redock` and
+    `f8_pose_metrics`, the redock tier deleted six known actives -- four of them at 5.78, 6.02,
+    6.18 and 6.97 Angstrom, including lenalidomide and 5-hydroxythalidomide -- and the refusal
+    read "widen it or drop the tier". That is the one remedy a pose check must never be offered,
+    and a legitimate rename is all it took.
+    """
+
+    from etalon.campaign.calibrate import STRUCTURAL_BACKENDS, structural_tiers
+
+    assert "docking.redock_consistency" in STRUCTURAL_BACKENDS
+    assert "derived.pose_strain" in STRUCTURAL_BACKENDS
+    assert "derived.normalized_docking_score" in STRUCTURAL_BACKENDS
+
+    revision = "rev-pose"
+    _revision_file(
+        tmp_path, revision,
+        tiers=[
+            {"id": "anything_at_all", "title": "redock", "mode": "all",
+             "criteria": ["my_redock"]},
+            {"id": "also_renamed", "title": "metrics", "mode": "all",
+             "criteria": ["my_strain", "my_le"]},
+            {"id": "t9_docking", "title": "docking", "mode": "all",
+             "criteria": ["docking_score"]},
+            {"id": "f2_properties", "title": "properties", "mode": "all",
+             "criteria": ["window"]},
+        ],
+        stages=[
+            {"id": "my_redock", "plugin": "docking.redock_consistency@0.1.0"},
+            {"id": "my_strain", "plugin": "derived.pose_strain@0.1.0"},
+            {"id": "my_le", "plugin": "derived.normalized_docking_score@0.1.0"},
+            {"id": "docking_score", "plugin": "docking.unidock@0.2.0"},
+            {"id": "window", "plugin": "chemistry.rdkit_property_range_gate@0.1.0"},
+        ],
+    )
+
+    screen = SimpleNamespace(workspace=tmp_path)
+    result = ScreenResult("panel", revision, "SUCCEEDED", ())
+    found, why_not = structural_tiers(screen, result)
+
+    assert why_not is None
+    assert found == {"anything_at_all", "also_renamed"}, found
+    # The docking tier scores the molecule; it is droppable and must not be protected.
+    assert "t9_docking" not in found
+    assert "f2_properties" not in found
+
+
+def test_a_criterion_gate_also_makes_its_tier_structural(tmp_path) -> None:
+    """A criterion compiles to a stage of its own name and a `__gate` beside it.
+
+    The pose-judging backend can be on either, so both are checked: `redock_consistency` is the
+    criterion while `derived.numeric_evidence_gate` is its threshold, and a tier whose pose
+    backend sits only on the gate stage is still a pose tier.
+    """
+
+    from etalon.campaign.calibrate import structural_tiers
+
+    revision = "rev-gate"
+    _revision_file(
+        tmp_path, revision,
+        tiers=[{"id": "zz", "title": "t", "mode": "all", "criteria": ["strain"]}],
+        stages=[
+            {"id": "strain", "plugin": "features.rdkit_properties@0.1.0"},
+            {"id": "strain__gate", "plugin": "derived.pose_strain@0.1.0"},
+        ],
+    )
+    found, why_not = structural_tiers(SimpleNamespace(workspace=tmp_path),
+                                      ScreenResult("p", revision, "SUCCEEDED", ()))
+    assert why_not is None and found == {"zz"}
+
+
+def test_a_version_bump_does_not_turn_the_guard_off(tmp_path) -> None:
+    """Matched on the plugin id before `@`, so `@0.2.0` is still the same backend."""
+
+    from etalon.campaign.calibrate import structural_tiers
+
+    revision = "rev-bump"
+    _revision_file(
+        tmp_path, revision,
+        tiers=[{"id": "r", "title": "t", "mode": "all", "criteria": ["rd"]}],
+        stages=[{"id": "rd", "plugin": "docking.redock_consistency@9.9.9"}],
+    )
+    found, why_not = structural_tiers(SimpleNamespace(workspace=tmp_path),
+                                      ScreenResult("p", revision, "SUCCEEDED", ()))
+    assert why_not is None and found == {"r"}
+
+
+def test_an_unreadable_revision_says_so_rather_than_answering_no(tmp_path) -> None:
+    """Unevaluable is not false, and here the two have opposite consequences.
+
+    "Not structural" offers "widen it or drop the tier". "Could not be read" has to fall back to
+    the shipped names and say that it did, because a pose tier told to drop itself is the failure
+    this whole check exists to prevent.
+    """
+
+    from etalon.campaign.calibrate import structural_tiers
+
+    screen = SimpleNamespace(workspace=tmp_path)
+    found, why_not = structural_tiers(screen, ScreenResult("p", "absent", "SUCCEEDED", ()))
+    assert found == frozenset()
+    assert why_not is not None and "no recorded revision" in why_not
+
+    # A screen double with no workspace at all must not raise: an exception here is caught
+    # upstream as "per-tier retention unreadable", which loses the whole measurement over one
+    # field.
+    found, why_not = structural_tiers(object(), ScreenResult("p", "x", "SUCCEEDED", ()))
+    assert found == frozenset()
+    assert why_not is not None and "could not be read" in why_not
