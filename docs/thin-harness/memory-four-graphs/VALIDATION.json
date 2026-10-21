@@ -1,0 +1,100 @@
+{
+  "scope": "Architecture artifact and browser checks, not scientific or implementation acceptance",
+  "diagrams": [
+    {
+      "name": "four-graphs",
+      "artifact": "four-graphs/four-graphs.html",
+      "artifact_sha256": "f461b4be795b9c1d3f93579fae6e22095ebb84f89d58c8fd60d80d87149bd5a5",
+      "candidate": "four-graphs/candidate.json",
+      "candidate_sha256": "36db431e2124664c218144e761c7640e85a634a0ab7babb061791f6b9862a817",
+      "source_revision": "fc570d6fca85f4c7be9defd04756c581cff07158",
+      "gates": {
+        "validate": "pass",
+        "deliver": "pass",
+        "check": "pass",
+        "browser-check": "pass"
+      },
+      "visual_review": "passed on 1440x900 light screenshot"
+    },
+    {
+      "name": "memory",
+      "artifact": "memory/memory.html",
+      "artifact_sha256": "e60dbd50315c2615db1c56b15c19d40aa6840e36cbaed3be51170550696c30a0",
+      "candidate": "memory/candidate.json",
+      "candidate_sha256": "fc2c6954680053feaf60845c18439f40631e322cc1bb48d5e1339e61db6f0ff0",
+      "source_revision": "fc570d6fca85f4c7be9defd04756c581cff07158",
+      "gates": {
+        "validate": "pass",
+        "deliver": "pass",
+        "check": "pass",
+        "browser-check": "pass"
+      },
+      "visual_review": "passed on 1440x900 light screenshot"
+    },
+    {
+      "name": "continuation-rsi",
+      "artifact": "continuation-rsi/continuation-rsi.html",
+      "artifact_sha256": "28de2a8af9b0b14d374cc75223d3c0c8447d60cdee121cc85957a0eba840eed3",
+      "candidate": "continuation-rsi/candidate.json",
+      "candidate_sha256": "6b5c92ef9bc090c53de75455970dbfacae55f0abb0b23d19c46fe5e167f3c9e5",
+      "source_revision": "fc570d6fca85f4c7be9defd04756c581cff07158",
+      "gates": {
+        "validate": "pass",
+        "deliver": "pass",
+        "check": "pass",
+        "browser-check": "pass"
+      },
+      "visual_review": "passed on 1440x900 light screenshot"
+    },
+    {
+      "name": "capabilities",
+      "artifact": "capabilities/capabilities.html",
+      "artifact_sha256": "f2196ace064350c9d0298eb4c1b9384eb4db72ce17bbd94ed88b989024ccba95",
+      "candidate": "capabilities/candidate.json",
+      "candidate_sha256": "f053cda5d13deee3538d9aa1b72344d74c586020e4b7d28fd4f1281b6b6cfb10",
+      "source_revision": "fc570d6fca85f4c7be9defd04756c581cff07158",
+      "gates": {
+        "validate": "pass",
+        "deliver": "pass",
+        "check": "pass",
+        "browser-check": "pass"
+      },
+      "visual_review": "existing layout retained; automated revalidation passed"
+    }
+  ],
+  "portal": {
+    "status": "pass",
+    "checks": [
+      {
+        "key": "four-graphs",
+        "active": "four-graphs",
+        "src": "four-graphs/four-graphs.html",
+        "overflow": false,
+        "loaded": true
+      },
+      {
+        "key": "memory",
+        "active": "memory",
+        "src": "memory/memory.html",
+        "overflow": false,
+        "loaded": true
+      },
+      {
+        "key": "continuation-rsi",
+        "active": "continuation-rsi",
+        "src": "continuation-rsi/continuation-rsi.html",
+        "overflow": false,
+        "loaded": true
+      },
+      {
+        "key": "capabilities",
+        "active": "capabilities",
+        "src": "capabilities/capabilities.html",
+        "overflow": false,
+        "loaded": true
+      }
+    ],
+    "errors": [],
+    "sha256": "22abe14175b9be798684443c516e98b742ed42ac87151d2fe290bb347185982c"
+  }
+}

@@ -1,0 +1,33 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>ETALON 研究架构 · 四图、Memory 与 RSI</title>
+<style>
+:root{color-scheme:light;--ink:#17253b;--muted:#57677c;--line:#dce4ed;--paper:#fff;--bg:#f2f5f9;--accent:#126e88}*{box-sizing:border-box}body{margin:0;background:var(--bg);font:15px/1.65 system-ui,-apple-system,"Segoe UI","Microsoft YaHei",sans-serif;color:var(--ink)}main{max-width:1400px;margin:auto;padding:28px 32px}header{display:flex;justify-content:space-between;gap:24px;align-items:flex-start}.eyebrow{font-size:12px;letter-spacing:.12em;color:var(--accent);font-weight:700}h1{font-size:29px;line-height:1.3;margin:7px 0 10px}p{margin:0;color:var(--muted)}.actions{display:flex;gap:12px;white-space:nowrap;padding-top:12px}a{color:var(--accent);text-decoration:none}a:hover{text-decoration:underline}.states{display:flex;gap:9px;margin:17px 0;flex-wrap:wrap}.pill{font-size:12px;padding:3px 11px;border-radius:20px;border:1px solid #bdded0;background:#e9f6ef;color:#256b4a}.planned{border-color:#edcf95;background:#fff6e4;color:#8a5b10}.mixed{border-color:#c6c4eb;background:#f1effc;color:#62538b}nav{display:flex;gap:8px;flex-wrap:wrap;margin:22px 0 12px}button{font:inherit;font-weight:600;border:1px solid var(--line);background:var(--paper);color:var(--muted);padding:10px 18px;border-radius:10px;cursor:pointer}button[aria-selected="true"]{color:#fff;background:var(--accent);border-color:var(--accent)}button:focus-visible,a:focus-visible{outline:3px solid #48abc3;outline-offset:3px}.caption{display:flex;justify-content:space-between;gap:20px;align-items:center;margin:14px 0 18px}.caption p{max-width:1050px}.viewer{background:var(--paper);border:1px solid var(--line);border-radius:16px;overflow:hidden;box-shadow:0 8px 24px #23334b08}iframe{display:block;width:100%;height:1040px;border:0;background:var(--bg)}footer{padding:18px 0 4px;font-size:12px;color:var(--muted)}@media(max-width:760px){main{padding:18px 12px}header,.caption{display:block}h1{font-size:23px}.actions{padding-top:12px}button{font-size:13px;padding:8px 10px}iframe{height:900px}.caption a{display:inline-block;margin-top:8px}}
+</style>
+</head>
+<body><main>
+<header><div><div class="eyebrow">ETALON / RESEARCH ARCHITECTURE</div><h1>四张图，一份可接续的研究历史</h1><p>在既有 Skills 与科学 SDK 能力图上，展开证据、判断、实验、结果，以及贯穿每一步的 memory。</p></div><div class="actions"><a href="DESIGN.md">阅读具体设计</a><a href="https://github.com/AIB001/ETALON/tree/codex/etalon-memory-four-graphs-20261021" target="_blank" rel="noopener">GitHub 分支 ↗</a></div></header>
+<div class="states" aria-label="能力状态说明"><span class="pill">已有：当前代码具备接口</span><span class="planned">待新增：设计中的能力</span><span class="pill mixed">已有＋待增：复用基础并扩展</span></div>
+<nav role="tablist" aria-label="架构视图">
+<button role="tab" aria-selected="true" aria-controls="diagram" data-view="four-graphs">01 四图连接</button>
+<button role="tab" aria-selected="false" aria-controls="diagram" data-view="memory">02 每一步读写 memory</button>
+<button role="tab" aria-selected="false" aria-controls="diagram" data-view="continuation-rsi">03 新 chat 与 RSI</button>
+<button role="tab" aria-selected="false" aria-controls="diagram" data-view="capabilities">04 既有 Skills / SDK</button>
+</nav>
+<div class="caption"><p id="explanation">E → J → X → R 是可选的研究关系；四图共享 H。证据足够时只读，分支可停，R 回到 E 仍使用同一证据身份。</p><a id="standalone" href="four-graphs/four-graphs.html" target="_blank" rel="noopener">单独打开此图 ↗</a></div>
+<section class="viewer" aria-label="交互架构图"><iframe id="diagram" title="ETALON 四图连接" src="four-graphs/four-graphs.html" allow="fullscreen" loading="eager"></iframe></section>
+<footer>节点内直接标注已有与待新增；图下方说明卡展开条件与代码边界。四图、接续与触发机制为设计，未修改科学实现。来源链接固定到本分支的源码与设计提交。</footer>
+</main>
+<script>
+const views={
+ 'four-graphs':{title:'ETALON 四图连接',text:'E → J → X → R 是可选的研究关系；四图共享 H。证据足够时只读，分支可停，R 回到 E 仍使用同一证据身份。'},
+ 'memory':{title:'ETALON 每一步读写 memory',text:'四行均读写同一个 H：先读范围与条件，出现有意义的事实或决定才落档。新内容契约、检索投影和关系视图明确标为待增。'},
+ 'continuation-rsi':{title:'ETALON 新 chat 接续与 RSI',text:'新 chat 先校验状态、水位和原任务。结果或反例进入评价；有具体问题才触发 S / U 的有界改进，采用或回退影响后续版本。'},
+ 'capabilities':{title:'ETALON 既有 Skills 与 SDK',text:'保留上一版能力映射：Skills 提供可选方法，SDK 与执行内核提供基础能力。这里是现有能力，不表示新四图和完整 RSI 已经实现。'}
+};
+function selectView(key,updateHash=true){if(!views[key])key='four-graphs';const v=views[key];document.querySelectorAll('[role="tab"]').forEach(b=>b.setAttribute('aria-selected',String(b.dataset.view===key)));const frame=document.getElementById('diagram');const path=key+'/'+key+'.html';if(!frame.getAttribute('src').endsWith(path))frame.src=path;frame.title=v.title;document.getElementById('explanation').textContent=v.text;document.getElementById('standalone').href=path;if(updateHash)history.replaceState(null,'','#'+key);}
+document.querySelectorAll('[role="tab"]').forEach(b=>{b.addEventListener('click',()=>selectView(b.dataset.view));b.addEventListener('keydown',e=>{if(!['ArrowRight','ArrowLeft','Home','End'].includes(e.key))return;e.preventDefault();const bs=[...document.querySelectorAll('[role="tab"]')];let i=bs.indexOf(b);i=e.key==='Home'?0:e.key==='End'?bs.length-1:(i+(e.key==='ArrowRight'?1:-1)+bs.length)%bs.length;bs[i].focus();selectView(bs[i].dataset.view);});});
+window.addEventListener('hashchange',()=>selectView(location.hash.slice(1),false));selectView(location.hash.slice(1),false);
+</script></body></html>

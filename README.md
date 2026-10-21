@@ -994,3 +994,8 @@ than one of them failing and the headline reporting the other number.
 
 The failure detection is written to be judged from files on disk precisely so that the part
 most likely to be wrong is not the part that needs a GPU to exercise.
+
+
+## Research memory architecture design
+
+[Four-graph memory and bounded S/U improvement design](docs/thin-harness/memory-four-graphs/README.md) adds an explorable architecture overview, per-step memory reads and writes, and new-chat continuation to the existing Skills/SDK map. Existing interfaces and proposed additions are explicitly distinguished; this is a design snapshot, not a new implementation or scientific acceptance.

@@ -1,0 +1,379 @@
+{
+  "schema_version": 1,
+  "diagram_type": "architecture",
+  "meta": {
+    "title": "ETALON · 每一步怎样读取与写入 memory",
+    "locale": "zh-CN",
+    "output": ".archify/architecture-etalon-memory-20261021-232732/memory/memory.html",
+    "quality_profile": "showcase",
+    "repository": {
+      "url": "https://github.com/AIB001/ETALON.git",
+      "revision": "fc570d6fca85f4c7be9defd04756c581cff07158",
+      "link_mode": "web"
+    }
+  },
+  "components": [
+    {
+      "id": "eread",
+      "type": "database",
+      "label": "读 H · E〔已有接口〕",
+      "sublabel": "来源 / 覆盖 / 条件",
+      "pos": [
+        40,
+        40
+      ],
+      "size": [
+        270,
+        80
+      ],
+      "tag": "已有 query/read",
+      "sources": [
+        {
+          "path": "src/etalon/research/evidence.py",
+          "line": 324,
+          "end_line": 384
+        }
+      ]
+    },
+    {
+      "id": "ework",
+      "type": "backend",
+      "label": "E 证据检索与区分〔已有＋待增〕",
+      "sublabel": "覆盖足够 → 复用",
+      "pos": [
+        435,
+        40
+      ],
+      "size": [
+        270,
+        80
+      ],
+      "tag": "宿主选择 · 图视图待新增",
+      "sources": [
+        {
+          "path": "docs/thin-harness/memory-four-graphs/DESIGN.md",
+          "line": 133,
+          "end_line": 152
+        }
+      ]
+    },
+    {
+      "id": "ewrite",
+      "type": "database",
+      "label": "写 H · E〔已有＋待增〕",
+      "sublabel": "查询范围 / 选取 / 缺口",
+      "pos": [
+        830,
+        40
+      ],
+      "size": [
+        270,
+        80
+      ],
+      "tag": "已有 Journal · 内容部分待增",
+      "sources": [
+        {
+          "path": "src/etalon/research/journal.py",
+          "line": 18,
+          "end_line": 43
+        },
+        {
+          "path": "docs/thin-harness/memory-four-graphs/DESIGN.md",
+          "line": 133,
+          "end_line": 152
+        }
+      ]
+    },
+    {
+      "id": "jread",
+      "type": "database",
+      "label": "读 H · J〔已有接口〕",
+      "sublabel": "支持 / 反证 / 适用边界",
+      "pos": [
+        40,
+        220
+      ],
+      "size": [
+        270,
+        80
+      ],
+      "tag": "已有 query/read",
+      "sources": [
+        {
+          "path": "src/etalon/research/evidence_refs.py",
+          "line": 237,
+          "end_line": 252
+        }
+      ]
+    },
+    {
+      "id": "jwork",
+      "type": "backend",
+      "label": "J 科学判断与快速计算〔已有＋待增〕",
+      "sublabel": "形成判断才落档",
+      "pos": [
+        435,
+        220
+      ],
+      "size": [
+        270,
+        80
+      ],
+      "tag": "宿主选择 · 图视图待新增",
+      "sources": [
+        {
+          "path": "docs/thin-harness/memory-four-graphs/DESIGN.md",
+          "line": 77,
+          "end_line": 112
+        }
+      ]
+    },
+    {
+      "id": "jwrite",
+      "type": "database",
+      "label": "写 H · J〔已有＋待增〕",
+      "sublabel": "claim / 条件 / 推导引用",
+      "pos": [
+        830,
+        220
+      ],
+      "size": [
+        270,
+        80
+      ],
+      "tag": "已有 Journal · 内容部分待增",
+      "sources": [
+        {
+          "path": "src/etalon/research/journal.py",
+          "line": 18,
+          "end_line": 43
+        },
+        {
+          "path": "docs/thin-harness/memory-four-graphs/DESIGN.md",
+          "line": 77,
+          "end_line": 112
+        }
+      ]
+    },
+    {
+      "id": "xread",
+      "type": "database",
+      "label": "读 H · X〔已有接口〕",
+      "sublabel": "输入 / 协议 / 原 handle",
+      "pos": [
+        40,
+        400
+      ],
+      "size": [
+        270,
+        80
+      ],
+      "tag": "已有 query/read",
+      "sources": [
+        {
+          "path": "src/etalon/runtime/api.py",
+          "line": 115,
+          "end_line": 183
+        }
+      ]
+    },
+    {
+      "id": "xwork",
+      "type": "backend",
+      "label": "X 选择与实验尝试〔已有＋待增〕",
+      "sublabel": "分支可停，计划不算结果",
+      "pos": [
+        435,
+        400
+      ],
+      "size": [
+        270,
+        80
+      ],
+      "tag": "宿主选择 · 图视图待新增",
+      "sources": [
+        {
+          "path": "docs/thin-harness/memory-four-graphs/DESIGN.md",
+          "line": 114,
+          "end_line": 131
+        }
+      ]
+    },
+    {
+      "id": "xwrite",
+      "type": "database",
+      "label": "写 H · X〔已有＋待增〕",
+      "sublabel": "计划 / 分支 / 尝试身份",
+      "pos": [
+        830,
+        400
+      ],
+      "size": [
+        270,
+        80
+      ],
+      "tag": "已有 Journal · 内容部分待增",
+      "sources": [
+        {
+          "path": "src/etalon/research/journal.py",
+          "line": 18,
+          "end_line": 43
+        },
+        {
+          "path": "docs/thin-harness/memory-four-graphs/DESIGN.md",
+          "line": 114,
+          "end_line": 131
+        }
+      ]
+    },
+    {
+      "id": "rread",
+      "type": "database",
+      "label": "读 H · R〔已有接口〕",
+      "sublabel": "身份 / 对照 / 数据版本",
+      "pos": [
+        40,
+        580
+      ],
+      "size": [
+        270,
+        80
+      ],
+      "tag": "已有 query/read",
+      "sources": [
+        {
+          "path": "src/etalon/research/journal.py",
+          "line": 76,
+          "end_line": 137
+        }
+      ]
+    },
+    {
+      "id": "rwork",
+      "type": "backend",
+      "label": "R 结果与证据沉淀〔已有＋待增〕",
+      "sublabel": "先原件，再 QC 与评价",
+      "pos": [
+        435,
+        580
+      ],
+      "size": [
+        270,
+        80
+      ],
+      "tag": "宿主选择 · 图视图待新增",
+      "sources": [
+        {
+          "path": "docs/thin-harness/memory-four-graphs/DESIGN.md",
+          "line": 171,
+          "end_line": 191
+        }
+      ]
+    },
+    {
+      "id": "rwrite",
+      "type": "database",
+      "label": "写 H · R〔已有＋待增〕",
+      "sublabel": "观测 / 失败 / golden 引用",
+      "pos": [
+        830,
+        580
+      ],
+      "size": [
+        270,
+        80
+      ],
+      "tag": "已有 Journal · 内容部分待增",
+      "sources": [
+        {
+          "path": "src/etalon/research/journal.py",
+          "line": 18,
+          "end_line": 43
+        },
+        {
+          "path": "docs/thin-harness/memory-four-graphs/DESIGN.md",
+          "line": 171,
+          "end_line": 191
+        }
+      ]
+    }
+  ],
+  "connections": [
+    {
+      "id": "eread-ework",
+      "from": "eread",
+      "to": "ework",
+      "label": "按需读取"
+    },
+    {
+      "id": "ework-ewrite",
+      "from": "ework",
+      "to": "ewrite",
+      "label": "有事实或决定"
+    },
+    {
+      "id": "jread-jwork",
+      "from": "jread",
+      "to": "jwork",
+      "label": "按需读取"
+    },
+    {
+      "id": "jwork-jwrite",
+      "from": "jwork",
+      "to": "jwrite",
+      "label": "有事实或决定"
+    },
+    {
+      "id": "xread-xwork",
+      "from": "xread",
+      "to": "xwork",
+      "label": "按需读取"
+    },
+    {
+      "id": "xwork-xwrite",
+      "from": "xwork",
+      "to": "xwrite",
+      "label": "有事实或决定"
+    },
+    {
+      "id": "rread-rwork",
+      "from": "rread",
+      "to": "rwork",
+      "label": "按需读取"
+    },
+    {
+      "id": "rwork-rwrite",
+      "from": "rwork",
+      "to": "rwrite",
+      "label": "有事实或决定"
+    }
+  ],
+  "cards": [
+    {
+      "dot": "cyan",
+      "title": "图中的读 H / 写 H 都指同一历史",
+      "items": [
+        "四行是四类操作，不是四个库或四套复制。读接口不产生新科学结果。",
+        "搜索层记录、计划、分支、golden、step 内容契约待新增；claim 与实际实验记录复用已有接口。"
+      ]
+    },
+    {
+      "dot": "emerald",
+      "title": "已有的持久化边界",
+      "items": [
+        "Artifact 校验哈希与字节，Journal 同身份不可改写；执行费用引用原账本。",
+        "文件先完整落地，随后 Journal 入库；数据库失败保留可核验文件供重试，不冒充跨存储原子事务。",
+        "failed / missing / unsupported 保留各自状态，不填成低分或实验阴性。"
+      ]
+    },
+    {
+      "dot": "amber",
+      "title": "待新增的读写与更新语义",
+      "items": [
+        "查询覆盖、分支理由、supersedes 和反向依赖驱动当前视图更新；索引可以重建。",
+        "新增内容 schema 需要同步增加验证、只读投影与发布规则；当前 query 是子串搜索，lineage 仅直接关系。",
+        "golden 回归、阳性保留、候选通过与 lab 确认分开统计分母、缺失和覆盖。"
+      ]
+    }
+  ]
+}

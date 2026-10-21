@@ -1,0 +1,412 @@
+{
+  "schema_version": 1,
+  "diagram_type": "architecture",
+  "meta": {
+    "title": "ETALON · 新 chat 接续与有界 RSI",
+    "locale": "zh-CN",
+    "output": ".archify/architecture-etalon-memory-20261021-232732/continuation-rsi/continuation-rsi.html",
+    "quality_profile": "showcase",
+    "repository": {
+      "url": "https://github.com/AIB001/ETALON.git",
+      "revision": "fc570d6fca85f4c7be9defd04756c581cff07158",
+      "link_mode": "web"
+    }
+  },
+  "components": [
+    {
+      "id": "chat",
+      "type": "external",
+      "label": "新 chat〔已有短入口〕",
+      "sublabel": "读取问题与权威状态",
+      "pos": [
+        40,
+        40
+      ],
+      "size": [
+        270,
+        80
+      ],
+      "tag": "已有短入口",
+      "sources": [
+        {
+          "path": "src/etalon/host-guides/project-entry.md",
+          "line": 1,
+          "end_line": 28
+        }
+      ]
+    },
+    {
+      "id": "handoff",
+      "type": "backend",
+      "label": "接续快照〔待新增〕",
+      "sublabel": "水位 / 前沿 / 待完成 handle",
+      "pos": [
+        435,
+        40
+      ],
+      "size": [
+        270,
+        80
+      ],
+      "tag": "待新增",
+      "sources": [
+        {
+          "path": "docs/thin-harness/memory-four-graphs/DESIGN.md",
+          "line": 154,
+          "end_line": 169
+        }
+      ]
+    },
+    {
+      "id": "choose",
+      "type": "backend",
+      "label": "读取与选择〔已有＋待增〕",
+      "sublabel": "先查旧任务，再复用或选分支",
+      "pos": [
+        830,
+        40
+      ],
+      "size": [
+        270,
+        80
+      ],
+      "tag": "已有读取 · U 记录待增",
+      "sources": [
+        {
+          "path": "src/etalon/runtime/api.py",
+          "line": 173,
+          "end_line": 183
+        },
+        {
+          "path": "docs/thin-harness/memory-four-graphs/DESIGN.md",
+          "line": 154,
+          "end_line": 169
+        }
+      ]
+    },
+    {
+      "id": "history",
+      "type": "database",
+      "label": "H 事实记录〔已有＋待增〕",
+      "sublabel": "原件 / claim / 分支 / 观测",
+      "pos": [
+        830,
+        235
+      ],
+      "size": [
+        270,
+        80
+      ],
+      "tag": "已有 Journal · 新内容待增",
+      "sources": [
+        {
+          "path": "src/etalon/research/journal.py",
+          "line": 18,
+          "end_line": 43
+        },
+        {
+          "path": "docs/thin-harness/memory-four-graphs/DESIGN.md",
+          "line": 114,
+          "end_line": 131
+        }
+      ]
+    },
+    {
+      "id": "assess",
+      "type": "backend",
+      "label": "评价触发规则〔待新增〕",
+      "sublabel": "有结果才评，具体问题才改",
+      "pos": [
+        435,
+        235
+      ],
+      "size": [
+        270,
+        80
+      ],
+      "tag": "待新增触发规则",
+      "sources": [
+        {
+          "path": "docs/thin-harness/memory-four-graphs/DESIGN.md",
+          "line": 193,
+          "end_line": 221
+        },
+        {
+          "path": "src/etalon/host.py",
+          "line": 224,
+          "end_line": 284
+        }
+      ]
+    },
+    {
+      "id": "retain",
+      "type": "backend",
+      "label": "继续或 no-change〔已有＋待增〕",
+      "sublabel": "普通读取不触发自我重写",
+      "pos": [
+        40,
+        235
+      ],
+      "size": [
+        270,
+        80
+      ],
+      "tag": "已有记录 · 规则待增",
+      "sources": [
+        {
+          "path": "src/etalon/research/method_revision.py",
+          "line": 31,
+          "end_line": 70
+        },
+        {
+          "path": "docs/thin-harness/memory-four-graphs/DESIGN.md",
+          "line": 208,
+          "end_line": 221
+        }
+      ]
+    },
+    {
+      "id": "method",
+      "type": "backend",
+      "label": "S 方法〔已有版本基础〕",
+      "sublabel": "固定分支，改怎么做",
+      "pos": [
+        40,
+        435
+      ],
+      "size": [
+        270,
+        80
+      ],
+      "tag": "已有版本基础 · 比较待扩展",
+      "sources": [
+        {
+          "path": "src/etalon/research/schema.py",
+          "line": 196,
+          "end_line": 221
+        },
+        {
+          "path": "docs/thin-harness/memory-four-graphs/DESIGN.md",
+          "line": 197,
+          "end_line": 206
+        }
+      ]
+    },
+    {
+      "id": "revision",
+      "type": "backend",
+      "label": "有界试用〔已有＋待增〕",
+      "sublabel": "绑定问题、基线、候选与成本",
+      "pos": [
+        435,
+        435
+      ],
+      "size": [
+        270,
+        80
+      ],
+      "tag": "已有 revision · 编排待增",
+      "sources": [
+        {
+          "path": "src/etalon/research/method_revision.py",
+          "line": 31,
+          "end_line": 70
+        },
+        {
+          "path": "docs/thin-harness/memory-four-graphs/DESIGN.md",
+          "line": 223,
+          "end_line": 233
+        }
+      ]
+    },
+    {
+      "id": "branch",
+      "type": "backend",
+      "label": "U 选择〔已有使用基础〕",
+      "sublabel": "固定方法，改做哪一步",
+      "pos": [
+        830,
+        435
+      ],
+      "size": [
+        270,
+        80
+      ],
+      "tag": "已有使用基础 · 决策待增",
+      "sources": [
+        {
+          "path": "src/etalon/research/schema.py",
+          "line": 224,
+          "end_line": 260
+        },
+        {
+          "path": "docs/thin-harness/memory-four-graphs/DESIGN.md",
+          "line": 197,
+          "end_line": 206
+        }
+      ]
+    },
+    {
+      "id": "evaluate",
+      "type": "backend",
+      "label": "比较评价〔需扩展〕",
+      "sublabel": "回归与独立性按结论匹配",
+      "pos": [
+        435,
+        635
+      ],
+      "size": [
+        270,
+        80
+      ],
+      "tag": "已有评价记录 · 适配待扩展",
+      "sources": [
+        {
+          "path": "src/etalon/research/journal.py",
+          "line": 209,
+          "end_line": 271
+        },
+        {
+          "path": "docs/thin-harness/memory-four-graphs/DESIGN.md",
+          "line": 223,
+          "end_line": 233
+        }
+      ]
+    },
+    {
+      "id": "choice",
+      "type": "backend",
+      "label": "采用与回退〔待新增〕",
+      "sublabel": "新 choice 只影响后续绑定",
+      "pos": [
+        830,
+        635
+      ],
+      "size": [
+        270,
+        80
+      ],
+      "tag": "待新增 choice",
+      "sources": [
+        {
+          "path": "docs/thin-harness/memory-four-graphs/DESIGN.md",
+          "line": 103,
+          "end_line": 110
+        },
+        {
+          "path": "docs/thin-harness/memory-four-graphs/DESIGN.md",
+          "line": 223,
+          "end_line": 233
+        }
+      ]
+    }
+  ],
+  "connections": [
+    {
+      "id": "chat-handoff",
+      "from": "chat",
+      "to": "handoff",
+      "label": "按需读取"
+    },
+    {
+      "id": "handoff-choose",
+      "from": "handoff",
+      "to": "choose",
+      "label": "校验新鲜度"
+    },
+    {
+      "id": "choose-history",
+      "from": "choose",
+      "to": "history",
+      "label": "事实或决定"
+    },
+    {
+      "id": "history-assess",
+      "from": "history",
+      "to": "assess",
+      "label": "结果 / 反例"
+    },
+    {
+      "id": "assess-retain",
+      "from": "assess",
+      "to": "retain",
+      "label": "无改进依据"
+    },
+    {
+      "id": "assess-revision",
+      "from": "assess",
+      "to": "revision",
+      "label": "满足触发条件"
+    },
+    {
+      "id": "revision-method",
+      "from": "revision",
+      "to": "method",
+      "label": "改 S"
+    },
+    {
+      "id": "revision-branch",
+      "from": "revision",
+      "to": "branch",
+      "label": "改 U"
+    },
+    {
+      "id": "revision-evaluate",
+      "from": "revision",
+      "to": "evaluate",
+      "label": "实际试用"
+    },
+    {
+      "id": "evaluate-choice",
+      "from": "evaluate",
+      "to": "choice",
+      "label": "有证据才采用"
+    },
+    {
+      "id": "choice-handoff",
+      "from": "choice",
+      "to": "handoff",
+      "label": "后续版本进入接续",
+      "fromSide": "right",
+      "toSide": "top"
+    }
+  ],
+  "cards": [
+    {
+      "dot": "cyan",
+      "title": "接续先读状态，不重复派发",
+      "items": [
+        "已有：短入口、evidence query/read、原 handle 与收据读取。待新增：handoff、frontier、水位过期检查。",
+        "旧快照只导航；新 chat 读取当前暂停与归属，先回查 pending，再决定是否执行。",
+        "后续采用/回退及新事实进入 H；下一份接续快照引用其版本，不复制整个聊天历史。"
+      ]
+    },
+    {
+      "dot": "amber",
+      "title": "触发有条件，事实不丢失",
+      "items": [
+        "已核验严重错误可触发一次局部修复；重复独立任务失败达到预定阈值、改变适用性的新证据或阶段复盘可触发改进。",
+        "普通 memory 写入、读取和“生成了一个新版本”不自动触发下一轮；候选可以为零。",
+        "已有 consume_events 提供有界读取与稳定 request ID；触发去重、合并信号和尝试上限待新增。"
+      ]
+    },
+    {
+      "dot": "emerald",
+      "title": "S 与 U 分开归因",
+      "items": [
+        "方法 S 比较尽量固定任务、信息与分支；选择 U 比较尽量固定可用方法与信息。",
+        "未执行分支的收益保持未知，不能用已选分支的成功反推全部选择正确。",
+        "现有 MethodEvaluation 的独立验证依赖冻结策略收据；通用 S/U 评价仍需适配，记录存在不等于收益成立。"
+      ]
+    },
+    {
+      "dot": "cyan",
+      "title": "试用、采用与回退",
+      "items": [
+        "版本与使用记录可复用；choice 默认选择记录和后续绑定约定待新增。",
+        "保留 no-change、失败与真实成本；回退改变后续选择，不删除旧结果，不热替换运行中任务。",
+        "G 绑定本次改进方法的版本；本轮只改 S/U，不建立 G 递归改进循环。"
+      ]
+    }
+  ]
+}

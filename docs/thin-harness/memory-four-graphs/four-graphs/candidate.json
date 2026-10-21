@@ -1,0 +1,240 @@
+{
+  "schema_version": 1,
+  "diagram_type": "architecture",
+  "meta": {
+    "title": "ETALON · 四张图连接同一份研究历史",
+    "locale": "zh-CN",
+    "output": ".archify/architecture-etalon-memory-20261021-232732/four-graphs/four-graphs.html",
+    "quality_profile": "showcase",
+    "repository": {
+      "url": "https://github.com/AIB001/ETALON.git",
+      "revision": "fc570d6fca85f4c7be9defd04756c581cff07158",
+      "link_mode": "web"
+    }
+  },
+  "components": [
+    {
+      "id": "evidence",
+      "type": "backend",
+      "label": "E 证据图〔待新增〕",
+      "sublabel": "已覆盖则复用，搜索可为零",
+      "pos": [
+        40,
+        300
+      ],
+      "size": [
+        270,
+        80
+      ],
+      "tag": "待新增视图 · 复用 evidence",
+      "sources": [
+        {
+          "path": "docs/thin-harness/memory-four-graphs/DESIGN.md",
+          "line": 22,
+          "end_line": 54
+        }
+      ]
+    },
+    {
+      "id": "judgment",
+      "type": "backend",
+      "label": "J 判断图〔待新增〕",
+      "sublabel": "竞争解释 → 可区分预测",
+      "pos": [
+        440,
+        40
+      ],
+      "size": [
+        270,
+        80
+      ],
+      "tag": "待新增视图 · 复用 claim",
+      "sources": [
+        {
+          "path": "docs/thin-harness/memory-four-graphs/DESIGN.md",
+          "line": 22,
+          "end_line": 54
+        }
+      ]
+    },
+    {
+      "id": "experiment",
+      "type": "backend",
+      "label": "X 实验图〔待新增〕",
+      "sublabel": "只选有区分力的分支",
+      "pos": [
+        840,
+        300
+      ],
+      "size": [
+        270,
+        80
+      ],
+      "tag": "待新增视图 · 复用执行记录",
+      "sources": [
+        {
+          "path": "docs/thin-harness/memory-four-graphs/DESIGN.md",
+          "line": 22,
+          "end_line": 54
+        }
+      ]
+    },
+    {
+      "id": "result",
+      "type": "backend",
+      "label": "R 结果图〔待新增〕",
+      "sublabel": "原件 / QC / 观测 / golden",
+      "pos": [
+        440,
+        560
+      ],
+      "size": [
+        270,
+        80
+      ],
+      "tag": "待新增视图 · 复用观测",
+      "sources": [
+        {
+          "path": "docs/thin-harness/memory-four-graphs/DESIGN.md",
+          "line": 22,
+          "end_line": 54
+        }
+      ]
+    },
+    {
+      "id": "history",
+      "type": "database",
+      "label": "H 研究历史〔已有基础〕",
+      "sublabel": "Journal + Artifact + 执行引用",
+      "pos": [
+        440,
+        300
+      ],
+      "size": [
+        270,
+        80
+      ],
+      "tag": "已有基础 · 新内容契约待增",
+      "sources": [
+        {
+          "path": "src/etalon/research/journal.py",
+          "line": 18,
+          "end_line": 43
+        },
+        {
+          "path": "src/etalon/research/evidence.py",
+          "line": 324,
+          "end_line": 384
+        },
+        {
+          "path": "docs/thin-harness/memory-four-graphs/DESIGN.md",
+          "line": 77,
+          "end_line": 112
+        }
+      ]
+    }
+  ],
+  "connections": [
+    {
+      "id": "evidence-judgment",
+      "from": "evidence",
+      "to": "judgment",
+      "label": "支持 / 反证"
+    },
+    {
+      "id": "judgment-experiment",
+      "from": "judgment",
+      "to": "experiment",
+      "label": "预测与对照"
+    },
+    {
+      "id": "experiment-result",
+      "from": "experiment",
+      "to": "result",
+      "label": "实际结果"
+    },
+    {
+      "id": "result-evidence",
+      "from": "result",
+      "to": "evidence",
+      "label": "同一证据复用"
+    },
+    {
+      "id": "evidence-history",
+      "from": "evidence",
+      "to": "history",
+      "label": "写查询与选择"
+    },
+    {
+      "id": "history-evidence",
+      "from": "history",
+      "to": "evidence",
+      "label": "读来源与覆盖"
+    },
+    {
+      "id": "judgment-history",
+      "from": "judgment",
+      "to": "history",
+      "label": "写 claim"
+    },
+    {
+      "id": "history-judgment",
+      "from": "history",
+      "to": "judgment",
+      "label": "读支持与反证"
+    },
+    {
+      "id": "experiment-history",
+      "from": "experiment",
+      "to": "history",
+      "label": "写计划与决定"
+    },
+    {
+      "id": "history-experiment",
+      "from": "history",
+      "to": "experiment",
+      "label": "读协议与输入"
+    },
+    {
+      "id": "result-history",
+      "from": "result",
+      "to": "history",
+      "label": "写原件与观测"
+    },
+    {
+      "id": "history-result",
+      "from": "history",
+      "to": "result",
+      "label": "读身份与基线"
+    }
+  ],
+  "cards": [
+    {
+      "dot": "cyan",
+      "title": "四图共享身份，不是四套数据库",
+      "items": [
+        "E/J/X/R 都是待新增的关系视图；底层 Journal、claim、Artifact、Experiment、Observation 已有。",
+        "R → E 复用同一 EvidenceRef，不重复生成独立证据或重复记费。",
+        "J 的新判断继续影响 E 的检索和 X 的实验；R 的支持与反证通过 H 更新 J。"
+      ]
+    },
+    {
+      "dot": "amber",
+      "title": "整层和分支都可以跳过",
+      "items": [
+        "箭头是可选关系，不是每轮必走的流水线。已有协议和证据足够时，可直接选择 X 的相关分支。",
+        "无区分力分支可以停止；保留依据、条件和重新考虑条件。未执行结果保持未知。",
+        "已有：数值与实验记录基础。待新增：通用分支、关系投影、frontier 与 golden manifest。"
+      ]
+    },
+    {
+      "dot": "emerald",
+      "title": "原架构能力如何接入",
+      "items": [
+        "搜索与来源：MolQuarry / data-design；判断与对照：research / campaign。",
+        "实验调用：现有 SDK 与 runtime；结果保存：ResearchJournal 和 evidence。",
+        "化学合成 / 采购 / lab 为 X 的候选路线，真实批次与测量进入 R；完整实时 lab 接口仍待新增。"
+      ]
+    }
+  ]
+}

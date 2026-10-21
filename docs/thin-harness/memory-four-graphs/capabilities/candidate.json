@@ -1,0 +1,541 @@
+{
+  "schema_version": 1,
+  "diagram_type": "architecture",
+  "meta": {
+    "title": "ETALON · 既有 Skills 与科学 SDK 能力对应",
+    "locale": "zh-CN",
+    "output": ".archify/architecture-etalon-memory-20261021-232732/capabilities/capabilities.html",
+    "quality_profile": "showcase",
+    "repository": {
+      "url": "https://github.com/AIB001/ETALON.git",
+      "revision": "fc570d6fca85f4c7be9defd04756c581cff07158",
+      "link_mode": "web"
+    }
+  },
+  "components": [
+    {
+      "id": "dataSkill",
+      "type": "frontend",
+      "label": "外部搜索与数据接入",
+      "sublabel": "data-design + 6 MolQuarry",
+      "pos": [
+        40,
+        40
+      ],
+      "size": [
+        320,
+        70
+      ],
+      "sources": [
+        {
+          "path": ".claude/skills/etalon-data-design/SKILL.md",
+          "line": 1,
+          "end_line": 25
+        }
+      ]
+    },
+    {
+      "id": "dataSdk",
+      "type": "backend",
+      "label": "数据与身份 SDK",
+      "sublabel": "data.service / library / ingress / design",
+      "pos": [
+        40,
+        166
+      ],
+      "size": [
+        320,
+        74
+      ],
+      "sources": [
+        {
+          "path": "src/etalon/mcp/data.py",
+          "line": 14,
+          "end_line": 106
+        }
+      ]
+    },
+    {
+      "id": "screenSkill",
+      "type": "frontend",
+      "label": "筛选与批次",
+      "sublabel": "screening-sweep",
+      "pos": [
+        430,
+        40
+      ],
+      "size": [
+        320,
+        70
+      ],
+      "sources": [
+        {
+          "path": ".claude/skills/etalon-screening-sweep/SKILL.md",
+          "line": 1,
+          "end_line": 25
+        }
+      ]
+    },
+    {
+      "id": "screenSdk",
+      "type": "backend",
+      "label": "筛选与 sweep SDK",
+      "sublabel": "screening / campaign.sweep",
+      "pos": [
+        430,
+        166
+      ],
+      "size": [
+        320,
+        74
+      ],
+      "sources": [
+        {
+          "path": "docs/thin-harness/README.md",
+          "line": 164,
+          "end_line": 165
+        }
+      ]
+    },
+    {
+      "id": "gateSkill",
+      "type": "frontend",
+      "label": "门控校准",
+      "sublabel": "gate-calibration",
+      "pos": [
+        820,
+        40
+      ],
+      "size": [
+        320,
+        70
+      ],
+      "sources": [
+        {
+          "path": ".claude/skills/etalon-gate-calibration/SKILL.md",
+          "line": 1,
+          "end_line": 25
+        }
+      ]
+    },
+    {
+      "id": "gateSdk",
+      "type": "backend",
+      "label": "校准与排序诊断",
+      "sublabel": "calibrate / separation / enrichment",
+      "pos": [
+        820,
+        166
+      ],
+      "size": [
+        320,
+        74
+      ],
+      "sources": [
+        {
+          "path": "docs/thin-harness/README.md",
+          "line": 166,
+          "end_line": 166
+        }
+      ]
+    },
+    {
+      "id": "generationSkill",
+      "type": "frontend",
+      "label": "生成与资源规划",
+      "sublabel": "generation-planning",
+      "pos": [
+        40,
+        295
+      ],
+      "size": [
+        320,
+        70
+      ],
+      "sources": [
+        {
+          "path": ".claude/skills/etalon-generation-planning/SKILL.md",
+          "line": 1,
+          "end_line": 25
+        }
+      ]
+    },
+    {
+      "id": "generationSdk",
+      "type": "backend",
+      "label": "产率与预算建议",
+      "sublabel": "generate / economics / tuning / Pipeline",
+      "pos": [
+        40,
+        421
+      ],
+      "size": [
+        320,
+        74
+      ],
+      "sources": [
+        {
+          "path": "src/etalon/mcp/planning.py",
+          "line": 65,
+          "end_line": 91
+        }
+      ]
+    },
+    {
+      "id": "campaignSkill",
+      "type": "frontend",
+      "label": "局部科学决策与执行",
+      "sublabel": "campaign",
+      "pos": [
+        430,
+        295
+      ],
+      "size": [
+        320,
+        70
+      ],
+      "sources": [
+        {
+          "path": ".claude/skills/etalon-campaign/SKILL.md",
+          "line": 1,
+          "end_line": 25
+        }
+      ]
+    },
+    {
+      "id": "campaignSdk",
+      "type": "backend",
+      "label": "active 与科学约束",
+      "sublabel": "active / diagnostics / faults / fep",
+      "pos": [
+        430,
+        421
+      ],
+      "size": [
+        320,
+        74
+      ],
+      "sources": [
+        {
+          "path": "docs/thin-harness/README.md",
+          "line": 162,
+          "end_line": 164
+        }
+      ]
+    },
+    {
+      "id": "researchSkill",
+      "type": "frontend",
+      "label": "研究、验证与证据复用",
+      "sublabel": "research",
+      "pos": [
+        820,
+        295
+      ],
+      "size": [
+        320,
+        70
+      ],
+      "sources": [
+        {
+          "path": ".claude/skills/etalon-research/SKILL.md",
+          "line": 1,
+          "end_line": 25
+        }
+      ]
+    },
+    {
+      "id": "researchSdk",
+      "type": "backend",
+      "label": "研究方法 SDK",
+      "sublabel": "transfer / pose / pool / feedback / evidence",
+      "pos": [
+        820,
+        421
+      ],
+      "size": [
+        320,
+        74
+      ],
+      "sources": [
+        {
+          "path": "docs/thin-harness/README.md",
+          "line": 169,
+          "end_line": 173
+        }
+      ]
+    },
+    {
+      "id": "monitorSkill",
+      "type": "frontend",
+      "label": "运行观察与恢复",
+      "sublabel": "campaign-monitoring",
+      "pos": [
+        40,
+        550
+      ],
+      "size": [
+        320,
+        70
+      ],
+      "sources": [
+        {
+          "path": ".claude/skills/etalon-campaign-monitoring/SKILL.md",
+          "line": 1,
+          "end_line": 25
+        }
+      ]
+    },
+    {
+      "id": "monitorSdk",
+      "type": "backend",
+      "label": "状态与收据接口",
+      "sublabel": "runtime / screening / sweep / events",
+      "pos": [
+        40,
+        676
+      ],
+      "size": [
+        320,
+        74
+      ],
+      "sources": [
+        {
+          "path": "docs/thin-harness/README.md",
+          "line": 164,
+          "end_line": 168
+        }
+      ]
+    },
+    {
+      "id": "improveSkill",
+      "type": "frontend",
+      "label": "方法与使用方式改进",
+      "sublabel": "skill-improvement",
+      "pos": [
+        430,
+        550
+      ],
+      "size": [
+        320,
+        70
+      ],
+      "sources": [
+        {
+          "path": ".claude/skills/etalon-skill-improvement/SKILL.md",
+          "line": 1,
+          "end_line": 25
+        }
+      ]
+    },
+    {
+      "id": "improveSdk",
+      "type": "backend",
+      "label": "方法版本与归因",
+      "sublabel": "MethodVersion / Use / Evaluation",
+      "pos": [
+        430,
+        676
+      ],
+      "size": [
+        320,
+        74
+      ],
+      "sources": [
+        {
+          "path": "src/etalon/mcp/methods.py",
+          "line": 12,
+          "end_line": 37
+        }
+      ]
+    },
+    {
+      "id": "installSkill",
+      "type": "frontend",
+      "label": "安装与能力诊断",
+      "sublabel": "install",
+      "pos": [
+        820,
+        550
+      ],
+      "size": [
+        320,
+        70
+      ],
+      "sources": [
+        {
+          "path": ".claude/skills/etalon-install/SKILL.md",
+          "line": 1,
+          "end_line": 25
+        }
+      ]
+    },
+    {
+      "id": "installSdk",
+      "type": "backend",
+      "label": "环境与宿主接入",
+      "sublabel": "doctor / infrastructure / host / skills",
+      "pos": [
+        820,
+        676
+      ],
+      "size": [
+        320,
+        74
+      ],
+      "sources": [
+        {
+          "path": "docs/thin-harness/README.md",
+          "line": 175,
+          "end_line": 175
+        }
+      ]
+    }
+  ],
+  "connections": [
+    {
+      "id": "dataMap",
+      "from": "dataSkill",
+      "to": "dataSdk",
+      "label": "方法对应的调用能力"
+    },
+    {
+      "id": "screenMap",
+      "from": "screenSkill",
+      "to": "screenSdk",
+      "label": "方法对应的调用能力"
+    },
+    {
+      "id": "gateMap",
+      "from": "gateSkill",
+      "to": "gateSdk",
+      "label": "方法对应的调用能力"
+    },
+    {
+      "id": "generationMap",
+      "from": "generationSkill",
+      "to": "generationSdk",
+      "label": "方法对应的调用能力"
+    },
+    {
+      "id": "campaignMap",
+      "from": "campaignSkill",
+      "to": "campaignSdk",
+      "label": "方法对应的调用能力"
+    },
+    {
+      "id": "researchMap",
+      "from": "researchSkill",
+      "to": "researchSdk",
+      "label": "方法对应的调用能力"
+    },
+    {
+      "id": "monitorMap",
+      "from": "monitorSkill",
+      "to": "monitorSdk",
+      "label": "方法对应的调用能力"
+    },
+    {
+      "id": "improveMap",
+      "from": "improveSkill",
+      "to": "improveSdk",
+      "label": "方法对应的调用能力"
+    },
+    {
+      "id": "installMap",
+      "from": "installSkill",
+      "to": "installSdk",
+      "label": "方法对应的调用能力"
+    }
+  ],
+  "cards": [
+    {
+      "dot": "cyan",
+      "title": "如何读这张能力图",
+      "items": [
+        "15 个已注册 Skills：9 个 ETALON + 6 个 MolQuarry。左上组含 7 个，其余每组 1 个。",
+        "每对框展示主要对应关系，并非必经顺序或独占模块。campaign / research 共享诊断与 Journal；其他方法也可直接调用这些 SDK。",
+        "SDK 可独立调用；Skills 提供适用条件、输入输出、解释和停止方式。发现或阅读不代表实际采用。"
+      ]
+    },
+    {
+      "dot": "cyan",
+      "title": "外部搜索的六种具体方法",
+      "items": [
+        "target-modulators：靶点身份→活性分子与可追溯 dossier；analogue-search：相似结构/子结构扩展。",
+        "assay-literature：回到原始测定、论文段落/表格；selectivity-evidence：on/off-target 与反筛证据。",
+        "structure-templates：结构、构建体、配体/模板来源；compound-sourcing：精确身份、供应商目录及合成线索。",
+        "data-design 负责来源冻结、候选/测定导入和 PRISM design bundle 消费；不是第七个远程搜索源。"
+      ]
+    },
+    {
+      "dot": "emerald",
+      "title": "筛选、校准和生成分别输出什么",
+      "items": [
+        "screening-sweep：计划、提交、状态、导出及 emit/claim/record/admit/recover；零命中与失败分开。",
+        "gate-calibration：保留率、分离能力、富集及有版本的 gate 判据；校准不是活性验证。",
+        "generation-planning：有效独特产率、枯竭、可选分配及漏斗预算估计；产率建议本身不启动生成器。",
+        "现有分子可直接筛选。分子图、3D 构象、结合姿势与可合成性是不同证据。"
+      ]
+    },
+    {
+      "dot": "violet",
+      "title": "campaign 与 research 的交叉",
+      "items": [
+        "campaign：factorial；bind_outcome / condition / exact_program；empirical_model 与已记录片段；handoff、stability、admission、council、FEP network。",
+        "active：数值选点/GP 与宿主所选 candidate–endpoint 的 evaluate；经预算、执行和准入记录结果。",
+        "research：fit_policy / calibrate_policy / next_action / evaluate_policies；validation/feedback；pose/preparation；固定池在线查询；evidence query/read。",
+        "learn、rescore、economics、tuning 等旧算法继续存在；有模块不代表每个算法都有独立 Skill 或完整宿主采用证据。"
+      ]
+    },
+    {
+      "dot": "amber",
+      "title": "原有流程仍可选用",
+      "items": [
+        "Campaign.round：screen → handoff/preflight → measure → admit → decide → ledger。",
+        "active：select → reserve → execute → admit → retrain；durable workflow 可连接 data → screen → active。",
+        "旧 Pipeline 的默认漏斗包含廉价规则、docking、Boltz2、MM/GBSA、MD、FEP 的成本规划；规划目录不等于完整可运行链。",
+        "现在宿主可选局部方法、更换路线或停止，无需完成整个旧流程。"
+      ]
+    },
+    {
+      "dot": "violet",
+      "title": "Memory：已有实现",
+      "items": [
+        "原始证据：data snapshots、Artifacts、Experiment/Observation、CampaignStore 与 ResearchJournal；RuntimeStore 管执行状态。",
+        "结论内容：etalon-research-claim/1，区分 extracted_report / hypothesis / interpretation，保留条件、局限、support_refs、counter_refs、supersedes。",
+        "方法记忆：完整 bundle 与 MethodVersion / MethodUse / MethodEvaluation；模型 M/科学策略 φ 不等于文本记忆。",
+        "发布与读取：etalon-workspace.json、EvidenceRef、location_map、query_evidence / read_evidence；当前查询为结构化过滤与文本匹配。"
+      ]
+    },
+    {
+      "dot": "amber",
+      "title": "Memory：本次讨论建议，尚未实施",
+      "items": [
+        "新 chat 只读短项目入口、当前任务与权威状态；按需取相关结论，再追到原始证据。",
+        "先维护少量可发布来源与带反例的结论，再根据实际查找失败增加可重建全文/语义索引。索引不能成为事实权威。",
+        "事实、解释、方法和当前状态分开更新；冲突并存，新结论显式替代旧结论；不自动把反思写成事实或训练标签。",
+        "先用历史已公开任务衡量证据召回、误用、读入量和最终回答，再决定检索复杂度。"
+      ]
+    },
+    {
+      "dot": "rose",
+      "title": "两类合成与实验边界",
+      "items": [
+        "证据综合：宿主结合原文/测定/反例形成 claim 和可区分假设；SDK 保存来源并计算已适用的对比，不自动判定结论为真。",
+        "化学合成：当前 sourcing 有目录匹配、SA/BRICS 启发式；未建立完整路线规划→合成执行→批次QC链。",
+        "计算实验：已有 MolCascade / PRISM 受限执行和专项驱动；物理化学条件与端点必须明确。",
+        "湿实验：可审阅导入已有 assay；未据此建立 CRO 下单、实物交付、板级结果和实验回传闭环。"
+      ]
+    },
+    {
+      "dot": "slate",
+      "title": "版本与验证范围",
+      "items": [
+        "图来自 2026-10-21 当前本地工作树，含未提交/未跟踪的 SDK、Skills 与契约文档；引用绑定本次源码副本。",
+        "它是能力对应图，不是部署图或全链已验收声明；没有修改产品实现、写入项目记忆或运行科学任务。",
+        "R4b 继续暂停。图中 Memory 建议与化学/湿实验缺口是本次讨论结论，不是新实现。"
+      ]
+    }
+  ]
+}
