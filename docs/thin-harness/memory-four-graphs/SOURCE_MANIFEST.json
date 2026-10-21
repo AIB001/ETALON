@@ -1,0 +1,73 @@
+{
+  "purpose": "Committed source identity for the design, not scientific acceptance",
+  "repository": "https://github.com/AIB001/ETALON.git",
+  "revision": "f4c8c46c5a2ea72435bdf60b88a68c73fa992718",
+  "byte_basis": "git blobs; checkout line endings can differ",
+  "sources": [
+    {
+      "path": "src/etalon/HOST.md",
+      "sha256": "c947930b42d78bd2eceada89a3c17eb15a46670068b4e80066f98f95b2a6bae2",
+      "bytes": 1621
+    },
+    {
+      "path": "src/etalon/host-guides/project-entry.md",
+      "sha256": "76db808f298c3251d6ca4aab522524b7d3cc668d04089e9ef1cec9b25a5b7439",
+      "bytes": 2240
+    },
+    {
+      "path": "src/etalon/host-guides/method-improvement.md",
+      "sha256": "9d0456cc55b67bd0c2e5892839d0d0bbbd6c3220abb6dabf189eb44c22116d67",
+      "bytes": 2501
+    },
+    {
+      "path": "src/etalon/research/journal.py",
+      "sha256": "e9c40695299062f3bfcf8bb97293907ca0904e286ee721c7b586ac9cb0344fef",
+      "bytes": 23957
+    },
+    {
+      "path": "src/etalon/research/schema.py",
+      "sha256": "adc154c38d2651de04e6230b7bcf7eab8aaece75501d10cf5c4027c0c374ab12",
+      "bytes": 12461
+    },
+    {
+      "path": "src/etalon/research/evidence_refs.py",
+      "sha256": "fc69c27da06b8214931324953214bf81597409042895ce60d650fce3e4b9d703",
+      "bytes": 11094
+    },
+    {
+      "path": "src/etalon/research/evidence.py",
+      "sha256": "6cc4b7111a3ddc5128473cb2dde157dc4ff1d864cb0494ef752162109ecf59a1",
+      "bytes": 27307
+    },
+    {
+      "path": "src/etalon/research/method_revision.py",
+      "sha256": "700a159103b8189b9f7fcc3f5d7e27d4054744da148aec6c79a63fe8246b5d85",
+      "bytes": 7991
+    },
+    {
+      "path": "src/etalon/host.py",
+      "sha256": "195ec5606e5680b066acb77e5fa78f00e8a141b8ac705c9b540a622c3c96b077",
+      "bytes": 15083
+    },
+    {
+      "path": "src/etalon/runtime/api.py",
+      "sha256": "8c15c65c71e2529484ebcea34dd7ede1e5d530c86bbb3f1de84294c3714f03d6",
+      "bytes": 17583
+    },
+    {
+      "path": "src/etalon/active/runner.py",
+      "sha256": "ca6e8496ba847a286ad50e28bb56fc60c44451e7189b9b75f5d71b7ef86b4fdf",
+      "bytes": 15124
+    },
+    {
+      "path": "src/etalon/data/ingress.py",
+      "sha256": "8e3ad5892b03ad426992e7fcc231c571ee47f9a6c5de479661dc75930803c232",
+      "bytes": 10159
+    },
+    {
+      "path": "examples/evidence_reuse.py",
+      "sha256": "35256965fcbcaed4d551b2fb1febe80e93b0311215620848a90a76a17d6e8cbe",
+      "bytes": 8974
+    }
+  ]
+}
