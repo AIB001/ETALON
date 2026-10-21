@@ -47,6 +47,21 @@ def register(sub: Any) -> None:
             command.add_argument("--min-new-admitted", type=int, default=1)
             command.add_argument("--max-seconds", type=float, default=3600)
 
+    actions = sub.add_parser("action", help="prepare, submit and read one host-selected action")
+    commands = actions.add_subparsers(dest="action_command", required=True)
+    for name in ("prepare", "submit", "result", "events"):
+        command = commands.add_parser(name)
+        command.set_defaults(handler=handle, runtime_family="action")
+        command.add_argument("--config", type=Path, required=True, help="request, handle or log_ref JSON")
+        command.add_argument("--output", type=Path)
+        if name == "submit":
+            command.add_argument("--workspace", type=Path, required=True)
+            command.add_argument("--plan-id", required=True)
+        if name == "events":
+            command.add_argument("--after-sequence", type=int, default=0)
+            command.add_argument("--cursor", type=Path)
+            command.add_argument("--limit", type=int, default=100)
+
     executors = sub.add_parser("executor", help="prepare and register immutable scientific executors")
     commands = executors.add_subparsers(dest="executor_command", required=True)
     for name in ("prepare", "register", "list"):
@@ -60,6 +75,19 @@ def register(sub: Any) -> None:
             command.add_argument("--database", type=Path, required=True)
         if name == "register":
             command.add_argument("--rationale", required=True)
+
+    design = sub.add_parser("design", help="validate/import independent PRISM design bundles without labels or simulation")
+    commands = design.add_subparsers(dest="design_command", required=True)
+    for name in ("check", "import", "index"):
+        command = commands.add_parser(name)
+        command.set_defaults(handler=handle, runtime_family="design")
+        command.add_argument("--output", type=Path)
+        if name in {"check", "import"}:
+            command.add_argument("--bundle", type=Path, required=True)
+        if name in {"import", "index"}:
+            command.add_argument("--database", type=Path, required=True)
+        if name == "import":
+            command.add_argument("--mode", choices=("pool", "index_only"), default="pool")
 
 
 def _read(path: Path) -> dict:
@@ -89,6 +117,31 @@ def _execute(args: argparse.Namespace) -> dict:
         register_executor,
         registered_executors,
     )
+
+    if args.runtime_family == "action":
+        from etalon.runtime.api import prepare_action, submit_action, read_action_result, read_events
+        value = _read(args.config)
+        if args.action_command == "prepare":
+            return prepare_action(value)
+        if args.action_command == "submit":
+            return submit_action(value, workspace=args.workspace.absolute(), plan_id=args.plan_id)
+        if args.action_command == "result":
+            return read_action_result(value)
+        return read_events(value, after_sequence=_read(args.cursor) if args.cursor else args.after_sequence,
+                           limit=args.limit)
+
+    if args.runtime_family == "design":
+        from etalon.active.store import CampaignStore
+        from etalon.data.design import design_index, import_bundle, read_bundle
+        if args.design_command == "check":
+            result = read_bundle(args.bundle)
+            return {k: v for k, v in result.items() if k != "references"}
+        if not args.database.is_file():
+            raise FileNotFoundError("design import/index requires an existing campaign")
+        store = CampaignStore(args.database, read_only=args.design_command == "index")
+        if args.design_command == "index":
+            return design_index(store)
+        return import_bundle(store, args.bundle, mode=args.mode)
 
     if args.runtime_family == "executor":
         if args.executor_command == "list":

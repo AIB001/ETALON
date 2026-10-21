@@ -1,0 +1,152 @@
+{
+  "status": "passed",
+  "source_sha256": "cd99711db238f5c57c1927cc40ff520da7f8a25cd6f798c3002a7a2059c30d5c",
+  "source_files": 1183,
+  "native_exit": {
+    "returncode": 0,
+    "wall_seconds": 70.24085140228271,
+    "ended_unix": 1792545909.537771
+  },
+  "mcp": [
+    {
+      "line": 7,
+      "tool": "etalon_capabilities",
+      "arguments": {}
+    },
+    {
+      "line": 11,
+      "tool": "etalon_skill_read",
+      "arguments": {
+        "slug": "campaign",
+        "member": "SKILL.md"
+      }
+    },
+    {
+      "line": 13,
+      "tool": "etalon_skill_read",
+      "arguments": {
+        "slug": "campaign",
+        "member": "references/paired-models-and-segments.md"
+      }
+    }
+  ],
+  "sdk_command_line": 18,
+  "shell_commands": 4,
+  "actual_calls": [
+    "empirical_model default (refused)",
+    "empirical_model group_balanced=True (returned)"
+  ],
+  "default_refusal": "correlated slots/tasks cannot be counted as independent rows",
+  "returned_model": {
+    "assumptions": [
+      "equal group weights, equal task weights within group; no pose replication",
+      "empirical support is finite; unseen outcomes challenge the model",
+      "predictive calibration and held-out gain remain untested",
+      "split_sha256=aa74b6fbdc9364c04be1d8b121d9fb22a945c76bcf8f784060c1a336d82d59bf"
+    ],
+    "cost_unit": "credit",
+    "evidence": [
+      "artifact-d81fe93c421498e399037bfe48cba0d65c31fc11f6813cd493773e700804cc2b"
+    ],
+    "hypotheses": {
+      "empirical_task": "empirical task variability; no HD/HP/HE attribution"
+    },
+    "independent_loss_definition": "synthetic wrong-decision unit loss; not measured benefit",
+    "probability_basis": "estimated_from_evidence",
+    "probes": [
+      {
+        "bindings": {
+          "condition": "synthetic-fixed"
+        },
+        "depends_on": [],
+        "id": "q",
+        "outcomes": [
+          "low",
+          "high"
+        ],
+        "primitive": "measure",
+        "resources": [
+          "cpu"
+        ]
+      }
+    ],
+    "resources": [
+      {
+        "existing_artifact_id": null,
+        "id": "cpu",
+        "quoted_cost": 0.1,
+        "unit": "credit"
+      }
+    ],
+    "worlds": [
+      {
+        "hypothesis": "empirical_task",
+        "id": "d7a7714c58e1d887575cedd5f8a4dfa13efd22d0ed8822644ce18240b1187c05",
+        "losses": {
+          "change": 1,
+          "keep": 0
+        },
+        "outcomes": {
+          "q": "low"
+        },
+        "probability": 0.25
+      },
+      {
+        "hypothesis": "empirical_task",
+        "id": "a4032b878270a8fe6ce6d6156992377f8ffff95cd9c6fa032825a099735ba5c4",
+        "losses": {
+          "change": 1,
+          "keep": 0
+        },
+        "outcomes": {
+          "q": "low"
+        },
+        "probability": 0.25
+      },
+      {
+        "hypothesis": "empirical_task",
+        "id": "3cbb40594f550a89301745432a5b6f19e2721886984933481a00d0b01f08c639",
+        "losses": {
+          "change": 0,
+          "keep": 1
+        },
+        "outcomes": {
+          "q": "high"
+        },
+        "probability": 0.5
+      }
+    ]
+  },
+  "source_data_inputs_prompt_unchanged": true,
+  "all_records_events_science_budget_unchanged": true,
+  "derived_records_added": 0,
+  "budget": {
+    "budget": 10,
+    "spent": 0.25,
+    "reserved": 2.0,
+    "remaining": 7.75
+  },
+  "exported_bundles_unchanged": true,
+  "usage": {
+    "input_tokens": 143835,
+    "cached_input_tokens": 113152,
+    "cache_write_input_tokens": 0,
+    "output_tokens": 1173,
+    "reasoning_output_tokens": 12
+  },
+  "model": null,
+  "monetary_cost": null,
+  "native_limit": "Both constructor attempts occur in one host-written shell script; group_balanced call is unconditional after try/except. This is actual alternative construction and subsequent explanation/stop, not a second tool decision made only after seeing default refusal.",
+  "not_run": [
+    "native record_program/compile_first_segment/observed_branch",
+    "real worker/scoring",
+    "independent scientific benefit"
+  ],
+  "raw_sha256": {
+    "stdout.jsonl": "80a14c186047807f6788bffcb0f5367f0316dd1bbded5ff150635f6d9ea8604a",
+    "prompt.txt": "2c5fa15a852acf822df0200bc42ac1bd99ccd4f9ae8af62c3c1b89aba202ff99",
+    "binding.json": "60f391c822fc21774eb22538807da681331713f6c1a91ed6cbc03e9f88df7bfc",
+    "task-inputs.json": "eb45f020a41af611834700bd1a8a60bc4dff409ab01f6d1668ead49d75e574ea",
+    "launch.json": "52b058ac852596983aa071aa7a1b2ac7207ee7bc10b6f0bdf9660aef2b0aec1c"
+  }
+}

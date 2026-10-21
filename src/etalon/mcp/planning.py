@@ -1,12 +1,8 @@
-"""The tools a model should call before it spends anything, and they are all free.
+"""Optional, free numerical planning and infrastructure inspection.
 
-A campaign is a budget decision, and the characteristic failure of an autonomous agent running one is
-not a wrong calculation -- it is a funnel whose shape nobody examined until the GPU-months were gone.
-So the planning tools cost nothing, return their reasoning, and name what they refuse.
-
-Every one of them is designed to be called repeatedly with different numbers. That is how a model
-should use them: plan, read the refusals, change an input, plan again. A campaign that was planned
-once has not been planned.
+The host may compare a proposal, revise its inputs, choose another method, or stop.
+These tools are not prerequisites for unrelated queries or supported atomic actions.
+Execution still enforces its own identity, budget, and admission constraints.
 """
 
 from __future__ import annotations
@@ -34,7 +30,8 @@ def register(mcp: Any) -> None:
         many of the pool's true actives are expected to reach the end, and -- the part to read first
         -- which tiers rest on numbers nobody measured.
 
-        Call this before any other tool. It refuses three kinds of tier: one answering a different
+        Use this when a funnel estimate helps the current decision; other tools and supported
+        atomic actions do not require this plan. It refuses three kinds of tier: one answering a different
         question from ranking (PMF answers mechanism), one whose accuracy the panel cannot distinguish
         from the tier above it, and one that ranks with no measured correlation. Each refusal names
         the remedy.
@@ -84,12 +81,14 @@ def register(mcp: Any) -> None:
             plan=plan.as_dict(),
             rendered=plan.render(),
             next_step=(
-                "Read unmeasured_inputs first. If docking's correlation is still the catalogue "
-                "placeholder, measuring it on your own panel is worth more than any other single "
-                "action: call etalon_tune_screen to see what it is worth."
+                "The docking correlation is a catalogue placeholder. If that uncertainty matters "
+                "to this decision, etalon_tune_screen can compare its sensitivity. This is an "
+                "optional estimate; the host may use the current answer, choose another method, "
+                "or stop without tuning or executing a campaign."
                 if any(stage == "docking" for stage, _ in plan.conventions)
-                else "Call etalon_tune_screen to see what changing the screen would be worth "
-                "against this plan."
+                else "If a sensitivity comparison would help, optionally use etalon_tune_screen. "
+                "Otherwise use this estimate or stop; tuning and campaign execution are not "
+                "required follow-up steps."
             ),
         )
 

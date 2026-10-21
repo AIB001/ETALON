@@ -1,0 +1,88 @@
+{
+  "request_template": {
+    "request_id": "request_id-example",
+    "campaign_id": "campaign_id-example",
+    "action_id": "action_id-example",
+    "candidate_id": "candidate_id-example",
+    "chemical_state_id": "chemical_state_id-example",
+    "pose_id": "pose_id-example",
+    "endpoint_id": "endpoint_id-example",
+    "protocol_id": "protocol_id-example",
+    "replicate": 0,
+    "seed": 20261018,
+    "schema_version": "etalon-prism-task/1",
+    "operation": "new_run",
+    "inputs": {
+      "protein": {
+        "path": "/absolute/host/path/protein",
+        "sha256": "0000000000000000000000000000000000000000000000000000000000000000"
+      },
+      "ligand": {
+        "path": "/absolute/host/path/ligand",
+        "sha256": "0000000000000000000000000000000000000000000000000000000000000000"
+      }
+    },
+    "workflow_spec": {
+      "md_steps": 1000,
+      "build": {
+        "forcefield": "amber14sb",
+        "ligand_forcefield": "gaff2",
+        "water_model": "tip3p",
+        "protonation": "propka",
+        "ligand_charge": 0,
+        "production_ns": 0.001,
+        "nvt_ps": 1,
+        "npt_ps": 1,
+        "dt": 0.001,
+        "em_steps": 20000,
+        "em_tolerance": 200,
+        "temperature": 310,
+        "ph": 7,
+        "salt_concentration": 0.15,
+        "box_distance": 1,
+        "box_shape": "dodecahedron",
+        "pressure": 1,
+        "nterm_met": "keep"
+      }
+    },
+    "resources": {
+      "threads": 2,
+      "wall_time_limit_seconds": 1800
+    },
+    "endpoint": {
+      "name": "mean_residue_contacts",
+      "units": "count",
+      "contact_cutoff_nm": 0.4,
+      "scope": "engineering_only"
+    }
+  },
+  "transport": {
+    "python": "/absolute/prism-env/bin/python",
+    "cwd": "/absolute/frozen-prism-snapshot",
+    "request_root": "/absolute/new/client-requests"
+  },
+  "job_root": "/absolute/new/prism-jobs",
+  "receptor_path": "/absolute/host/path/protein",
+  "handoff": {
+    "parent_id": "candidate_id-example",
+    "parent_smiles": "c1ccccc1",
+    "stereo_smiles": "c1ccccc1",
+    "status": "OK",
+    "coordinate_source": "SUPPLIED_POSE",
+    "receptor_id": "0000000000000000000000000000000000000000000000000000000000000000",
+    "hydrogens": "EXPLICIT_ALL",
+    "hydrogen_count": 6,
+    "formal_charge": 0,
+    "protonation_state_id": "neutral-benzene-example",
+    "chemical_state_id": "chemical_state_id-example",
+    "pose_id": "pose_id-example",
+    "ligand_sha256": "0000000000000000000000000000000000000000000000000000000000000000",
+    "provenance": "EXAMPLE ONLY: replace with independently inspected actual molecule/coordinate evidence"
+  },
+  "seeds": [
+    20261018,
+    20261019
+  ],
+  "budget": 5400,
+  "quote_wall_seconds": 1800
+}

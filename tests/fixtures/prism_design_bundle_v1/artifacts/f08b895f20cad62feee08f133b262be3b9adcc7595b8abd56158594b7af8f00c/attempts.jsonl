@@ -1,0 +1,3 @@
+{"slot": 1, "status": "DECODED", "sdf": "F:\\life_healthy\\PRISM\\.agent-local\\round2\\shared-fixture\\source\\run\\backend\\raw1.sdf"}
+{"slot": 2, "status": "DECODED", "sdf": "F:\\life_healthy\\PRISM\\.agent-local\\round2\\shared-fixture\\source\\run\\backend\\raw2.sdf"}
+{"slot": 3, "status": "DECODE_FAILED", "sdf": null, "error": "synthetic decode failure"}

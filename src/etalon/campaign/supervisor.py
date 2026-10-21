@@ -39,7 +39,7 @@ from __future__ import annotations
 import subprocess
 import time
 from collections.abc import Callable, Sequence
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import Any
 
@@ -251,31 +251,27 @@ class Supervisor:
         """
 
         notes: list[str] = []
-        finished, failures = self._reap()
+        finished, failures = self._step("reaping", self._reap, ((), ()), notes)
         # Straight into notes: a failure that only a counter records reads as nothing happening.
         notes.extend(failures)
-        ingested, admitted, duplicates = self._ingest_chunks()
+        ingested, admitted, duplicates = self._step(
+            "chunk ingest", self._ingest_chunks, (0, 0, 0), notes
+        )
         # Recovery is also how a finished batch gets recorded, and there is deliberately no second
         # path for the ordinary case. Sweep.recover already asks the run record of every claimed
         # batch and records the terminal ones; a supervisor with its own "record what my screen
         # finished" branch would be the same query answered twice, and the two would eventually
         # disagree about a batch whose screen outlived the process that launched it -- which is the
         # exact case recovery exists for.
-        try:
-            recovered = self.sweep.recover()
-        except Exception as error:  # noqa: BLE001 -- one batch must not end the campaign
-            # A supervisor exists so that a 44-hour campaign survives things going wrong in it. One
-            # batch that cannot be recorded is a thing going wrong in it. Measured on ALK2: a
-            # revision check inside ``recover`` raised on a single batch, the exception left
-            # ``tick``, and the process driving 470,651 molecules through 23 batches exited --
-            # leaving every GPU idle until somebody looked. Loud and fatal is not better than
-            # silent; the note is the loud part, and continuing is the supervisor's whole job.
-            recovered = ()
-            notes.append(f"recovery raised and was contained: {error!r}")
-        emitted = self._emit()
-        migrated = self._migrate(notes)
-        started_screens = self._start_screens(notes)
-        started_generation, retired = self._start_generation(notes)
+        recovered = self._step("recovery", self.sweep.recover, (), notes)
+        emitted = self._step("batch emission", self._emit, (), notes)
+        migrated = self._step("device migration", lambda: self._migrate(notes), (), notes)
+        started_screens = self._step(
+            "screen dispatch", lambda: self._start_screens(notes), (), notes
+        )
+        started_generation, retired = self._step(
+            "generation dispatch", lambda: self._start_generation(notes), ((), ()), notes
+        )
 
         return TickReport(
             ingested_chunks=ingested,
@@ -295,6 +291,46 @@ class Supervisor:
             migrated=migrated,
             notes=tuple(notes),
         )
+
+    def _step(
+        self,
+        label: str,
+        work: Callable[[], Any],
+        fallback: Any,
+        notes: list[str],
+    ) -> Any:
+        """Run one piece of a pass, and turn an exception from it into a note.
+
+        A supervisor exists so that a 44-hour campaign survives things going wrong in it, and one
+        piece of one pass going wrong is a thing going wrong in it. Measured on ALK2: a revision
+        check inside ``Sweep.recover`` raised on a single batch, the exception left ``tick``, and
+        the process driving 470,651 molecules through 23 batches exited -- leaving every GPU idle
+        until somebody looked.
+
+        The containment that incident bought was wrapped around ``recover`` alone, which fixed the
+        instance and not the class. Every other piece of a pass reaches the same ledger, the same
+        pool and the same filesystem, and three of ``_emit``'s raises are certainties rather than
+        hypotheses: ``require_gate`` raises ``NotAuthorized`` on every tick after the
+        authorization's lifetime passes -- 168 hours by default, so any campaign outliving its gate
+        meets this -- and again if the compiled funnel stops matching the one the gate was minted
+        for; ``Sweep.emit`` raises ``SweepError`` for a batch id that already names a run in the
+        workspace, which was measured when a second sweep over the same pool carved
+        ``batch_0001..0027`` into a fresh ledger. ``_ingest_chunks`` reaches the ledger's
+        nonblocking lock and SQLite's, either of which can refuse under contention.
+
+        Loud and fatal is not better than silent. The note is the loud part -- ``TickReport.quiet``
+        is false whenever ``notes`` is non-empty, so a pass whose only product was a contained
+        failure still prints -- and continuing is the supervisor's whole job.
+
+        The fallback is the neutral value for that piece, never a fabricated success: a contained
+        ingest reports zero molecules admitted rather than the number it was about to admit.
+        """
+
+        try:
+            return work()
+        except Exception as error:  # noqa: BLE001 -- one piece of a pass must not end the campaign
+            notes.append(f"{label} raised and was contained: {error!r}")
+            return fallback
 
     def run(
         self,
@@ -319,10 +355,51 @@ class Supervisor:
             if done():
                 break
             time.sleep(interval)
+        # Stopping is not the same as having screened everything, and the difference was silent.
+        remainder = self.unscreened_remainder()
+        if remainder:
+            last = replace(
+                last,
+                notes=(
+                    *last.notes,
+                    f"the campaign stopped with {remainder} molecules in the pool that no batch "
+                    f"was carved from: fewer than one batch of {self.sweep.batch_size}. They were "
+                    "generated, deduplicated and admitted, and nothing screened them. Carve them "
+                    "with Sweep.emit(flush=True) if a short batch is wanted, or record that they "
+                    "were not screened.",
+                ),
+            )
         return last
 
+    def unscreened_remainder(self) -> int:
+        """Molecules in the pool that no batch will ever be carved from.
+
+        :meth:`.Sweep.emit` carves full batches only, so a pool holding fewer than ``batch_size``
+        unbatched molecules yields nothing and :meth:`complete` is satisfied by it. Measured on the
+        finished ALK2 v7 campaign: 27 batches of 20,000 all recorded ``committed``, nothing pending
+        and nothing outstanding, and **883 molecules sitting unbatched in the pool** with
+        ``complete`` true. They were generated, deduplicated, admitted, and never screened, and no
+        line of the ledger says so -- the ledger has 27 batch rows and no row for them.
+
+        Reported rather than carved, because a short batch is not a smaller sample of the same
+        thing and ``emit(flush=True)`` exists for exactly this decision: end-to-end survival is a
+        fraction of a percent, and three short batches measured at the tail of one campaign yielded
+        6, 2 and 0 hits. Whether to spend a funnel pass on 883 molecules is the operator's call.
+        What is not theirs to make by default is the silence.
+        """
+
+        ready = self.sweep.ready()
+        return ready if ready < self.sweep.batch_size else 0
+
     def complete(self) -> bool:
-        """Nothing running, nothing pending, nothing left to generate."""
+        """Nothing running, nothing pending, nothing left to generate.
+
+        Deliberately still true with an :meth:`unscreened_remainder`, because a campaign whose pool
+        holds 883 molecules and whose generators have stopped genuinely cannot do anything more on
+        its own -- and a predicate that answered false here would make :meth:`run` loop until its
+        deadline over molecules it is not allowed to carve. The remainder is surfaced by
+        :meth:`run`, as a note on the report it returns, and by :meth:`state`.
+        """
 
         if self.jobs:
             return False
@@ -366,14 +443,31 @@ class Supervisor:
             return 0, 0, 0
         count = admitted = duplicates = 0
         for chunk in list(self._ingest.pending()):
-            rows = self._ingest.consume(chunk)
+            rows = self._ingest.read(chunk)
             count += 1
             tag = chunk.parent.name
             if not rows:
+                # Nothing to admit, so nothing to wait for: a barren chunk is dealt with by being
+                # counted, and re-reading it on every tick for the rest of the campaign is not an
+                # improvement on recording that it was empty.
+                self._ingest.retire(chunk)
                 self.barren[tag] = self.barren.get(tag, 0) + 1
+                # A barren chunk still gets a uniqueness count, and leaving it out is what broke
+                # ``productivity``. ``self.chunks`` grows for every chunk the generator produced and
+                # ``self.unique`` only grew for chunks that produced rows, so one barren chunk made
+                # the two lists permanently unequal in length and ``productivity`` skipped that
+                # generator for the rest of the campaign. Zero is also the honest count: nothing
+                # new reached the library.
+                self.unique.setdefault(tag, []).append(0)
                 continue
             self.barren[tag] = 0
+            # Admit first, retire second, and the order is the whole point. `Ingest.retire` writes
+            # a file that stops `pending()` ever offering this chunk again, and an `admit` that
+            # raises after that write has thrown the chunk's molecules away: PRISM is not
+            # re-invoked for a chunk whose directory exists, so the SDF on disk is the only copy
+            # the campaign has and nothing re-reads it.
             report = self.sweep.admit(rows)
+            self._ingest.retire(chunk)
             admitted += report.accepted
             duplicates += report.duplicates
             self.unique.setdefault(tag, []).append(report.accepted)
@@ -613,6 +707,9 @@ class Supervisor:
                 for tag, generator in self.generators.items()
             },
             "complete": self.complete(),
+            # Beside ``complete`` on purpose: the pair is the whole finding. ``complete`` true with
+            # a non-zero remainder is a campaign that stopped with molecules it never screened.
+            "unscreened_remainder": self.unscreened_remainder(),
         }
 
     def productivity(self) -> dict[str, Any]:
@@ -626,13 +723,42 @@ class Supervisor:
         from etalon.generate.productivity import allocate
 
         profiles = []
+        skipped: dict[str, str] = {}
         for tag, generator in self.generators.items():
             results = self.chunks.get(tag, [])
             counts = self.unique.get(tag, [])
-            if not results or len(results) != len(counts):
+            if not results:
+                skipped[tag] = "no chunk of this generator has finished in this process yet"
+                continue
+            if len(results) != len(counts):
+                # Said rather than skipped in silence. A generator dropped here used to vanish from
+                # the reading with no trace, and when every generator was dropped the reading came
+                # back as "no finished chunks yet" -- which on the campaign that exposed this would
+                # have been printed over 239 finished chunks.
+                skipped[tag] = (
+                    f"{len(results)} chunk results against {len(counts)} uniqueness counts, so "
+                    "they cannot be paired: either a chunk this process generated has not been "
+                    "ingested yet, which resolves on a later pass, or this process was restarted "
+                    "and the ingest state outlived the chunk results, which does not"
+                )
                 continue
             profiles.append(chunk_measurements(generator, results, counts))
-        return allocate(profiles) if profiles else {"loops": [], "retire": {}, "note": "no finished chunks yet"}
+        reading = (
+            allocate(profiles)
+            if profiles
+            else {
+                "loops": [],
+                "retire": {},
+                "note": (
+                    "no generator has a pairable chunk record; see skipped"
+                    if skipped
+                    else "no finished chunks yet"
+                ),
+            }
+        )
+        if skipped:
+            reading["skipped"] = skipped
+        return reading
 
 
 class _Call:

@@ -125,11 +125,12 @@ class LocalArtifactStore:
     a process crash without becoming partially visible artifacts.
     """
 
-    def __init__(self, root: str | Path) -> None:
+    def __init__(self, root: str | Path, *, create: bool = True) -> None:
         requested_root = Path(root).expanduser()
         if requested_root.is_symlink():
             raise ValueError("artifact-store root may not be a symlink")
-        requested_root.mkdir(parents=True, exist_ok=True)
+        if create:
+            requested_root.mkdir(parents=True, exist_ok=True)
         self.root = requested_root.resolve(strict=True)
         if not self.root.is_dir():
             raise ValueError(f"artifact-store root is not a directory: {self.root}")
@@ -140,7 +141,7 @@ class LocalArtifactStore:
             _ensure_real_directory(
                 directory,
                 owner_root=self.root,
-                create=True,
+                create=create,
             )
 
     def _owned_directory(

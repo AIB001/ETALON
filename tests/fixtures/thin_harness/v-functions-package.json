@@ -1,0 +1,55 @@
+{
+  "status": "passed",
+  "wheel_sha256": "4b366ce39bb27fa8d4120bc6f78b7a3b99a5b19a63f8955e8aff6249b8f5eae0",
+  "source_wheel_installed_files": 326,
+  "modules": {
+    "etalon.boundary.screen": "F:\\life_healthy\\integration\\thin-harness-functions-20261021\\install\\etalon\\boundary\\screen.py",
+    "etalon.campaign.sweep": "F:\\life_healthy\\integration\\thin-harness-functions-20261021\\install\\etalon\\campaign\\sweep.py",
+    "etalon.research.journal": "F:\\life_healthy\\integration\\thin-harness-functions-20261021\\install\\etalon\\research\\journal.py",
+    "etalon.mcp.sweep": "F:\\life_healthy\\integration\\thin-harness-functions-20261021\\install\\etalon\\mcp\\sweep.py",
+    "etalon.skills": "F:\\life_healthy\\integration\\thin-harness-functions-20261021\\install\\etalon\\skills.py"
+  },
+  "bundle_count": 6,
+  "exports": {
+    "codex": {
+      "target": "F:\\life_healthy\\integration\\thin-harness-functions-20261021\\installed-codex",
+      "export_matches_manifest": true,
+      "matches_current_source": true,
+      "runtime_matches": true,
+      "changed": [],
+      "missing": [],
+      "unexpected": [],
+      "catalog_sha256": "d2198731f4da1c5a85608e1b979a5e6627099ac61c243e149ce81ac549d0a258",
+      "current_catalog_sha256": "d2198731f4da1c5a85608e1b979a5e6627099ac61c243e149ce81ac549d0a258",
+      "host_validation": "not performed; export is not evidence of native host discovery",
+      "current_file_count": 15
+    },
+    "claude": {
+      "target": "F:\\life_healthy\\integration\\thin-harness-functions-20261021\\installed-claude",
+      "export_matches_manifest": true,
+      "matches_current_source": true,
+      "runtime_matches": true,
+      "changed": [],
+      "missing": [],
+      "unexpected": [],
+      "catalog_sha256": "d2198731f4da1c5a85608e1b979a5e6627099ac61c243e149ce81ac549d0a258",
+      "current_catalog_sha256": "d2198731f4da1c5a85608e1b979a5e6627099ac61c243e149ce81ac549d0a258",
+      "host_validation": "not performed; export is not evidence of native host discovery",
+      "current_file_count": 15
+    }
+  },
+  "actual_stdio": {
+    "tools": 65,
+    "factorial_reference": {
+      "content": "# Local two-factor diagnostic\n\nUse when four conditions share a defined readout and a descriptive interaction\nwould answer a local question. This is a numerical function over existing\nevidence, not a pipeline or evidence of independent improvement. You can use\nthis method without any other section of the campaign skill.\n\n## Inputs and call\n\nUse an existing campaign database and a recorded `Contrast` ID. Its `cells`\nmap `00`, `01`, `10`, `11` to distinct `Observation` IDs or `None`; `readout`\nnames the numeric measurement. Recorded experiments must belong to the same\ntask and compatible measurement method. Record shared inputs, paired\nconditions, and assumptions in `Coupling` rather than claiming independence.\nDiagnostic inputs must have diagnostic roles; held-out evidence is not a\nsource of design feedback.\n\n```python\nfrom etalon.active import CampaignStore\nfrom etalon.research import ResearchJournal\n\njournal = ResearchJournal(CampaignStore(database, read_only=True))\nresult = journal.factorial(contrast_id)\n```\n\nThis is the actual existing SDK call, not an MCP tool name. The caller chooses\nhow to inspect or report its result. It does not create a MethodUse or\nMethodEvaluation, schedule actions, authorize spending, or change records.\nIf reporting adoption separately, attribute a host declaration as\n`host_reported`; an SDK call does not prove use of the whole skill.\n\n## Outputs and decisions\n\n- `computed`: `interaction = y11 - y10 - y01 + y00`, with the observed `cells`\n  and `unit`. For synthetic values `1, 2, 3, 7`, the interaction is `3`.\n- `unresolved`: `interaction=None`; `missing_or_failed` identifies absent,\n  failed or otherwise unusable cells. Missing cells stay absent from `cells`.\n  Preserve the original status; never complete the arithmetic with zero.\n- Mixed units raise `ValueError('contrast units differ')`; nonnumeric measured\n  values also raise `ValueError`. Stop the combination and inspect the\n  readout definition or choose a different already-supported question.\n- `uncertainty=None` means not estimated. The returned scope is descriptive;\n  even a nonzero interaction does not establish causal identification,\n  independent replication, transfer gain, or a scientific effect.\n\nIf an unresolved cell is essential, state the missing evidence and stop unless\nthe user separately authorized a suitable measurement. Do not dispatch work\njust to complete a table. Recording and reading these records does not incur\na second execution charge; local audit CPU cost is unmetered, not certified\nzero. Actual action costs and reservations remain in the existing ledger.\n",
+      "manifest_sha256": "f2f28041e42e16ad8cf3401352022582d2cef9ea0983e02659babe2f41e6f8fd",
+      "member": "references/factorial-diagnostic.md",
+      "ok": true,
+      "sha256": "28ac72a4c2c15b80adc5cbab100af7884110b8541cb320b3c49c627835dea36b",
+      "slug": "campaign"
+    }
+  },
+  "native_host_decision": "not_run by this package check",
+  "python": "F:\\life_healthy\\ETALON\\.venv\\Scripts\\python.exe",
+  "cwd": "F:\\life_healthy\\integration\\thin-harness-functions-20261021"
+}

@@ -1,6 +1,8 @@
 """One round of a self-tuning campaign, with the expensive stage kept at arm's length.
 
-The loop is six steps and the order is the argument.
+This is an optional compatibility loop with six ordered steps. Choosing this loop
+chooses that order; independent screening, proposal, authorization and admission
+functions do not require it. Hosts may call those functions directly and stop.
 
 **Screen.** MolCascade compiles to a revision id before anything runs, and the round
 records it. Two rounds with different revisions screened different funnels, and a change
@@ -24,7 +26,8 @@ same seam without the loop learning anything about which.
 under may update the screen. This is the step the literature's loops do not have.
 
 **Decide.** A proposed parameter change is accepted only if it beats the panel's own
-resolution on a scaffold-grouped holdout. Refusals are recorded, because a loop that
+resolution under the comparison's declared split. The optional ParameterChange adapter
+uses a whole-panel comparison, not a scaffold-grouped holdout. Refusals are recorded, because a loop that
 silently declines to learn is indistinguishable from one with nothing to learn.
 
 Everything lands in the ledger as one append-only line. The loop holds no state of its

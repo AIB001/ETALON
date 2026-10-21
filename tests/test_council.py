@@ -15,6 +15,7 @@ import pytest
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
 from etalon.council import (  # noqa: E402
+    Ballot,
     Evidence,
     Outcome,
     Seat,
@@ -28,6 +29,7 @@ from etalon.council import (  # noqa: E402
     effective_votes,
     fleiss_kappa,
     for_a_person,
+    outcome_for,
     report,
     rule,
 )
@@ -426,3 +428,69 @@ def test_a_seat_that_declines_the_class_that_matters_is_reported_as_such() -> No
     assert any(
         "10 of 12 records where the fault was present" in note for note in ruling.notes
     )
+
+
+# -- the bound, in one function ----------------------------------------------
+
+
+def test_the_vote_to_outcome_mapping_is_one_function() -> None:
+    """The bound was written twice: in `adjudicate` and inline in the MCP tool.
+
+    The MCP tool's own docstring explains the factoring it chose -- "the transport is your
+    business, and the bound on what agreement is allowed to do is the part that has to be identical
+    everywhere, so it lives in one function with one test suite" -- and the bound was living in two
+    functions with two test suites. Both were correct, which is why nothing caught it. Having two
+    was the defect.
+    """
+
+    import inspect
+
+    import etalon.council.convene as convene
+    import etalon.mcp.governance as governance
+
+    for module in (convene, governance):
+        source = inspect.getsource(module)
+        assert "outcome_for(" in source, module.__name__
+        # Neither may re-derive the member from the votes.
+        assert "Outcome.SPLIT, (" not in source, module.__name__
+        assert "outcome = Outcome.REFUSED" not in source, module.__name__
+
+
+@pytest.mark.parametrize(
+    ("votes", "expected"),
+    [
+        ((Vote.REFUSE, Vote.REFUSE), Outcome.REFUSED),
+        ((Vote.REFUSE, Vote.ABSTAIN), Outcome.REFUSED),
+        ((Vote.REFUSE, Vote.CLEAR), Outcome.SPLIT),
+        ((Vote.CLEAR, Vote.CLEAR), Outcome.CLEARED_BUT_STILL_UNCHECKED),
+        ((Vote.CLEAR, Vote.ABSTAIN), Outcome.CLEARED_BUT_STILL_UNCHECKED),
+        ((Vote.ABSTAIN, Vote.ABSTAIN), Outcome.UNDECIDED),
+    ],
+)
+def test_the_mapping_never_produces_a_cleared_outcome(votes, expected) -> None:
+    """Unanimous clearing is `CLEARED_BUT_STILL_UNCHECKED`, and there is no other member to reach.
+
+    A council may move a check from unevaluable to fired and never to cleared. `Outcome` has no
+    `CLEARED` member, so the strongest thing agreement can buy is a record that nobody saw a
+    problem -- and `as_observations` still emits `fired=False, evaluable=False` for it, so
+    `unchecked()` goes on reporting the cause.
+    """
+
+    ballots = tuple(
+        Ballot(seat=f"s{i}", code="F_RUN_NOT_REPRODUCIBLE", vote=vote, reason="r")
+        for i, vote in enumerate(votes)
+    )
+    assert outcome_for(ballots) is expected
+    assert not any(member.value == "cleared" for member in Outcome)
+
+
+def test_an_unqualified_council_is_not_aggregated_at_all() -> None:
+    """Short-circuits before a vote is read: an unmeasured council's agreement is not evidence."""
+
+    unanimous = tuple(
+        Ballot(seat=f"s{i}", code="F_RUN_NOT_REPRODUCIBLE", vote=Vote.REFUSE, reason="r")
+        for i in range(3)
+    )
+    assert outcome_for(unanimous) is Outcome.REFUSED
+    assert outcome_for(unanimous, qualified=False) is Outcome.COUNCIL_NOT_QUALIFIED
+    assert outcome_for((), qualified=False) is Outcome.COUNCIL_NOT_QUALIFIED

@@ -3,10 +3,13 @@
 Two proposers, matching the two acts an advisor may put forward that the harness can act on
 without a person (ADR 0003).
 
-:class:`Acquisition` chooses which molecules the next batch of compute goes to. Applied
-directly, because being wrong costs a week and nothing recorded becomes untrue.
+:class:`Acquisition` proposes which molecules a next batch could measure. Calling
+``propose`` returns a proposal and does not dispatch or reserve compute. The optional
+Campaign adapter records that choice for a later round.
 
-:class:`ParameterChange` proposes an edit to the screen and scores it. Applied only if
+:class:`ParameterChange` scores a caller-supplied edit to the screen. Its standalone
+``judge`` returns a proposal and verdict without changing configuration. The optional
+Campaign adapter applies it only if
 :func:`etalon.learn.calibrate.decide` admits it, which on this panel means an AUC gain larger
 than about 0.10 -- so most proposals are refused, and the refusal is the point rather than a
 disappointment.
@@ -41,10 +44,10 @@ from etalon.learn.surrogate import Features, Surrogate, featurize, pic50
 class Panel:
     """Known molecules with measured affinities: what a proposal is judged against.
 
-    Held separately from the campaign's own measurements on purpose. A change fitted on the
-    molecules the campaign just simulated and scored on the same molecules will always look like
-    an improvement; the panel is the held-out answer key, and its size is what sets the noise
-    floor every proposal has to clear.
+    Held separately from the campaign's own measurements on purpose. Its size sets the
+    noise floor, but the object alone does not establish an independent holdout. Acquisition
+    fits on this panel; ParameterChange evaluates the whole panel. Repeated adaptive use
+    makes it development evidence, even when no parameters are fitted inside ``judge``.
     """
 
     smiles: tuple[str, ...]
@@ -148,8 +151,9 @@ class Panel:
 class Acquisition:
     """Fit a surrogate, calibrate it, and say which molecules to spend on next.
 
-    The campaign applies this without asking anybody, so everything that could make it quietly
-    bad is reported rather than absorbed: how much of the batch went on chemotypes the model has
+    The standalone method returns advice without executing it. The optional campaign adapter
+    can apply the choice, so everything that could make it quietly bad is reported rather
+    than absorbed: how much of the batch went on chemotypes the model has
     never seen, how many candidates were tied with the best, and the coverage the calibration
     actually achieved on its worst series.
     """
@@ -310,8 +314,8 @@ def as_loop_proposer(
 
     The loop's ``propose`` hook receives the admitted measurements and returns a change with a
     decision, or ``None``. The measurements are deliberately unused here: a change is judged
-    against the panel, which is the held-out answer key, and judging it against the molecules
-    the campaign just measured is how a round congratulates itself.
+    against the supplied panel with its actual whole-panel split. This does not establish
+    independence from earlier tuning or adaptive use of that panel.
     """
 
     def proposer(_: Sequence[Measurement]) -> tuple[dict[str, Any], Decision]:

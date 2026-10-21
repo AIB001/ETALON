@@ -42,6 +42,7 @@ from __future__ import annotations
 import math
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
+from statistics import NormalDist
 
 
 def wilson(successes: int, trials: int, *, confidence: float = 0.95) -> tuple[float, float]:
@@ -53,13 +54,15 @@ def wilson(successes: int, trials: int, *, confidence: float = 0.95) -> tuple[fl
     decides whether a campaign may act on a generator's share of its final survivors.
     """
 
-    from scipy import stats
-
     if trials < 1:
         raise ValueError("a rate needs at least one trial")
     if not 0 <= successes <= trials:
         raise ValueError(f"{successes} successes in {trials} trials is not a rate")
-    z = float(stats.norm.isf((1.0 - confidence) / 2.0))
+    if not math.isfinite(confidence) or not 0.0 < confidence < 1.0:
+        raise ValueError("confidence must be finite and strictly between zero and one")
+    # Use the lower tail: (1 + confidence) / 2 can round to 1 near full confidence.
+    # This scalar quantile needs no NumPy/SciPy initialization in a cold tool process.
+    z = -NormalDist().inv_cdf((1.0 - confidence) / 2.0)
     rate = successes / trials
     denominator = 1.0 + z * z / trials
     centre = (rate + z * z / (2 * trials)) / denominator

@@ -1,0 +1,508 @@
+{
+  "schema_version": "prism-design-candidate-bundle/1",
+  "generation_action_id": "generation-ce8454e7ed7e3a5393de905b35ef9e4d900f2643ecfb682d20ff4067883f683a",
+  "design_id": "design-b44d7f7b2da89646812238f256905f5c5daff5209b5d96d93444a32e194f9e42",
+  "source": {
+    "kind": "fixture",
+    "run_status": "FAILED",
+    "label_kind": "unverified_design_requirement",
+    "task": "fragment_replacement",
+    "seed": 101,
+    "legacy_design_id": "synthetic-test-only",
+    "annotation": {
+      "path": "artifacts/e72f3a3560e749f2cbaa3920c3503e65690838bc3d6e931693365a35a6efd31e/designspec.json",
+      "sha256": "e72f3a3560e749f2cbaa3920c3503e65690838bc3d6e931693365a35a6efd31e",
+      "bytes": 10345
+    },
+    "compiled_plan": {
+      "path": "artifacts/6e00dada8b8727225dcefa995fbf82a7d6f1276cd38f1ead046079ab80411a26/compiled_design.json",
+      "sha256": "6e00dada8b8727225dcefa995fbf82a7d6f1276cd38f1ead046079ab80411a26",
+      "bytes": 7782
+    },
+    "results": {
+      "path": "artifacts/d7e31c96419b441282157c863f4353ea361efb1432a66ed378c297a1deffa5bd/results.json",
+      "sha256": "d7e31c96419b441282157c863f4353ea361efb1432a66ed378c297a1deffa5bd",
+      "bytes": 14055
+    },
+    "manifest": {
+      "path": "artifacts/f994640c4f6ca9d5e9e9a87972c341583a78a353f0b1b4afcc9ffd02c78594f6/manifest.json",
+      "sha256": "f994640c4f6ca9d5e9e9a87972c341583a78a353f0b1b4afcc9ffd02c78594f6",
+      "bytes": 3680
+    },
+    "slot_ledger": {
+      "path": "slot-ledger.json",
+      "sha256": "d826a018c269a062a419a6620a40774db8ed0c2c400ea74f5fddf0d6ac15db47",
+      "bytes": 12258
+    },
+    "backend_records": [
+      {
+        "path": "artifacts/f08b895f20cad62feee08f133b262be3b9adcc7595b8abd56158594b7af8f00c/attempts.jsonl",
+        "sha256": "f08b895f20cad62feee08f133b262be3b9adcc7595b8abd56158594b7af8f00c",
+        "bytes": 366
+      }
+    ],
+    "source_bindings": [
+      {
+        "path": "artifacts/3ab40c6b39783e8ec31d037ee567e08621436e73948d1c2d62522e5baef16034/atom_map.json",
+        "sha256": "3ab40c6b39783e8ec31d037ee567e08621436e73948d1c2d62522e5baef16034",
+        "bytes": 1360
+      },
+      {
+        "path": "artifacts/0a32174e1b7a941474c4261c7a1aea2452d95a17659024d2b6858c207daefcfe/decisions.tsv",
+        "sha256": "0a32174e1b7a941474c4261c7a1aea2452d95a17659024d2b6858c207daefcfe",
+        "bytes": 21
+      },
+      {
+        "path": "artifacts/e07c32711422e41f21b711d84ac2d1ae6609c1dda2a364c62367cd3c38153e35/evidence.json",
+        "sha256": "e07c32711422e41f21b711d84ac2d1ae6609c1dda2a364c62367cd3c38153e35",
+        "bytes": 50
+      },
+      {
+        "path": "artifacts/0680f07c4e0cf4c8f448ba4c8a0710da9f530e7a9f9be2d6e5f4a2e47cb0d690/original.mol2",
+        "sha256": "0680f07c4e0cf4c8f448ba4c8a0710da9f530e7a9f9be2d6e5f4a2e47cb0d690",
+        "bytes": 50
+      },
+      {
+        "path": "artifacts/8ccdeb41502364a80376ae391bb4f8ce9df8e8d08d7f3f6daa17d11025cea5b9/pocket.pdb",
+        "sha256": "8ccdeb41502364a80376ae391bb4f8ce9df8e8d08d7f3f6daa17d11025cea5b9",
+        "bytes": 743
+      },
+      {
+        "path": "artifacts/8ccdeb41502364a80376ae391bb4f8ce9df8e8d08d7f3f6daa17d11025cea5b9/protein.pdb",
+        "sha256": "8ccdeb41502364a80376ae391bb4f8ce9df8e8d08d7f3f6daa17d11025cea5b9",
+        "bytes": 743
+      },
+      {
+        "path": "artifacts/95b81f18db997e0475f2a148daf4511bd29095f4a6a4c7116ba6d0398a484f2c/reference.sdf",
+        "sha256": "95b81f18db997e0475f2a148daf4511bd29095f4a6a4c7116ba6d0398a484f2c",
+        "bytes": 1868
+      },
+      {
+        "path": "artifacts/4697027ddf43aeb19142fba5df3ea7b81bfb7e1b5efa3f7909e871765395cdaf/review.json",
+        "sha256": "4697027ddf43aeb19142fba5df3ea7b81bfb7e1b5efa3f7909e871765395cdaf",
+        "bytes": 615
+      },
+      {
+        "path": "artifacts/9c937cb9f3ba41a41965f93844abf6ec5e8a64c50df537d32a647ef63bed9936/selection_manifest.json",
+        "sha256": "9c937cb9f3ba41a41965f93844abf6ec5e8a64c50df537d32a647ef63bed9936",
+        "bytes": 37
+      }
+    ],
+    "identity_derivation": {
+      "algorithm": "prism-design-bundle-identity/1",
+      "design_preimage": {
+        "annotation_sha256": "e72f3a3560e749f2cbaa3920c3503e65690838bc3d6e931693365a35a6efd31e"
+      },
+      "action_preimage": {
+        "compiled_plan_sha256": "6e00dada8b8727225dcefa995fbf82a7d6f1276cd38f1ead046079ab80411a26",
+        "results_sha256": "d7e31c96419b441282157c863f4353ea361efb1432a66ed378c297a1deffa5bd",
+        "slot_ledger_sha256": "d826a018c269a062a419a6620a40774db8ed0c2c400ea74f5fddf0d6ac15db47",
+        "seed": 101,
+        "backend_record_sha256s": [
+          "f08b895f20cad62feee08f133b262be3b9adcc7595b8abd56158594b7af8f00c"
+        ]
+      }
+    }
+  },
+  "identity_policy": {
+    "algorithm": "rdkit-exact-observed-graph/1",
+    "rdkit_version": "2026.09.1",
+    "normalization": "sanitize; remove atom maps; RemoveHs; canonical isomeric SMILES; preserve charge/isotopes/stereo; no neutralization/tautomer/salt merging",
+    "state_semantics": "observed valence/charge graph; pH-dependent state unresolved",
+    "pose_semantics": "raw file hash plus observed state and receptor frame; no alignment; conservative byte identity"
+  },
+  "receptor": {
+    "receptor_state_id": "receptor-e4d4a398d5d481e6be7836a6c5fecbe30e3da53e4ab8554bf54505b83f42606d",
+    "receptor": {
+      "path": "artifacts/8ccdeb41502364a80376ae391bb4f8ce9df8e8d08d7f3f6daa17d11025cea5b9/receptor.pdb",
+      "sha256": "8ccdeb41502364a80376ae391bb4f8ce9df8e8d08d7f3f6daa17d11025cea5b9",
+      "bytes": 743
+    },
+    "pocket": {
+      "path": "artifacts/8ccdeb41502364a80376ae391bb4f8ce9df8e8d08d7f3f6daa17d11025cea5b9/pocket.pdb",
+      "sha256": "8ccdeb41502364a80376ae391bb4f8ce9df8e8d08d7f3f6daa17d11025cea5b9",
+      "bytes": 743
+    },
+    "reference_ligand": {
+      "path": "artifacts/405389f60c6673eda0b6fb9a845cb3a85bfec931997a6baab971359ca5e277bc/reference_backend.sdf",
+      "sha256": "405389f60c6673eda0b6fb9a845cb3a85bfec931997a6baab971359ca5e277bc",
+      "bytes": 848
+    },
+    "atom_mapping_record": {
+      "path": "artifacts/3ab40c6b39783e8ec31d037ee567e08621436e73948d1c2d62522e5baef16034/atom_map.json",
+      "sha256": "3ab40c6b39783e8ec31d037ee567e08621436e73948d1c2d62522e5baef16034",
+      "bytes": 1360
+    },
+    "reference_atom_map_to_backend_index_0based": {
+      "10": 0,
+      "12": 1,
+      "14": 2,
+      "16": 3,
+      "18": 4,
+      "20": 5,
+      "22": 6,
+      "24": 7,
+      "26": 8
+    },
+    "coordinate_frame": "original_receptor_frame_no_ligand_alignment",
+    "length_unit": "angstrom",
+    "protonation_status": "unresolved"
+  },
+  "counts": {
+    "requested": 4,
+    "raw_slots": 3,
+    "decoded": 2,
+    "decode_failed": 1,
+    "serialize_failed": 0,
+    "not_attempted": 1,
+    "hard_constraints_passed": 2,
+    "design_selection_passed": 2,
+    "design_and_qc_passed": 2,
+    "unique_selected": 1,
+    "duplicate_selected_chemistry": 1,
+    "md_hydrogen_files": 1,
+    "failure_counts_nonexclusive": {}
+  },
+  "candidates": [
+    {
+      "candidate_id": "candidate-01c872a90d13c7245ead7769d9454b2805fe27a22c48fb7c0115dd5187fe5300",
+      "source_slot_id": "flowr_root_0001",
+      "slot": 1,
+      "raw_status": "DECODED",
+      "selected_by_source": true,
+      "duplicate_of": null,
+      "identity": {
+        "molecule_id": "molecule-6d8ebc73652a4da24f42ebc2c6e455d0b09eac377fc12dd895af108c8049a8cc",
+        "chemical_state_id": "state-b74a4a56c855c3666c0b99c2e78750d239cb1b5bb6a86da67880cfd7c85d168a",
+        "pose_id": "pose-d483f39c36d4b3d05571f237fb7343e79de05d623e830fd9ee1be66421ac9ace",
+        "canonical_isomeric_smiles": "NCCc1ccccc1",
+        "formal_charge": 0,
+        "protonation_status": "unresolved",
+        "identity_policy": "rdkit-exact-observed-graph/1"
+      },
+      "raw": {
+        "path": "artifacts/e72a6c4398c985dbebf0b35867ecd099380f90f53297aa9e418b13f690a787de/raw1.sdf",
+        "sha256": "e72a6c4398c985dbebf0b35867ecd099380f90f53297aa9e418b13f690a787de",
+        "bytes": 848
+      },
+      "processed": {
+        "path": "artifacts/719755117b478368eeb931caabf249176344b687f67de7fa14bb7017e7474d62/flowr_root_0001_with_H.sdf",
+        "sha256": "719755117b478368eeb931caabf249176344b687f67de7fa14bb7017e7474d62",
+        "bytes": 1783
+      },
+      "transformations": [
+        {
+          "kind": "valence_hydrogen_addition",
+          "source": {
+            "path": "artifacts/e72a6c4398c985dbebf0b35867ecd099380f90f53297aa9e418b13f690a787de/raw1.sdf",
+            "sha256": "e72a6c4398c985dbebf0b35867ecd099380f90f53297aa9e418b13f690a787de",
+            "bytes": 848
+          },
+          "target": {
+            "path": "artifacts/719755117b478368eeb931caabf249176344b687f67de7fa14bb7017e7474d62/flowr_root_0001_with_H.sdf",
+            "sha256": "719755117b478368eeb931caabf249176344b687f67de7fa14bb7017e7474d62",
+            "bytes": 1783
+          },
+          "provenance_record": {
+            "path": "artifacts/22fbfd3c3498231e3ed1837693963fcaea31ac05e794d849c82f00dc256043fa/slot_0001.json",
+            "sha256": "22fbfd3c3498231e3ed1837693963fcaea31ac05e794d849c82f00dc256043fa",
+            "bytes": 5502
+          },
+          "verification": "pass",
+          "heavy_atom_map_0based": [
+            {
+              "raw": 0,
+              "processed": 0
+            },
+            {
+              "raw": 1,
+              "processed": 1
+            },
+            {
+              "raw": 2,
+              "processed": 2
+            },
+            {
+              "raw": 3,
+              "processed": 3
+            },
+            {
+              "raw": 4,
+              "processed": 4
+            },
+            {
+              "raw": 5,
+              "processed": 5
+            },
+            {
+              "raw": 6,
+              "processed": 6
+            },
+            {
+              "raw": 7,
+              "processed": 7
+            },
+            {
+              "raw": 8,
+              "processed": 8
+            }
+          ],
+          "heavy_atom_max_displacement_A": 0.0,
+          "protonation_status": "unresolved"
+        }
+      ],
+      "validation": {
+        "status": "pass",
+        "hard_status": "pass",
+        "selection_status": "pass",
+        "qc_status": "PASS",
+        "source_record": {
+          "path": "artifacts/22fbfd3c3498231e3ed1837693963fcaea31ac05e794d849c82f00dc256043fa/slot_0001.json",
+          "sha256": "22fbfd3c3498231e3ed1837693963fcaea31ac05e794d849c82f00dc256043fa",
+          "bytes": 5502
+        },
+        "revalidation_record": {
+          "path": "revalidation/slot_0001.json",
+          "sha256": "d0647931adf84174c0e9d66d44cb038850c2644dd17f0997a1b3d5ce146f9230",
+          "bytes": 2803
+        },
+        "checks": [
+          {
+            "id": "chemical_validity",
+            "priority": "hard",
+            "status": "pass"
+          },
+          {
+            "id": "fixed_subgraph",
+            "priority": "hard",
+            "status": "pass"
+          },
+          {
+            "id": "single_attachment_boundary",
+            "priority": "hard",
+            "status": "pass"
+          },
+          {
+            "id": "formal_charge",
+            "priority": "hard",
+            "status": "pass"
+          },
+          {
+            "id": "new_unspecified_stereocenter_count",
+            "priority": "hard",
+            "status": "pass"
+          },
+          {
+            "id": "core_rmsd",
+            "priority": "hard",
+            "status": "pass"
+          },
+          {
+            "id": "new_fragment_heavy_atoms",
+            "priority": "hard",
+            "status": "pass"
+          }
+        ],
+        "core_atom_mapping": {
+          "16": 3,
+          "18": 4,
+          "20": 5,
+          "22": 6,
+          "24": 7,
+          "26": 8
+        }
+      },
+      "readiness": {
+        "pool_admission": "eligible",
+        "followup_evaluations": [
+          "structure_review",
+          "state_preparation"
+        ],
+        "md": {
+          "status": "unsupported",
+          "capability": "bounded-5jwt-benzene/1",
+          "reason": "Design bundle is not a candidate-specific MD preparation/authorization contract"
+        }
+      }
+    },
+    {
+      "candidate_id": "candidate-9af29170f04fd32dd6b5f67c24f97f324efdd87a3cbc7b6880b047b2262531eb",
+      "source_slot_id": "flowr_root_0002",
+      "slot": 2,
+      "raw_status": "DECODED",
+      "selected_by_source": false,
+      "duplicate_of": "candidate-01c872a90d13c7245ead7769d9454b2805fe27a22c48fb7c0115dd5187fe5300",
+      "identity": {
+        "molecule_id": "molecule-6d8ebc73652a4da24f42ebc2c6e455d0b09eac377fc12dd895af108c8049a8cc",
+        "chemical_state_id": "state-b74a4a56c855c3666c0b99c2e78750d239cb1b5bb6a86da67880cfd7c85d168a",
+        "pose_id": "pose-a68bc3877a86c1ab9bba89b5937b2078660d6f7cb5db5979bf0b36538af36cba",
+        "canonical_isomeric_smiles": "NCCc1ccccc1",
+        "formal_charge": 0,
+        "protonation_status": "unresolved",
+        "identity_policy": "rdkit-exact-observed-graph/1"
+      },
+      "raw": {
+        "path": "artifacts/ea3f4a56200260e0bc9caaa5c0f76e593aa20b515e3c3bf11c4f226c0dac8792/raw2.sdf",
+        "sha256": "ea3f4a56200260e0bc9caaa5c0f76e593aa20b515e3c3bf11c4f226c0dac8792",
+        "bytes": 848
+      },
+      "processed": null,
+      "transformations": [],
+      "validation": {
+        "status": "pass",
+        "hard_status": "pass",
+        "selection_status": "pass",
+        "qc_status": "PASS",
+        "source_record": {
+          "path": "artifacts/7554b0ea7fade3b28259dbcd778aac699f81af06152a9c84c8fc628178c8fe44/slot_0002.json",
+          "sha256": "7554b0ea7fade3b28259dbcd778aac699f81af06152a9c84c8fc628178c8fe44",
+          "bytes": 5365
+        },
+        "revalidation_record": {
+          "path": "revalidation/slot_0002.json",
+          "sha256": "82a1c73f69bcb74501f5134f0f91302ed0272b8fc9568c7a8f77e6188995b870",
+          "bytes": 2836
+        },
+        "checks": [
+          {
+            "id": "chemical_validity",
+            "priority": "hard",
+            "status": "pass"
+          },
+          {
+            "id": "fixed_subgraph",
+            "priority": "hard",
+            "status": "pass"
+          },
+          {
+            "id": "single_attachment_boundary",
+            "priority": "hard",
+            "status": "pass"
+          },
+          {
+            "id": "formal_charge",
+            "priority": "hard",
+            "status": "pass"
+          },
+          {
+            "id": "new_unspecified_stereocenter_count",
+            "priority": "hard",
+            "status": "pass"
+          },
+          {
+            "id": "core_rmsd",
+            "priority": "hard",
+            "status": "pass"
+          },
+          {
+            "id": "new_fragment_heavy_atoms",
+            "priority": "hard",
+            "status": "pass"
+          }
+        ],
+        "core_atom_mapping": {
+          "16": 3,
+          "18": 4,
+          "20": 5,
+          "22": 6,
+          "24": 7,
+          "26": 8
+        }
+      },
+      "readiness": {
+        "pool_admission": "eligible",
+        "followup_evaluations": [
+          "structure_review",
+          "state_preparation"
+        ],
+        "md": {
+          "status": "unsupported",
+          "capability": "bounded-5jwt-benzene/1",
+          "reason": "Design bundle is not a candidate-specific MD preparation/authorization contract"
+        }
+      }
+    },
+    {
+      "candidate_id": "candidate-48ecdced77cad075aec8d0835fe3cfae06dffd1447d82ee8f3417c4f5693a812",
+      "source_slot_id": "flowr_root_0003",
+      "slot": 3,
+      "raw_status": "DECODE_FAILED",
+      "selected_by_source": false,
+      "duplicate_of": null,
+      "identity": null,
+      "raw": null,
+      "processed": null,
+      "transformations": [],
+      "validation": {
+        "status": "not_evaluated",
+        "hard_status": "not_evaluated",
+        "selection_status": "not_evaluated",
+        "qc_status": "NOT_CHECKED",
+        "source_record": {
+          "path": "artifacts/40c0e2d767e17077584108315c95f0f732e777b4a8c843093eb1d14a1c092b3e/slot_0003.json",
+          "sha256": "40c0e2d767e17077584108315c95f0f732e777b4a8c843093eb1d14a1c092b3e",
+          "bytes": 254
+        },
+        "revalidation_record": null,
+        "checks": [],
+        "core_atom_mapping": {}
+      },
+      "readiness": {
+        "pool_admission": "not_evaluated",
+        "followup_evaluations": [
+          "structure_review"
+        ],
+        "md": {
+          "status": "unsupported",
+          "capability": "bounded-5jwt-benzene/1",
+          "reason": "Design bundle is not a candidate-specific MD preparation/authorization contract"
+        }
+      }
+    },
+    {
+      "candidate_id": "candidate-c673c09c5890adbdcdc36469e1077188ad9a17aa21c6205d18e2377a6762df6b",
+      "source_slot_id": "flowr_root_0004",
+      "slot": 4,
+      "raw_status": "NOT_ATTEMPTED",
+      "selected_by_source": false,
+      "duplicate_of": null,
+      "identity": null,
+      "raw": null,
+      "processed": null,
+      "transformations": [],
+      "validation": {
+        "status": "not_evaluated",
+        "hard_status": "not_evaluated",
+        "selection_status": "not_evaluated",
+        "qc_status": "NOT_CHECKED",
+        "source_record": {
+          "path": "artifacts/9f5956db45c417f0c1b0ba42009e16ff87032ceddd7eb9fd2d2fdc878b302e51/slot_0004.json",
+          "sha256": "9f5956db45c417f0c1b0ba42009e16ff87032ceddd7eb9fd2d2fdc878b302e51",
+          "bytes": 262
+        },
+        "revalidation_record": null,
+        "checks": [],
+        "core_atom_mapping": {}
+      },
+      "readiness": {
+        "pool_admission": "not_evaluated",
+        "followup_evaluations": [
+          "structure_review"
+        ],
+        "md": {
+          "status": "unsupported",
+          "capability": "bounded-5jwt-benzene/1",
+          "reason": "Design bundle is not a candidate-specific MD preparation/authorization contract"
+        }
+      }
+    }
+  ],
+  "observations": [],
+  "producer": {
+    "module": "prism.design.bundle",
+    "module_sha256": "a79b6b0870ed8a1fa3f84ff02e7a0bfe4efe4ec54cbe024dc1f2ca7a3a3a62e6",
+    "python_version": "3.13.12 | packaged by Anaconda, Inc. | (main, Feb 24 2026, 16:05:56) [MSC v.1942 64 bit (AMD64)]",
+    "rdkit_version": "2026.09.1"
+  },
+  "bundle_id": "bundle-e91e8aefb98a1a3f3e951284f9ccf286e38d9bdc4c844d13decb45f8ad75fd69"
+}

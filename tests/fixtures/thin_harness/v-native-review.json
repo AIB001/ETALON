@@ -1,0 +1,500 @@
+{
+  "schema": "independent-native-review/1",
+  "reviewer": "V",
+  "scope": "Independent raw-evidence audit, plus separate actual package invocation in v-native-package.json; no implementation edits",
+  "protocol_sha256": "5525fa623104559ee44ca968844e2ca15070b771cc8c408658f77c2107d09f9a",
+  "a_archive_sha256": "fc4223c2cee158fde5f1b4c7b329488dafbb2724d0659864831113a49209627c",
+  "a_raw_junit": {
+    "posix-v1.xml": {
+      "tests": 4,
+      "failures": 1,
+      "errors": 0,
+      "skipped": 0
+    },
+    "posix-v2.xml": {
+      "tests": 32,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0
+    },
+    "posix-v3.xml": {
+      "tests": 33,
+      "failures": 1,
+      "errors": 0,
+      "skipped": 0
+    },
+    "posix-v4.xml": {
+      "tests": 33,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0
+    },
+    "legacy-original.xml": {
+      "tests": 250,
+      "failures": 4,
+      "errors": 0,
+      "skipped": 0
+    },
+    "legacy-with-git-v2.xml": {
+      "tests": 250,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0
+    }
+  },
+  "posix_test_matches_raw_archive": true,
+  "a_final_audit": {
+    "at": 1792520511.3611472,
+    "python": "/root/zx/prism-minimal-20261017/engineering/etalon-thin-native-20261021-01/env/bin/python",
+    "version": "3.11.17 (main, Oct  7 2026, 00:02:24) [GCC 15.3.0]",
+    "modules": {
+      "etalon.runtime.api": {
+        "path": "/root/zx/prism-minimal-20261017/engineering/etalon-thin-native-20261021-01/source-v2/src/etalon/runtime/api.py",
+        "sha256": "8c15c65c71e2529484ebcea34dd7ede1e5d530c86bbb3f1de84294c3714f03d6"
+      },
+      "etalon.runtime.service": {
+        "path": "/root/zx/prism-minimal-20261017/engineering/etalon-thin-native-20261021-01/source-v2/src/etalon/runtime/service.py",
+        "sha256": "ffff910947feeb153f535dc8b1e15eb4c8fd07ac54b779ce515dadb2623f50fa"
+      },
+      "etalon.runtime.process": {
+        "path": "/root/zx/prism-minimal-20261017/engineering/etalon-thin-native-20261021-01/source-v2/src/etalon/runtime/process.py",
+        "sha256": "4cd2691c4d6603e2b1d6e59e8872d3536c7f769bef5b14b2ae742cf5d317658e"
+      },
+      "etalon.active.store": {
+        "path": "/root/zx/prism-minimal-20261017/engineering/etalon-thin-native-20261021-01/source-v2/src/etalon/active/store.py",
+        "sha256": "f01c101748142fc801bbf618124e6d0a5dbcd2b9d5a47990ae2e1f33da0f511b"
+      },
+      "etalon.active.runner": {
+        "path": "/root/zx/prism-minimal-20261017/engineering/etalon-thin-native-20261021-01/source-v2/src/etalon/active/runner.py",
+        "sha256": "ca6e8496ba847a286ad50e28bb56fc60c44451e7189b9b75f5d71b7ef86b4fdf"
+      }
+    },
+    "active_engineering_processes": [],
+    "source_archive_v1": "5f84fc5faa3ba4aaf797bc13c01295a245d76a2cc857fa6ee1cc8560280541a9",
+    "source_archive_v2": "dd5d939594d0698386464994ceb2118a7848fcce06ab83f779891e6cd9f2691d",
+    "test_v4_sha256": "72793173ce7f8c1d42d2ab674e9b14356e657121f7ee64cd364cd8ebd6286fbf"
+  },
+  "original32_independent_id_match": [
+    {
+      "test_id": "tests/test_campaign.py::test_only_accepted_changes_reach_the_state",
+      "windows": "failed",
+      "linux": "passed",
+      "classification": "legacy_posix_flock_unsupported"
+    },
+    {
+      "test_id": "tests/test_campaign.py::test_a_rewind_abandons_without_deleting",
+      "windows": "failed",
+      "linux": "passed",
+      "classification": "legacy_posix_flock_unsupported"
+    },
+    {
+      "test_id": "tests/test_campaign.py::test_a_rewind_to_a_round_that_never_happened_is_refused",
+      "windows": "failed",
+      "linux": "passed",
+      "classification": "legacy_posix_flock_unsupported"
+    },
+    {
+      "test_id": "tests/test_campaign.py::test_an_unreadable_line_is_a_gap_rather_than_a_nuisance",
+      "windows": "failed",
+      "linux": "passed",
+      "classification": "legacy_posix_flock_unsupported"
+    },
+    {
+      "test_id": "tests/test_campaign.py::test_every_round_line_round_trips_as_json",
+      "windows": "failed",
+      "linux": "passed",
+      "classification": "legacy_posix_flock_unsupported"
+    },
+    {
+      "test_id": "tests/test_campaign.py::test_a_workspace_under_a_temporary_directory_is_reported_as_volatile",
+      "windows": "failed",
+      "linux": "passed",
+      "classification": "unix_tmp_path_assumption"
+    },
+    {
+      "test_id": "tests/test_campaign.py::test_recorded_next_batch_limits_the_next_real_spend",
+      "windows": "failed",
+      "linux": "passed",
+      "classification": "legacy_posix_flock_unsupported"
+    },
+    {
+      "test_id": "tests/test_campaign.py::test_accepted_nested_changes_reach_the_config_without_editing_the_source",
+      "windows": "failed",
+      "linux": "passed",
+      "classification": "legacy_posix_flock_unsupported"
+    },
+    {
+      "test_id": "tests/test_campaign.py::test_postflight_checks_do_not_replace_preflight_evidence",
+      "windows": "failed",
+      "linux": "passed",
+      "classification": "legacy_posix_flock_unsupported"
+    },
+    {
+      "test_id": "tests/test_campaign.py::test_measurements_survive_a_failed_proposer_without_permitting_repeated_spend",
+      "windows": "failed",
+      "linux": "passed",
+      "classification": "legacy_posix_flock_unsupported"
+    },
+    {
+      "test_id": "tests/test_campaign.py::test_a_round_refuses_before_spending_and_records_what_it_refused",
+      "windows": "failed",
+      "linux": "passed",
+      "classification": "legacy_posix_flock_unsupported"
+    },
+    {
+      "test_id": "tests/test_campaign.py::test_a_round_without_a_comparator_measures_and_learns_nothing",
+      "windows": "failed",
+      "linux": "passed",
+      "classification": "legacy_posix_flock_unsupported"
+    },
+    {
+      "test_id": "tests/test_campaign.py::test_a_proposal_the_panel_cannot_resolve_is_recorded_and_not_applied",
+      "windows": "failed",
+      "linux": "passed",
+      "classification": "legacy_posix_flock_unsupported"
+    },
+    {
+      "test_id": "tests/test_campaign.py::test_the_acquisition_hook_carries_the_one_act_an_advisor_may_settle",
+      "windows": "failed",
+      "linux": "passed",
+      "classification": "legacy_posix_flock_unsupported"
+    },
+    {
+      "test_id": "tests/test_campaign.py::test_the_round_hands_the_expensive_stage_a_token_per_surviving_molecule",
+      "windows": "failed",
+      "linux": "passed",
+      "classification": "legacy_posix_flock_unsupported"
+    },
+    {
+      "test_id": "tests/test_campaign.py::test_the_round_records_what_the_gate_permitted",
+      "windows": "failed",
+      "linux": "passed",
+      "classification": "legacy_posix_flock_unsupported"
+    },
+    {
+      "test_id": "tests/test_sweep.py::test_an_outcome_is_append_only",
+      "windows": "failed",
+      "linux": "passed",
+      "classification": "legacy_posix_flock_unsupported"
+    },
+    {
+      "test_id": "tests/test_sweep.py::test_a_ledger_row_lost_after_the_pool_commit_can_be_filled",
+      "windows": "failed",
+      "linux": "passed",
+      "classification": "legacy_posix_flock_unsupported"
+    },
+    {
+      "test_id": "tests/test_sweep.py::test_a_repair_does_not_let_a_second_outcome_in",
+      "windows": "failed",
+      "linux": "passed",
+      "classification": "legacy_posix_flock_unsupported"
+    },
+    {
+      "test_id": "tests/test_sweep.py::test_a_batch_keeps_the_revision_it_was_emitted_under",
+      "windows": "failed",
+      "linux": "passed",
+      "classification": "legacy_posix_flock_unsupported"
+    },
+    {
+      "test_id": "tests/test_sweep.py::test_an_exhausted_batch_is_recorded_as_a_measurement",
+      "windows": "failed",
+      "linux": "passed",
+      "classification": "legacy_posix_flock_unsupported"
+    },
+    {
+      "test_id": "tests/test_sweep.py::test_the_ledger_line_carries_the_revision_and_the_gate",
+      "windows": "failed",
+      "linux": "passed",
+      "classification": "legacy_posix_flock_unsupported"
+    },
+    {
+      "test_id": "tests/test_sweep.py::test_an_unfinished_run_is_not_recorded_as_a_measurement",
+      "windows": "failed",
+      "linux": "passed",
+      "classification": "legacy_posix_flock_unsupported"
+    },
+    {
+      "test_id": "tests/test_sweep.py::test_two_recorders_cannot_both_file_an_outcome",
+      "windows": "failed",
+      "linux": "passed",
+      "classification": "legacy_posix_flock_unsupported"
+    },
+    {
+      "test_id": "tests/test_sweep.py::test_the_ledger_records_the_gate_the_batch_was_emitted_under",
+      "windows": "failed",
+      "linux": "passed",
+      "classification": "legacy_posix_flock_unsupported"
+    },
+    {
+      "test_id": "tests/test_sweep.py::test_a_pool_carved_before_the_gate_column_still_records",
+      "windows": "failed",
+      "linux": "passed",
+      "classification": "legacy_posix_flock_unsupported"
+    },
+    {
+      "test_id": "tests/test_sweep.py::test_a_finished_run_is_recorded_whatever_became_of_its_claimer",
+      "windows": "failed",
+      "linux": "passed",
+      "classification": "legacy_posix_flock_unsupported"
+    },
+    {
+      "test_id": "tests/test_sweep.py::test_more_than_one_revision_marks_the_batches_incomparable",
+      "windows": "failed",
+      "linux": "passed",
+      "classification": "legacy_posix_flock_unsupported"
+    },
+    {
+      "test_id": "tests/test_sweep.py::test_a_claimed_batch_carries_the_etalon_revision_that_will_screen_it",
+      "windows": "failed",
+      "linux": "passed",
+      "classification": "legacy_posix_flock_unsupported"
+    },
+    {
+      "test_id": "tests/test_sweep.py::test_a_requeued_batch_is_attributed_to_the_etalon_that_rescreened_it",
+      "windows": "failed",
+      "linux": "passed",
+      "classification": "legacy_posix_flock_unsupported"
+    },
+    {
+      "test_id": "tests/test_sweep.py::test_two_etalon_revisions_mark_one_funnel_s_batches_incomparable",
+      "windows": "failed",
+      "linux": "passed",
+      "classification": "legacy_posix_flock_unsupported"
+    },
+    {
+      "test_id": "tests/test_sweep.py::test_one_unreadable_csv_does_not_abort_library_writing",
+      "windows": "failed",
+      "linux": "passed",
+      "classification": "windows_symlink_privilege_1314"
+    }
+  ],
+  "source_v2_sealed_sha256": "dd5d939594d0698386464994ceb2118a7848fcce06ab83f779891e6cd9f2691d",
+  "hosts_raw": {
+    "codex-direct": {
+      "stdout_sha256": "231b299d0c22ca6f73d39f30ca58071e07c69e7dbd0360aa7c3e7bd30ad57cba",
+      "prompt_sha256": "4ba6983c1f63b477d4aaf0dab85158dd849511e2b490aafdbb5eb8e9aedc48f6",
+      "exit": {
+        "returncode": 0,
+        "wall_seconds": 111.63548183441162,
+        "ended_unix": 1792520082.5603848
+      },
+      "observed_etalon_tools": [
+        "etalon_capabilities",
+        "etalon_active_status",
+        "etalon_active_replay",
+        "etalon_active_status",
+        "etalon_events_read",
+        "etalon_events_read"
+      ],
+      "observed_usage": [
+        {
+          "input_tokens": 663447,
+          "cached_input_tokens": 620416,
+          "cache_write_input_tokens": 0,
+          "output_tokens": 1805,
+          "reasoning_output_tokens": 29
+        }
+      ],
+      "model": null,
+      "monetary_cost": null
+    },
+    "codex-discovery": {
+      "stdout_sha256": "de0cb28588a8180614bb4a56fdcd7d232ff9c49435b393f139bb80bda497153f",
+      "prompt_sha256": "ce79f8f1de05be8120ef9704aaa7531f71e0462f123bf96c261d3f8d7cf10271",
+      "exit": {
+        "returncode": 0,
+        "wall_seconds": 29.247594594955444,
+        "ended_unix": 1792520319.1629858
+      },
+      "observed_etalon_tools": [
+        "etalon_active_status",
+        "etalon_events_read"
+      ],
+      "observed_usage": [
+        {
+          "input_tokens": 147800,
+          "cached_input_tokens": 108672,
+          "cache_write_input_tokens": 0,
+          "output_tokens": 667,
+          "reasoning_output_tokens": 0
+        }
+      ],
+      "model": null,
+      "monetary_cost": null
+    },
+    "codex-discovery-isolated": {
+      "stdout_sha256": "fd4806a6be14a4f401af6688b40bfd97622086adce2f44a9c6990eda52780e8e",
+      "prompt_sha256": "47a969573c16219e90c34122df293f69e5863e4b4d6e8673f8c0a48488d8ad0b",
+      "exit": {
+        "returncode": 0,
+        "wall_seconds": 26.860495567321777,
+        "ended_unix": 1792520726.7958715
+      },
+      "observed_etalon_tools": [
+        "etalon_active_status",
+        "etalon_events_read"
+      ],
+      "observed_usage": [
+        {
+          "input_tokens": 149396,
+          "cached_input_tokens": 108672,
+          "cache_write_input_tokens": 0,
+          "output_tokens": 597,
+          "reasoning_output_tokens": 0
+        }
+      ],
+      "model": null,
+      "monetary_cost": null
+    },
+    "codex-linux": {
+      "stdout_sha256": "a9236172e2dc08a4c8b7ce1d0f5cd610192fdcb82282dc71472243d9519e3235",
+      "prompt_sha256": "f0a6acb4ed790209ed26723aa45dd3bbded5455b7fc0c510fa7a5be79083e510",
+      "exit": {
+        "returncode": 0,
+        "wall_seconds": 55.13736581802368,
+        "ended_unix": 1792520226.9200528
+      },
+      "observed_etalon_tools": [
+        "etalon_capabilities",
+        "etalon_active_status",
+        "etalon_action_prepare",
+        "etalon_action_submit",
+        "etalon_action_result",
+        "etalon_action_prepare",
+        "etalon_action_submit",
+        "etalon_action_result",
+        "etalon_active_status"
+      ],
+      "observed_usage": [
+        {
+          "input_tokens": 364202,
+          "cached_input_tokens": 321536,
+          "cache_write_input_tokens": 0,
+          "output_tokens": 1721,
+          "reasoning_output_tokens": 8
+        }
+      ],
+      "model": null,
+      "monetary_cost": null
+    },
+    "codex-methods": {
+      "stdout_sha256": "4d24415b942a88194f021ab110387ffbdb669bb3714a41f1aaa672a1ca38cc94",
+      "prompt_sha256": "e1cc8a60646c114dd3ffd3eb037cf8a465deecbba5e1111cefc95eb516dfb563",
+      "exit": {
+        "returncode": 0,
+        "wall_seconds": 182.81493473052979,
+        "ended_unix": 1792520188.4685047
+      },
+      "observed_etalon_tools": [
+        "etalon_capabilities",
+        "etalon_active_status",
+        "etalon_skill_read",
+        "etalon_active_replay",
+        "etalon_active_status",
+        "etalon_events_read",
+        "etalon_skill_read",
+        "etalon_events_read",
+        "etalon_action_result",
+        "etalon_method_record",
+        "etalon_method_record",
+        "etalon_events_read",
+        "etalon_method_record"
+      ],
+      "observed_usage": [
+        {
+          "input_tokens": 741188,
+          "cached_input_tokens": 703744,
+          "cache_write_input_tokens": 0,
+          "output_tokens": 3407,
+          "reasoning_output_tokens": 218
+        }
+      ],
+      "model": null,
+      "monetary_cost": null
+    },
+    "codex-revision": {
+      "stdout_sha256": "fb3efc0f8aa6cd22fe9795ee8c4d27f5362889fd3e5274c89739e6645c600be5",
+      "prompt_sha256": "d0cbdfa32aeee6b1bf3cf707ac108d8706694c7a12968dd0448223d1a08ba326",
+      "exit": {
+        "returncode": 0,
+        "wall_seconds": 92.642737865448,
+        "ended_unix": 1792520509.755399
+      },
+      "observed_etalon_tools": [
+        "etalon_capabilities",
+        "etalon_skill_read",
+        "etalon_events_read",
+        "etalon_skill_read",
+        "etalon_events_read",
+        "etalon_active_status",
+        "etalon_skill_read",
+        "etalon_method_record",
+        "etalon_method_record",
+        "etalon_events_read",
+        "etalon_active_status",
+        "etalon_method_record",
+        "etalon_events_read",
+        "etalon_active_status"
+      ],
+      "observed_usage": [
+        {
+          "input_tokens": 411592,
+          "cached_input_tokens": 368256,
+          "cache_write_input_tokens": 0,
+          "output_tokens": 3387,
+          "reasoning_output_tokens": 62
+        }
+      ],
+      "model": null,
+      "monetary_cost": null
+    },
+    "claude-direct": {
+      "stdout_sha256": "54983f83aeaef1bd5d9fc23b95ba72a149eac912e57bd8f177451c225bb68b80",
+      "prompt_sha256": "0d8cf92cd36a2aadf13031036e7f72d5e20d7d25756b0875751d504e0709f55b",
+      "exit": {
+        "returncode": 1,
+        "wall_seconds": 4.861915826797485,
+        "ended_unix": 1792519975.7965984
+      },
+      "observed_etalon_tools": [],
+      "observed_usage": [],
+      "model": "claude-opus-4-7[1m]",
+      "monetary_cost": {
+        "reported_api_usd": 0,
+        "scope": "401 failed attempt only; not complete development cost"
+      }
+    }
+  },
+  "isolated_discovery": {
+    "distinct_database_paths": true,
+    "before_after_sha256": "0d5b8b9bb9477b4372bf156f26a0797a4620a09c48d61fe9faefe9a8d0a52a66",
+    "source_before_after_sha256": "e41e173e16e94864336ae82f804da09b01c69d12ebaa5e8b027b8e3e72f47c8f",
+    "mcp_source_sha256": "d2b66f0d78d941b22aba06d36b190a0a8e1409f5cbf2a4803afbe412fecc41d6"
+  },
+  "shared_contracts": {
+    "tests": 84,
+    "failures": 0,
+    "errors": 0,
+    "skipped": 0
+  },
+  "verdicts": {
+    "Codex_HOST01": "passed for observed six bounded engineering attempts; original discovery reuses read-only DB and isolated rerun separately proves isolation",
+    "Claude_HOST01": "blocked by actual native HTTP401; attempted call failed, no substantive ETALON operation",
+    "ACT05_ACT06_RES07": "passed for actual isolated Linux fixtures; original v1 product failure and v3 lock readiness failure retained",
+    "A32": "32 original IDs fail Windows and pass unchanged source on Linux; Windows support remains unsupported",
+    "B5": "existing missing optional dependency; 5 same-source controls pass isolated overlay, default shared venv unchanged",
+    "LEARN01_LEARN02": "not_run; no independent scientific improvement evidence",
+    "revision_parent_binding": "not demonstrated: successful new MethodVersion parents=[]; prior version only textual change_summary",
+    "cost": "fixture declared/measured costs and native tokens separate; total development/native monetary cost unknown"
+  },
+  "review_method": [
+    "Reviewed original prompts and native completed tool requests/responses, not only summaries",
+    "Independently verified C archive SHA and all 50 captured file hashes and deserialized raw SQLite ledgers",
+    "Independently read A raw process/lock/receipt/count logs and 29 raw runtime SQLite receipt body digests",
+    "Independently compared v3-v4 fixture change: bounded real flock readiness, unchanged production rejection; not weakened assertion",
+    "Independently checked B 27-file manifest and git-show three pinned conformal/test sources",
+    "Actual package stdio/import checks separately recorded in v-native-package.json"
+  ],
+  "posix_v4_test_sha256": "72793173ce7f8c1d42d2ab674e9b14356e657121f7ee64cd364cd8ebd6286fbf",
+  "posix_raw_test_member": "test_runtime_posix_acceptance_v4.py"
+}

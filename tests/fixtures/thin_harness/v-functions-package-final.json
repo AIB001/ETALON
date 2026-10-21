@@ -1,0 +1,104 @@
+{
+  "status": "passed",
+  "wheel_sha256": "95ede2d138c18afc6ab4091be9527db31815de48b2074efeea6bee9058409f4c",
+  "source_wheel_installed_files": 326,
+  "modules": {
+    "etalon.generate.audit": {
+      "path": "F:\\life_healthy\\integration\\thin-harness-functions-20261021\\install-final\\etalon\\generate\\audit.py",
+      "sha256": "5c141540996d685ddee2c7418bfe03a278072f0d0482518e228cd54bdd983470"
+    },
+    "etalon.generate.productivity": {
+      "path": "F:\\life_healthy\\integration\\thin-harness-functions-20261021\\install-final\\etalon\\generate\\productivity.py",
+      "sha256": "4d27267a7736365e50c1e3e536539dd313974ffe1e72fb40299197a10d2eef3b"
+    },
+    "etalon.boundary.screen": {
+      "path": "F:\\life_healthy\\integration\\thin-harness-functions-20261021\\install-final\\etalon\\boundary\\screen.py",
+      "sha256": "0ea9cc5bad25fd76cf72eb5505a82c1c677fc5e5824083a27b176d4a13ba0a9c"
+    },
+    "etalon.campaign.sweep": {
+      "path": "F:\\life_healthy\\integration\\thin-harness-functions-20261021\\install-final\\etalon\\campaign\\sweep.py",
+      "sha256": "9db48faf72fdd1e39bed227f5034b97f5c32ff90683f8ff6017892ea951db402"
+    },
+    "etalon.mcp.sweep": {
+      "path": "F:\\life_healthy\\integration\\thin-harness-functions-20261021\\install-final\\etalon\\mcp\\sweep.py",
+      "sha256": "71ba17527c482eecee10253f577cc274bdb44fa67da3ff433dba01f3cf47c7e5"
+    }
+  },
+  "bad_confidence_rejections": [
+    {
+      "input": "0",
+      "error": "confidence must be finite and strictly between zero and one"
+    },
+    {
+      "input": "1",
+      "error": "confidence must be finite and strictly between zero and one"
+    },
+    {
+      "input": "-0.1",
+      "error": "confidence must be finite and strictly between zero and one"
+    },
+    {
+      "input": "1.1",
+      "error": "confidence must be finite and strictly between zero and one"
+    },
+    {
+      "input": "nan",
+      "error": "confidence must be finite and strictly between zero and one"
+    },
+    {
+      "input": "inf",
+      "error": "confidence must be finite and strictly between zero and one"
+    }
+  ],
+  "actual_cold_stdio": {
+    "productivity": {
+      "loops": [
+        {
+          "chunks": 3,
+          "delivered": 300,
+          "delivery": {
+            "rate": 1.0,
+            "viable": true,
+            "wilson95": [
+              0.9874,
+              1.0
+            ]
+          },
+          "hours": 0.05,
+          "model": "fixture",
+          "pocket": "same",
+          "requested": 300,
+          "retire": [
+            "uniqueness 0.0% costs unbounded per screenable molecule, above the 2.0x ceiling. This model has covered the space its conditioning reaches on this pocket."
+          ],
+          "tag": "independent-cold",
+          "unique": 0,
+          "unique_per_hour": 0.0,
+          "uniqueness": {
+            "cost_multiplier": null,
+            "exhausted": true,
+            "rate": 0.0,
+            "trend": 0.0,
+            "wilson95": [
+              0.0,
+              0.0126
+            ]
+          }
+        }
+      ],
+      "median_unique_per_hour": null,
+      "note": "Ranked on unique molecules per hour. Use etalon.generate.audit.compare for hit rates, and act on it only where its intervals are disjoint.",
+      "ok": true,
+      "retire": {
+        "independent-cold": [
+          "uniqueness 0.0% costs unbounded per screenable molecule, above the 2.0x ceiling. This model has covered the space its conditioning reaches on this pocket."
+        ]
+      }
+    },
+    "following_capabilities_ok": true,
+    "numpy_scipy_not_preloaded_assertion": true
+  },
+  "native_host_decision": "not_run by this package check",
+  "python": "F:\\life_healthy\\ETALON\\.venv\\Scripts\\python.exe",
+  "cwd": "F:\\life_healthy\\integration\\thin-harness-functions-20261021"
+}

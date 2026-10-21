@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 import re
 from collections.abc import Mapping
 from pathlib import Path
@@ -21,6 +22,14 @@ from molcascade.runtime.models import CacheEntry
 EXECUTION_SEMANTICS_VERSION = "molcascade.local-stage/v1"
 _CACHE_KEY_RE = re.compile(r"^cache:sha256:([0-9a-f]{64})$")
 _CACHE_ENTRY_SIZE_LIMIT = 1024 * 1024
+
+
+def checkpoint_directory_name(cache_key: str) -> str:
+    """Keep the invocation identity while using legal Windows directory names."""
+    match = _CACHE_KEY_RE.fullmatch(cache_key)
+    if match is None:
+        raise ValueError("invalid checkpoint cache key")
+    return match.group(1) if os.name == "nt" else cache_key
 
 
 def stage_cache_key(
@@ -110,11 +119,12 @@ def _cache_digest(cache_key: str) -> str:
 class LocalStageCache:
     """Atomic cache-key index; artifact bytes remain owned by the store."""
 
-    def __init__(self, root: str | Path) -> None:
+    def __init__(self, root: str | Path, *, create: bool = True) -> None:
         requested = Path(root).expanduser()
         if requested.is_symlink():
             raise ValueError("cache root may not be a symlink")
-        requested.mkdir(parents=True, exist_ok=True)
+        if create:
+            requested.mkdir(parents=True, exist_ok=True)
         self.root = requested.resolve(strict=True)
         if not self.root.is_dir():
             raise ValueError(f"cache root is not a directory: {self.root}")

@@ -27,6 +27,7 @@ from etalon.active.schema import (
     Evaluation,
     canonical,
     digest,
+    finite,
 )
 from etalon.judgment.waiver import WaiverSet
 from etalon.learn.admissible import Admission, Measurement, Ruling, rule
@@ -199,28 +200,32 @@ class CampaignStore:
             db.execute("UPDATE metadata SET body=? WHERE key='configuration'", (canonical(config),))
 
     def add_candidates(self, candidates: Sequence[Candidate]) -> int:
-        added = 0
         with self.connection(write=True) as db:
-            spec, _ = self._configuration(db)
-            known_ids = {row[0] for row in db.execute("SELECT id FROM candidates")}
-            if len(known_ids | {candidate.id for candidate in candidates}) > spec.max_candidates:
-                raise ValueError("candidate import exceeds the active pool limit")
-            first = db.execute("SELECT body FROM candidates LIMIT 1").fetchone()
-            width = len(json.loads(first[0])["features"]) if first else None
-            for candidate in candidates:
-                if width is None:
-                    width = len(candidate.features)
-                if len(candidate.features) != width:
-                    raise ValueError("all candidates must use the declared representation width")
-                body = canonical(candidate.as_dict())
-                previous = db.execute("SELECT body FROM candidates WHERE id=?", (candidate.id,)).fetchone()
-                if previous is not None:
-                    if previous[0] != body:
-                        raise StateError(f"candidate {candidate.id!r} changed; register a new state id")
-                    continue
-                db.execute("INSERT INTO candidates VALUES (?,?)", (candidate.id, body))
-                self._event(db, "candidate_added", candidate.as_dict())
-                added += 1
+            return self._add_candidates(db, candidates)
+
+    def _add_candidates(self, db: sqlite3.Connection, candidates: Sequence[Candidate]) -> int:
+        """Share the journal transaction with an identity/provenance importer."""
+        added = 0
+        spec, _ = self._configuration(db)
+        known_ids = {row[0] for row in db.execute("SELECT id FROM candidates")}
+        if len(known_ids | {candidate.id for candidate in candidates}) > spec.max_candidates:
+            raise ValueError("candidate import exceeds the active pool limit")
+        first = db.execute("SELECT body FROM candidates LIMIT 1").fetchone()
+        width = len(json.loads(first[0])["features"]) if first else None
+        for candidate in candidates:
+            if width is None:
+                width = len(candidate.features)
+            if len(candidate.features) != width:
+                raise ValueError("all candidates must use the declared representation width")
+            body = canonical(candidate.as_dict())
+            previous = db.execute("SELECT body FROM candidates WHERE id=?", (candidate.id,)).fetchone()
+            if previous is not None:
+                if previous[0] != body:
+                    raise StateError(f"candidate {candidate.id!r} changed; register a new state id")
+                continue
+            db.execute("INSERT INTO candidates VALUES (?,?)", (candidate.id, body))
+            self._event(db, "candidate_added", candidate.as_dict())
+            added += 1
         return added
 
     @staticmethod
@@ -290,6 +295,14 @@ class CampaignStore:
             FROM actions""").fetchone()
         balance = {"budget": budget, "spent": row[0], "reserved": row[1],
                    "remaining": budget - row[0] - row[1]}
+        # Non-scalar research executions use the SAME campaign budget without inventing
+        # a trainable affinity observation. Older databases have no such metadata rows.
+        for entry in db.execute("SELECT body FROM metadata WHERE key LIKE 'budget:execution:%'"):
+            charge = json.loads(entry[0])
+            balance["spent"] += charge["cost"]
+            if charge["status"] != "settled":
+                balance["reserved"] += charge["reservation"]
+        balance["remaining"] = budget - balance["spent"] - balance["reserved"]
         if any(not math.isfinite(value) for value in balance.values()):
             raise StateError("campaign accounting exceeds finite numeric range; preserve the recorded charges "
                              "and rescale cost units in a new journal")
@@ -300,6 +313,58 @@ class CampaignStore:
             db.execute("BEGIN")
             spec, _ = self._configuration(db)
             return self._balance(db, spec.budget)
+
+    def reserve_resource_execution(self, execution_id: str, request_sha256: str,
+                                   quote: float, *, unit: str, provenance: dict) -> dict:
+        """Reserve a non-scalar diagnostic in the central budget before external dispatch.
+
+        Returning an existing receipt does not authorize re-execution. Unknown outcomes
+        retain their reservation until a measured terminal receipt is reconciled.
+        """
+        if (not isinstance(execution_id, str) or not execution_id.strip()
+                or len(request_sha256) != 64 or any(c not in '0123456789abcdef' for c in request_sha256)):
+            raise ValueError("execution and request content identities required")
+        finite(quote, "diagnostic reservation", minimum=0)
+        canonical(provenance)
+        binding = {"execution_id": execution_id, "request_sha256": request_sha256,
+                   "reservation": float(quote), "unit": unit, "provenance": provenance}
+        key = "budget:execution:" + execution_id
+        with self.connection(write=True) as db:
+            spec, _ = self._configuration(db)
+            if unit != spec.cost_unit:
+                raise ValueError("diagnostic cost unit differs from the campaign budget")
+            old = db.execute("SELECT body FROM metadata WHERE key=?", (key,)).fetchone()
+            if old:
+                record = json.loads(old[0])
+                if any(record[k] != v for k, v in binding.items()):
+                    raise StateError("same execution id has different request or budget binding")
+                return {**record, "new_reservation": False}
+            if not fits_budget(quote, self._balance(db, spec.budget)["remaining"]):
+                raise BudgetExhausted("diagnostic does not fit the shared campaign budget")
+            record = {**binding, "cost": 0., "status": "reserved", "receipt": None}
+            db.execute("INSERT INTO metadata VALUES (?,?)", (key, canonical(record)))
+            self._event(db, "resource_execution_reserved", record)
+            return {**record, "new_reservation": True}
+
+    def settle_resource_execution(self, execution_id: str, *, measured_cost: float | None,
+                                  receipt: dict) -> dict:
+        """Record real additional execution cost, including failures. None remains pending."""
+        if measured_cost is not None: finite(measured_cost, "measured diagnostic cost", minimum=0)
+        canonical(receipt)
+        key = "budget:execution:" + execution_id
+        with self.connection(write=True) as db:
+            old = db.execute("SELECT body FROM metadata WHERE key=?", (key,)).fetchone()
+            if old is None: raise StateError("cannot settle an unreserved diagnostic execution")
+            record = json.loads(old[0])
+            if record["status"] == "settled":
+                if measured_cost != record["cost"] or record["receipt"] != receipt:
+                    raise StateError("settled diagnostic execution receipt is immutable")
+                return record
+            record.update(cost=float(measured_cost) if measured_cost is not None else 0.,
+                          status="settled" if measured_cost is not None else "pending", receipt=receipt)
+            db.execute("UPDATE metadata SET body=? WHERE key=?", (canonical(record), key))
+            self._event(db, "resource_execution_reconciled", record)
+            return record
 
     def start_round(self, model: dict[str, Any], *, expected_event_cutoff: int | None = None) -> int:
         """Start an idle round, optionally only if a read-only planning snapshot is current.
@@ -374,7 +439,7 @@ class CampaignStore:
                        blocking=(*ruling.blocking, "PROTOCOL_EVIDENCE_MISMATCH"), notes=(*ruling.notes, issue))
 
     def reserve(self, round_id: int, candidate_id: str, endpoint_id: str,
-                decision: dict[str, Any]) -> Action:
+                decision: dict[str, Any], *, max_cost: float | None = None) -> Action:
         if (type(round_id) is not int or round_id < 1
                 or any(not isinstance(value, str) or not value.strip() for value in (candidate_id, endpoint_id))
                 or not isinstance(decision, dict)):
@@ -397,6 +462,10 @@ class CampaignStore:
                 raise StateError("replicate limit reached; implicit retries are not permitted")
             history = [{"result": json.loads(row[0])} for row in db.execute("SELECT body FROM observations")]
             quote = cost_quote(endpoint, history)
+            if max_cost is not None:
+                finite(max_cost, "max_cost", minimum=0)
+                if not fits_budget(quote, max_cost):
+                    raise BudgetExhausted("action quote exceeds its host resource limit")
             from etalon.active.protocols import enforce_protocol_quota
 
             enforce_protocol_quota(db, endpoint_id, quote, candidate_id=candidate_id)
@@ -434,14 +503,56 @@ class CampaignStore:
                 raise StateError("only a reserved action can start; running actions require recovery")
             self._event(db, "action_started", {"action_id": action_id})
 
-    def resolve(self, action_id: str, result: Evaluation, *, waivers: WaiverSet | None = None) -> None:
+    def record_execution_costs(self, action_id: str, records: Sequence[dict[str, Any]]) -> None:
+        """Journal immutable completed execution costs for a still-pending external action.
+
+        Repeated reads do not charge again. Recovery attempts have distinct execution ids.
+        The outstanding reservation stays conservative until final reconciliation.
+        """
+        from etalon.active.schema import finite
+
+        with self.connection(write=True) as db:
+            action = db.execute("SELECT status FROM actions WHERE id=?", (action_id,)).fetchone()
+            if action is None:
+                raise StateError("execution cost requires an existing action")
+            changed = False
+            for record in records:
+                if not isinstance(record.get("execution_id"), str) or not record["execution_id"]:
+                    raise ValueError("execution id is required")
+                finite(record.get("wall_seconds"), "wall seconds", minimum=0)
+                key = "execution-cost:" + digest([action_id, record["execution_id"]])
+                body = canonical({"action_id": action_id, "cost_unit": "wall_second", "record": record})
+                old = db.execute("SELECT body FROM metadata WHERE key=?", (key,)).fetchone()
+                if old:
+                    if old[0] != body:
+                        raise StateError("execution receipt changed")
+                    continue
+                if action["status"] not in {"reserved", "running"}:
+                    raise StateError("new execution cost after terminal action")
+                db.execute("INSERT INTO metadata VALUES (?,?)", (key, body))
+                self._event(db, "external_execution_cost", json.loads(body))
+                changed = True
+            if changed:
+                total = sum(json.loads(r[0])["record"]["wall_seconds"] for r in db.execute(
+                    "SELECT body FROM metadata WHERE key LIKE 'execution-cost:%'")
+                    if json.loads(r[0])["action_id"] == action_id)
+                finite(total, "total measured wall seconds", minimum=0)
+                db.execute("UPDATE actions SET cost=? WHERE id=?", (total, action_id))
+
+    def resolve(self, action_id: str, result: Evaluation, *, waivers: WaiverSet | None = None,
+                idempotent: bool = False) -> None:
         """Commit a real outcome; quality failures retain their cost and raw evidence."""
 
         with self.connection(write=True) as db:
             _, endpoints = self._configuration(db)
             row = db.execute("SELECT * FROM actions WHERE id=?", (action_id,)).fetchone()
             if row is None or row["status"] not in {"reserved", "running"}:
+                previous = db.execute("SELECT body FROM observations WHERE action_id=?", (action_id,)).fetchone()
+                if idempotent and previous is not None and previous[0] == canonical(result.as_dict()):
+                    return
                 raise StateError("action is absent or already resolved")
+            if result.cost < row["cost"]:
+                raise StateError("final cost cannot discard already measured execution costs")
             if (result.candidate_id, result.endpoint_id) != (row["candidate_id"], row["endpoint_id"]):
                 raise ValueError("result belongs to a different molecule or endpoint")
             if result.units != endpoints[result.endpoint_id].units:
@@ -597,6 +708,8 @@ class CampaignStore:
         return {"spec": spec, "endpoints": endpoints, "candidates": self._candidates(db),
                 "observations": observations, "actions": self._actions(db),
                 "balance": self._balance(db, spec.budget), "rounds": self._rounds(db),
+                "resource_executions": {row["key"]: json.loads(row["body"]) for row in db.execute(
+                    "SELECT key,body FROM metadata WHERE key LIKE 'budget:execution:%' ORDER BY key")},
                 "event_cutoff": db.execute("SELECT COALESCE(MAX(sequence),0) FROM events").fetchone()[0],
                 "endpoint_limits": {key: cap for key, endpoint in endpoints.items()
                                     if (cap := _capacity(db, key, cost_quote(endpoint, observations))) is not None},

@@ -1,0 +1,1325 @@
+{
+  "schema": "v-functions-source-review/1",
+  "python": "F:\\life_healthy\\ETALON\\.venv\\Scripts\\python.exe",
+  "version": "3.13.12 | packaged by Anaconda, Inc. | (main, Feb 24 2026, 16:05:56) [MSC v.1942 64 bit (AMD64)]",
+  "protected_scope_count": 209,
+  "unchanged_count": 206,
+  "intentional_changed": [
+    "asset/molcascade/src/molcascade/artifacts/store.py",
+    "asset/molcascade/src/molcascade/runtime/cache.py",
+    "asset/molcascade/src/molcascade/runtime/runner.py"
+  ],
+  "protected_manifest": [
+    {
+      "path": "asset/molcascade/.gitignore",
+      "baseline_sha256": "b280cff17b6435ec96c4ae230db1fd83ed7bacbf4947b7712d292dc02e21ca37",
+      "current_sha256": "b280cff17b6435ec96c4ae230db1fd83ed7bacbf4947b7712d292dc02e21ca37",
+      "unchanged": true
+    },
+    {
+      "path": "asset/molcascade/MolCascade.png",
+      "baseline_sha256": "31f1dc0c45bd24f731f940f8b88695a3327d8eedc5be4ed8ba489a01096ed4cc",
+      "current_sha256": "31f1dc0c45bd24f731f940f8b88695a3327d8eedc5be4ed8ba489a01096ed4cc",
+      "unchanged": true
+    },
+    {
+      "path": "asset/molcascade/README.md",
+      "baseline_sha256": "52f46e9a0080372aff3f3aa1105f9c2cb152dfb59d463835181d76888419f107",
+      "current_sha256": "52f46e9a0080372aff3f3aa1105f9c2cb152dfb59d463835181d76888419f107",
+      "unchanged": true
+    },
+    {
+      "path": "asset/molcascade/envs/README.md",
+      "baseline_sha256": "48580e69635ca4681e80a7de1540fd156bb84aa57a6245af1ce5b549695dae97",
+      "current_sha256": "48580e69635ca4681e80a7de1540fd156bb84aa57a6245af1ce5b549695dae97",
+      "unchanged": true
+    },
+    {
+      "path": "asset/molcascade/envs/bootstrap.sh",
+      "baseline_sha256": "dd55505650b5214b0dbc6b454d1c4a13c325804475d5a82bb82b2b2be9fcf5e2",
+      "current_sha256": "dd55505650b5214b0dbc6b454d1c4a13c325804475d5a82bb82b2b2be9fcf5e2",
+      "unchanged": true
+    },
+    {
+      "path": "asset/molcascade/envs/karmadock-requirements.txt",
+      "baseline_sha256": "0139eeec86d29defe10818b0f3087e8e429ddd6e8accf29971d61b0b33f8b1e2",
+      "current_sha256": "0139eeec86d29defe10818b0f3087e8e429ddd6e8accf29971d61b0b33f8b1e2",
+      "unchanged": true
+    },
+    {
+      "path": "asset/molcascade/envs/prism-requirements.txt",
+      "baseline_sha256": "b5bf0ccae0951243387506d311b10144c390460ab6b30c4cfc3cd3a52e6efb3d",
+      "current_sha256": "b5bf0ccae0951243387506d311b10144c390460ab6b30c4cfc3cd3a52e6efb3d",
+      "unchanged": true
+    },
+    {
+      "path": "asset/molcascade/pyproject.toml",
+      "baseline_sha256": "22a16c930ba9c52549ca611127e9b72c7c9eaf4201c41c47f914d5b9bdbc6a07",
+      "current_sha256": "22a16c930ba9c52549ca611127e9b72c7c9eaf4201c41c47f914d5b9bdbc6a07",
+      "unchanged": true
+    },
+    {
+      "path": "asset/molcascade/src/molcascade/__init__.py",
+      "baseline_sha256": "ec01b83eaedb53a58e9a39e836533eb43d30d5d6e71579c6818a7c0f2b52e711",
+      "current_sha256": "ec01b83eaedb53a58e9a39e836533eb43d30d5d6e71579c6818a7c0f2b52e711",
+      "unchanged": true
+    },
+    {
+      "path": "asset/molcascade/src/molcascade/__main__.py",
+      "baseline_sha256": "3bc9613cbcfaad69129279cc80ded0aa9e8d056881355b21731929af91831a46",
+      "current_sha256": "3bc9613cbcfaad69129279cc80ded0aa9e8d056881355b21731929af91831a46",
+      "unchanged": true
+    },
+    {
+      "path": "asset/molcascade/src/molcascade/_version.py",
+      "baseline_sha256": "a7f786d5feb0f1f20f7781324fd899fa2cc168ced9e2586e5ded12795ec5021a",
+      "current_sha256": "a7f786d5feb0f1f20f7781324fd899fa2cc168ced9e2586e5ded12795ec5021a",
+      "unchanged": true
+    },
+    {
+      "path": "asset/molcascade/src/molcascade/artifacts/__init__.py",
+      "baseline_sha256": "49fd3507bcf06310b5ad36d771ab30e512b53f4371548f0396fa30543e5fd78b",
+      "current_sha256": "49fd3507bcf06310b5ad36d771ab30e512b53f4371548f0396fa30543e5fd78b",
+      "unchanged": true
+    },
+    {
+      "path": "asset/molcascade/src/molcascade/artifacts/hashing.py",
+      "baseline_sha256": "9321ed59f510a2b12388f4a8168f19662d4fc7c0f654f414c38c685e14afb9b9",
+      "current_sha256": "9321ed59f510a2b12388f4a8168f19662d4fc7c0f654f414c38c685e14afb9b9",
+      "unchanged": true
+    },
+    {
+      "path": "asset/molcascade/src/molcascade/artifacts/models.py",
+      "baseline_sha256": "4612fee6d73cd7443f4158f26543dc7e3eb74832f88171639dafd61b9a03fd47",
+      "current_sha256": "4612fee6d73cd7443f4158f26543dc7e3eb74832f88171639dafd61b9a03fd47",
+      "unchanged": true
+    },
+    {
+      "path": "asset/molcascade/src/molcascade/artifacts/store.py",
+      "baseline_sha256": "1e4c6b8e596f8f09ba0562b24236f7d6dada29cb4f0866f78966d927dc951abb",
+      "current_sha256": "66d25df7fa338efdb877510ca06f36014f95b6429b9aeda95112a03baa7efa98",
+      "unchanged": false
+    },
+    {
+      "path": "asset/molcascade/src/molcascade/assets/__init__.py",
+      "baseline_sha256": "99d63b63bf9eec12e2077fe8ca82a4fdcf65c68a9b317fff15a72dcf4bfcf72f",
+      "current_sha256": "99d63b63bf9eec12e2077fe8ca82a4fdcf65c68a9b317fff15a72dcf4bfcf72f",
+      "unchanged": true
+    },
+    {
+      "path": "asset/molcascade/src/molcascade/assets/catalog.py",
+      "baseline_sha256": "bbef234fe07b25a3f52235e458c0afa84dcac3612ff1c073e683c30f1d7c6090",
+      "current_sha256": "bbef234fe07b25a3f52235e458c0afa84dcac3612ff1c073e683c30f1d7c6090",
+      "unchanged": true
+    },
+    {
+      "path": "asset/molcascade/src/molcascade/assets/fetch.py",
+      "baseline_sha256": "c53e06a06d1cdf36a1f29f3d6aa40cee351557f2f97f273485a36d25bff9e18c",
+      "current_sha256": "c53e06a06d1cdf36a1f29f3d6aa40cee351557f2f97f273485a36d25bff9e18c",
+      "unchanged": true
+    },
+    {
+      "path": "asset/molcascade/src/molcascade/assets/models.py",
+      "baseline_sha256": "28ad01694ca8e5362410534e31f7235f6457dc3cba058cad1ad1322b7a91c0e9",
+      "current_sha256": "28ad01694ca8e5362410534e31f7235f6457dc3cba058cad1ad1322b7a91c0e9",
+      "unchanged": true
+    },
+    {
+      "path": "asset/molcascade/src/molcascade/assets/preflight.py",
+      "baseline_sha256": "886822289a4644862e281a338eadb3deab2f992bc3bd77021cb75c4ecf0ff3e8",
+      "current_sha256": "886822289a4644862e281a338eadb3deab2f992bc3bd77021cb75c4ecf0ff3e8",
+      "unchanged": true
+    },
+    {
+      "path": "asset/molcascade/src/molcascade/assets/store.py",
+      "baseline_sha256": "f17b2eea69d7f9d4163b39b9c1c518a2e3eaa36bfb757aeb7e131c9d8afa143c",
+      "current_sha256": "f17b2eea69d7f9d4163b39b9c1c518a2e3eaa36bfb757aeb7e131c9d8afa143c",
+      "unchanged": true
+    },
+    {
+      "path": "asset/molcascade/src/molcascade/backends/__init__.py",
+      "baseline_sha256": "aa2ceacddc8d3925f703018e03051e602dd1ad7cfe7a7d9c35bf2be001fab4e9",
+      "current_sha256": "aa2ceacddc8d3925f703018e03051e602dd1ad7cfe7a7d9c35bf2be001fab4e9",
+      "unchanged": true
+    },
+    {
+      "path": "asset/molcascade/src/molcascade/backends/catalog.py",
+      "baseline_sha256": "3f4763d189fa4abbccaa1286db2649e547e35f86ca359efade9d7128c059018c",
+      "current_sha256": "3f4763d189fa4abbccaa1286db2649e547e35f86ca359efade9d7128c059018c",
+      "unchanged": true
+    },
+    {
+      "path": "asset/molcascade/src/molcascade/backends/models.py",
+      "baseline_sha256": "fea41d30fdcb753eccf0e021b5ee47fdfcf72ff0282df3b21152ae1eeedfb440",
+      "current_sha256": "fea41d30fdcb753eccf0e021b5ee47fdfcf72ff0282df3b21152ae1eeedfb440",
+      "unchanged": true
+    },
+    {
+      "path": "asset/molcascade/src/molcascade/backends/preflight.py",
+      "baseline_sha256": "37729b3ea2bf74de29342831d18ecbccb5e122029160da3405956f32b7e0d06c",
+      "current_sha256": "37729b3ea2bf74de29342831d18ecbccb5e122029160da3405956f32b7e0d06c",
+      "unchanged": true
+    },
+    {
+      "path": "asset/molcascade/src/molcascade/backends/registry.py",
+      "baseline_sha256": "cbdd3eaf56862ed2e6df80ede63875efd54c79a64ee0c0a2846817a44b4e917d",
+      "current_sha256": "cbdd3eaf56862ed2e6df80ede63875efd54c79a64ee0c0a2846817a44b4e917d",
+      "unchanged": true
+    },
+    {
+      "path": "asset/molcascade/src/molcascade/cascade/__init__.py",
+      "baseline_sha256": "9f6e4838f3824ca7b586635a605a0a8693028d8cec4e0e7a9c228780d514037a",
+      "current_sha256": "9f6e4838f3824ca7b586635a605a0a8693028d8cec4e0e7a9c228780d514037a",
+      "unchanged": true
+    },
+    {
+      "path": "asset/molcascade/src/molcascade/cascade/availability.py",
+      "baseline_sha256": "a9af5489adad2ed64736fe57512e78e80f0aa39565bba034cd03db2ed4231b07",
+      "current_sha256": "a9af5489adad2ed64736fe57512e78e80f0aa39565bba034cd03db2ed4231b07",
+      "unchanged": true
+    },
+    {
+      "path": "asset/molcascade/src/molcascade/cascade/catalog.py",
+      "baseline_sha256": "d923bfc7c8a3f1200671b8a4b6d7460c81194982f07151f54785b673c18e316f",
+      "current_sha256": "d923bfc7c8a3f1200671b8a4b6d7460c81194982f07151f54785b673c18e316f",
+      "unchanged": true
+    },
+    {
+      "path": "asset/molcascade/src/molcascade/cascade/citations.py",
+      "baseline_sha256": "0b6beadfa8f445e4607f7a40be192a94fc691b1e0ebe94dc8de5957f907d5a7b",
+      "current_sha256": "0b6beadfa8f445e4607f7a40be192a94fc691b1e0ebe94dc8de5957f907d5a7b",
+      "unchanged": true
+    },
+    {
+      "path": "asset/molcascade/src/molcascade/cascade/defaults.py",
+      "baseline_sha256": "02bd44c089834efe147e6c6a47a96d281090b0ad2fbd63008ef644e7e2bf5517",
+      "current_sha256": "02bd44c089834efe147e6c6a47a96d281090b0ad2fbd63008ef644e7e2bf5517",
+      "unchanged": true
+    },
+    {
+      "path": "asset/molcascade/src/molcascade/cascade/funnel.py",
+      "baseline_sha256": "5650b5bb6921cd3243714e31b970d4b930bb3be70aa8c602703109ba4e13379e",
+      "current_sha256": "5650b5bb6921cd3243714e31b970d4b930bb3be70aa8c602703109ba4e13379e",
+      "unchanged": true
+    },
+    {
+      "path": "asset/molcascade/src/molcascade/cascade/introspect.py",
+      "baseline_sha256": "efd18443e410b02737e4afaa246af1f5a548069f23bc9bbefeb437bf030d47ea",
+      "current_sha256": "efd18443e410b02737e4afaa246af1f5a548069f23bc9bbefeb437bf030d47ea",
+      "unchanged": true
+    },
+    {
+      "path": "asset/molcascade/src/molcascade/cascade/library.py",
+      "baseline_sha256": "1a833c9c88647da2b2ef45d9c70e2148d2ae85ad29cf59f3f56e564bc453bcc8",
+      "current_sha256": "1a833c9c88647da2b2ef45d9c70e2148d2ae85ad29cf59f3f56e564bc453bcc8",
+      "unchanged": true
+    },
+    {
+      "path": "asset/molcascade/src/molcascade/cascade/load.py",
+      "baseline_sha256": "f172b865f396a71da9b8ffdd6a7efc0c0e66185ed42ef0328e21e686441a905e",
+      "current_sha256": "f172b865f396a71da9b8ffdd6a7efc0c0e66185ed42ef0328e21e686441a905e",
+      "unchanged": true
+    },
+    {
+      "path": "asset/molcascade/src/molcascade/cascade/lower.py",
+      "baseline_sha256": "367e809be17384c443737057066b2ca9c52bc2b3b6d041a00b65a6da6ec981e0",
+      "current_sha256": "367e809be17384c443737057066b2ca9c52bc2b3b6d041a00b65a6da6ec981e0",
+      "unchanged": true
+    },
+    {
+      "path": "asset/molcascade/src/molcascade/cascade/models.py",
+      "baseline_sha256": "f41e768e13e313af189e3f5b13d5737da0378ce770942ea0cc6763ee0cd90717",
+      "current_sha256": "f41e768e13e313af189e3f5b13d5737da0378ce770942ea0cc6763ee0cd90717",
+      "unchanged": true
+    },
+    {
+      "path": "asset/molcascade/src/molcascade/cascade/receptor.py",
+      "baseline_sha256": "65725b6e6e085c095b30c6dea7b67482a1b43d21711341452a6c892096236f82",
+      "current_sha256": "65725b6e6e085c095b30c6dea7b67482a1b43d21711341452a6c892096236f82",
+      "unchanged": true
+    },
+    {
+      "path": "asset/molcascade/src/molcascade/cascade/target.py",
+      "baseline_sha256": "4c87039037c556f02dd648a0c66235cf9bed81030053abb87cd7f0065a04b11f",
+      "current_sha256": "4c87039037c556f02dd648a0c66235cf9bed81030053abb87cd7f0065a04b11f",
+      "unchanged": true
+    },
+    {
+      "path": "asset/molcascade/src/molcascade/chemistry/__init__.py",
+      "baseline_sha256": "75a3867aff1ef64d9a2ca70d0fb5b03d8f188752d40481374c8455e3bc6f02aa",
+      "current_sha256": "75a3867aff1ef64d9a2ca70d0fb5b03d8f188752d40481374c8455e3bc6f02aa",
+      "unchanged": true
+    },
+    {
+      "path": "asset/molcascade/src/molcascade/chemistry/alerts.py",
+      "baseline_sha256": "6552c3955b828ce9883859d881c512623cebe828447771fde2fd86c4a7c7fa1b",
+      "current_sha256": "6552c3955b828ce9883859d881c512623cebe828447771fde2fd86c4a7c7fa1b",
+      "unchanged": true
+    },
+    {
+      "path": "asset/molcascade/src/molcascade/chemistry/datasets.py",
+      "baseline_sha256": "916a62d6c4f6ef5a4968ffefd82ca8bef47e33c43cc4ce588cc59d0a94a02a23",
+      "current_sha256": "916a62d6c4f6ef5a4968ffefd82ca8bef47e33c43cc4ce588cc59d0a94a02a23",
+      "unchanged": true
+    },
+    {
+      "path": "asset/molcascade/src/molcascade/chemistry/featurizers.py",
+      "baseline_sha256": "56d3a1f40e4b471fccb74ea9ee73b19fbd754b100ff90a868d3b58c9743d009b",
+      "current_sha256": "56d3a1f40e4b471fccb74ea9ee73b19fbd754b100ff90a868d3b58c9743d009b",
+      "unchanged": true
+    },
+    {
+      "path": "asset/molcascade/src/molcascade/chemistry/gates.py",
+      "baseline_sha256": "bf2f8a1ac73eca6a8998ab2445fb4556c59af96b0dac33edbe54c1c3e4a2d2b0",
+      "current_sha256": "bf2f8a1ac73eca6a8998ab2445fb4556c59af96b0dac33edbe54c1c3e4a2d2b0",
+      "unchanged": true
+    },
+    {
+      "path": "asset/molcascade/src/molcascade/chemistry/identity.py",
+      "baseline_sha256": "ba678c2bd9b356ddffa164c1a5ac7566bf1697f4ee115240cc854545f3095462",
+      "current_sha256": "ba678c2bd9b356ddffa164c1a5ac7566bf1697f4ee115240cc854545f3095462",
+      "unchanged": true
+    },
+    {
+      "path": "asset/molcascade/src/molcascade/chemistry/policies.py",
+      "baseline_sha256": "807b50ce7659ff1c112e532968a2029a04070bb5dd32e1dc1a7c3fc25d4f8815",
+      "current_sha256": "807b50ce7659ff1c112e532968a2029a04070bb5dd32e1dc1a7c3fc25d4f8815",
+      "unchanged": true
+    },
+    {
+      "path": "asset/molcascade/src/molcascade/chemistry/sharding.py",
+      "baseline_sha256": "e7b8d443576cbd204d66e9e40ad04545e5dda40e8ea216fec5bc2380a1ad63b3",
+      "current_sha256": "e7b8d443576cbd204d66e9e40ad04545e5dda40e8ea216fec5bc2380a1ad63b3",
+      "unchanged": true
+    },
+    {
+      "path": "asset/molcascade/src/molcascade/cli.py",
+      "baseline_sha256": "02be701894a738bb20428ee2aa436d0eb06de2334d286da17b1b6802eac77ddd",
+      "current_sha256": "02be701894a738bb20428ee2aa436d0eb06de2334d286da17b1b6802eac77ddd",
+      "unchanged": true
+    },
+    {
+      "path": "asset/molcascade/src/molcascade/config/__init__.py",
+      "baseline_sha256": "8a2230d943d9cdba8b518305e3793c4453dfbc6d4766266882fd31426a8bc3e6",
+      "current_sha256": "8a2230d943d9cdba8b518305e3793c4453dfbc6d4766266882fd31426a8bc3e6",
+      "unchanged": true
+    },
+    {
+      "path": "asset/molcascade/src/molcascade/config/canonical.py",
+      "baseline_sha256": "5338791a4222232200a0f3c4f5ba79f31d8ca4a9f4d5fecd0166bcc33f2b755f",
+      "current_sha256": "5338791a4222232200a0f3c4f5ba79f31d8ca4a9f4d5fecd0166bcc33f2b755f",
+      "unchanged": true
+    },
+    {
+      "path": "asset/molcascade/src/molcascade/config/load.py",
+      "baseline_sha256": "eaebc5c0c5104f5ec8b3baa49c7c1f998bdce6f52e4ec6f658000aaf8da8d0ef",
+      "current_sha256": "eaebc5c0c5104f5ec8b3baa49c7c1f998bdce6f52e4ec6f658000aaf8da8d0ef",
+      "unchanged": true
+    },
+    {
+      "path": "asset/molcascade/src/molcascade/config/models.py",
+      "baseline_sha256": "74d21111f5b468312e13135cfc9769afa5450540dee75b61ca10c1c6e8b1a806",
+      "current_sha256": "74d21111f5b468312e13135cfc9769afa5450540dee75b61ca10c1c6e8b1a806",
+      "unchanged": true
+    },
+    {
+      "path": "asset/molcascade/src/molcascade/contracts/__init__.py",
+      "baseline_sha256": "d5c530adea1980a70d44a20927d692039d686955146d9f80e94430116b989780",
+      "current_sha256": "d5c530adea1980a70d44a20927d692039d686955146d9f80e94430116b989780",
+      "unchanged": true
+    },
+    {
+      "path": "asset/molcascade/src/molcascade/contracts/base.py",
+      "baseline_sha256": "d5bdb06eab23918eb35b664109c4b35b5496b664e69516de2a1ed9697ec4b548",
+      "current_sha256": "d5bdb06eab23918eb35b664109c4b35b5496b664e69516de2a1ed9697ec4b548",
+      "unchanged": true
+    },
+    {
+      "path": "asset/molcascade/src/molcascade/contracts/registry.py",
+      "baseline_sha256": "d3bcdcd542c32b0a6a1dfaaab89b868c52f05a918d439e4bd31557a49d6e00af",
+      "current_sha256": "d3bcdcd542c32b0a6a1dfaaab89b868c52f05a918d439e4bd31557a49d6e00af",
+      "unchanged": true
+    },
+    {
+      "path": "asset/molcascade/src/molcascade/contracts/schemas.py",
+      "baseline_sha256": "c5fbebd59f3724d3923f1ca91b61d297b4b34704653ee3bb2d956810b5d2d6d1",
+      "current_sha256": "c5fbebd59f3724d3923f1ca91b61d297b4b34704653ee3bb2d956810b5d2d6d1",
+      "unchanged": true
+    },
+    {
+      "path": "asset/molcascade/src/molcascade/contracts/validation.py",
+      "baseline_sha256": "098008aa932193256a6ea2b7007d979f03c6c07ddec2b1a1a3a46bea6622fd72",
+      "current_sha256": "098008aa932193256a6ea2b7007d979f03c6c07ddec2b1a1a3a46bea6622fd72",
+      "unchanged": true
+    },
+    {
+      "path": "asset/molcascade/src/molcascade/decisions.py",
+      "baseline_sha256": "bf8aaafff2c7288012924463eed872b8144e683f0faa2980346d21cc84fb33d9",
+      "current_sha256": "bf8aaafff2c7288012924463eed872b8144e683f0faa2980346d21cc84fb33d9",
+      "unchanged": true
+    },
+    {
+      "path": "asset/molcascade/src/molcascade/environment/__init__.py",
+      "baseline_sha256": "f1afdad51263dcd638dd5d5e441cc4905d25602a1ca84037155275ada4328a3d",
+      "current_sha256": "f1afdad51263dcd638dd5d5e441cc4905d25602a1ca84037155275ada4328a3d",
+      "unchanged": true
+    },
+    {
+      "path": "asset/molcascade/src/molcascade/environment/detect.py",
+      "baseline_sha256": "891a9ff44fcd4698049d8f407c0a10eecb433bf723e1daa8fa81e502fbb30773",
+      "current_sha256": "891a9ff44fcd4698049d8f407c0a10eecb433bf723e1daa8fa81e502fbb30773",
+      "unchanged": true
+    },
+    {
+      "path": "asset/molcascade/src/molcascade/environment/models.py",
+      "baseline_sha256": "53670684d74602ec0f8966c1ea6bb560f311ee5839565a5d34937187faa4cdc2",
+      "current_sha256": "53670684d74602ec0f8966c1ea6bb560f311ee5839565a5d34937187faa4cdc2",
+      "unchanged": true
+    },
+    {
+      "path": "asset/molcascade/src/molcascade/errors.py",
+      "baseline_sha256": "1c26330062b1f8669cfdf1191154d0c26bda7a2995581d1e0a099c435b4a3dbc",
+      "current_sha256": "1c26330062b1f8669cfdf1191154d0c26bda7a2995581d1e0a099c435b4a3dbc",
+      "unchanged": true
+    },
+    {
+      "path": "asset/molcascade/src/molcascade/explain.py",
+      "baseline_sha256": "722ad2269f2e8fa442931d05cc60a4672af250be7e1fbf36663f4a441cde5958",
+      "current_sha256": "722ad2269f2e8fa442931d05cc60a4672af250be7e1fbf36663f4a441cde5958",
+      "unchanged": true
+    },
+    {
+      "path": "asset/molcascade/src/molcascade/handoff.py",
+      "baseline_sha256": "d8d253008d4c73a2109877e19af50d2155ab0266f770afbd46ef135a277ae24b",
+      "current_sha256": "d8d253008d4c73a2109877e19af50d2155ab0266f770afbd46ef135a277ae24b",
+      "unchanged": true
+    },
+    {
+      "path": "asset/molcascade/src/molcascade/io/__init__.py",
+      "baseline_sha256": "bfa85ef2e83c4246aa6f014d926db8a42caea26a159e015c11fc37ce914ac5bb",
+      "current_sha256": "bfa85ef2e83c4246aa6f014d926db8a42caea26a159e015c11fc37ce914ac5bb",
+      "unchanged": true
+    },
+    {
+      "path": "asset/molcascade/src/molcascade/io/atomic.py",
+      "baseline_sha256": "da8869b78fdef8fac379b90936a3aebbb3d4b89e603b11c55f9696c270158531",
+      "current_sha256": "da8869b78fdef8fac379b90936a3aebbb3d4b89e603b11c55f9696c270158531",
+      "unchanged": true
+    },
+    {
+      "path": "asset/molcascade/src/molcascade/io/molecules.py",
+      "baseline_sha256": "ca7447b4d970bb862f32561943b5cd347fab65c62bab62aa5b671878fb883c6f",
+      "current_sha256": "ca7447b4d970bb862f32561943b5cd347fab65c62bab62aa5b671878fb883c6f",
+      "unchanged": true
+    },
+    {
+      "path": "asset/molcascade/src/molcascade/io/parquet.py",
+      "baseline_sha256": "4907cb4d3dcd90bd30615b451fa5729f0a794b58984eeffbfbb90f1cfe3e8711",
+      "current_sha256": "4907cb4d3dcd90bd30615b451fa5729f0a794b58984eeffbfbb90f1cfe3e8711",
+      "unchanged": true
+    },
+    {
+      "path": "asset/molcascade/src/molcascade/mcp/__init__.py",
+      "baseline_sha256": "49ba0a8046884beeb8388f05b6260a3c87f2dfd84f1bc58f9595aed751914c5c",
+      "current_sha256": "49ba0a8046884beeb8388f05b6260a3c87f2dfd84f1bc58f9595aed751914c5c",
+      "unchanged": true
+    },
+    {
+      "path": "asset/molcascade/src/molcascade/mcp/_common.py",
+      "baseline_sha256": "fbc18be1acbef7b68a7011df3d2e41efe6220ebbaa662bf4a99dd6c725a5ac65",
+      "current_sha256": "fbc18be1acbef7b68a7011df3d2e41efe6220ebbaa662bf4a99dd6c725a5ac65",
+      "unchanged": true
+    },
+    {
+      "path": "asset/molcascade/src/molcascade/mcp/audit.py",
+      "baseline_sha256": "425f9b3cea9a971f297f641ab45a72bb249eedc3a25f47190225ac1bdb45f4f0",
+      "current_sha256": "425f9b3cea9a971f297f641ab45a72bb249eedc3a25f47190225ac1bdb45f4f0",
+      "unchanged": true
+    },
+    {
+      "path": "asset/molcascade/src/molcascade/mcp/configuration.py",
+      "baseline_sha256": "3270b219096edf247d5c7ffbe2b9466a54fc6e691b4d78a3216c207b895a5c44",
+      "current_sha256": "3270b219096edf247d5c7ffbe2b9466a54fc6e691b4d78a3216c207b895a5c44",
+      "unchanged": true
+    },
+    {
+      "path": "asset/molcascade/src/molcascade/mcp/environment.py",
+      "baseline_sha256": "9e737366ed6e5e26bb787d68a60baa579a1cb2395665de8f8796e323c73aaf18",
+      "current_sha256": "9e737366ed6e5e26bb787d68a60baa579a1cb2395665de8f8796e323c73aaf18",
+      "unchanged": true
+    },
+    {
+      "path": "asset/molcascade/src/molcascade/mcp/resources.py",
+      "baseline_sha256": "644af581a39fc3423f7274baff2958dfac4facd991d463600924724093e812d1",
+      "current_sha256": "644af581a39fc3423f7274baff2958dfac4facd991d463600924724093e812d1",
+      "unchanged": true
+    },
+    {
+      "path": "asset/molcascade/src/molcascade/mcp/results.py",
+      "baseline_sha256": "9519dac2ab5d68d15752d218d1cc8ba3dfc64a930240fdc7c7bd76549ce7bb37",
+      "current_sha256": "9519dac2ab5d68d15752d218d1cc8ba3dfc64a930240fdc7c7bd76549ce7bb37",
+      "unchanged": true
+    },
+    {
+      "path": "asset/molcascade/src/molcascade/mcp/screening.py",
+      "baseline_sha256": "678d72222dd8465ae1b7e7f5f059f3e7baf2dba56a9a591acce90aa4f037ec70",
+      "current_sha256": "678d72222dd8465ae1b7e7f5f059f3e7baf2dba56a9a591acce90aa4f037ec70",
+      "unchanged": true
+    },
+    {
+      "path": "asset/molcascade/src/molcascade/mcp_server.py",
+      "baseline_sha256": "af76fc56b807d59cd9026747107c59f351c619695681570bc3fc2d11b9adb6aa",
+      "current_sha256": "af76fc56b807d59cd9026747107c59f351c619695681570bc3fc2d11b9adb6aa",
+      "unchanged": true
+    },
+    {
+      "path": "asset/molcascade/src/molcascade/parallel/__init__.py",
+      "baseline_sha256": "58233625db01cdfa54f360c6c55a32450b30be4b3658004a08d5b64c2c517b6e",
+      "current_sha256": "58233625db01cdfa54f360c6c55a32450b30be4b3658004a08d5b64c2c517b6e",
+      "unchanged": true
+    },
+    {
+      "path": "asset/molcascade/src/molcascade/parallel/devices.py",
+      "baseline_sha256": "c2c0a06239e3990be221901a10c5203188f643347f0d2267b1f92db49d572805",
+      "current_sha256": "c2c0a06239e3990be221901a10c5203188f643347f0d2267b1f92db49d572805",
+      "unchanged": true
+    },
+    {
+      "path": "asset/molcascade/src/molcascade/parallel/models.py",
+      "baseline_sha256": "6d92941be949288fd8b54788104c5b07395e7df0cacf1e2ec4b969d5e1d9e2a8",
+      "current_sha256": "6d92941be949288fd8b54788104c5b07395e7df0cacf1e2ec4b969d5e1d9e2a8",
+      "unchanged": true
+    },
+    {
+      "path": "asset/molcascade/src/molcascade/parallel/shards.py",
+      "baseline_sha256": "74981368dd031ce7d86abc92d8fc64a061faeec58e76858b18202a28a04e4a4b",
+      "current_sha256": "74981368dd031ce7d86abc92d8fc64a061faeec58e76858b18202a28a04e4a4b",
+      "unchanged": true
+    },
+    {
+      "path": "asset/molcascade/src/molcascade/pipeline/__init__.py",
+      "baseline_sha256": "8b685de47b02687ab626b3e7a4fe926742f6c423fe64e5bd1ccf9eb5001111d4",
+      "current_sha256": "8b685de47b02687ab626b3e7a4fe926742f6c423fe64e5bd1ccf9eb5001111d4",
+      "unchanged": true
+    },
+    {
+      "path": "asset/molcascade/src/molcascade/pipeline/compiler.py",
+      "baseline_sha256": "62eb00bee7ec557acb9a6b566c24e8ba5de4d3b3840699d90458faea26c40a7a",
+      "current_sha256": "62eb00bee7ec557acb9a6b566c24e8ba5de4d3b3840699d90458faea26c40a7a",
+      "unchanged": true
+    },
+    {
+      "path": "asset/molcascade/src/molcascade/pipeline/models.py",
+      "baseline_sha256": "0747d41743d0deca432195268f7873e9aab9d15441b0a8992ebc9ba2093c1f2d",
+      "current_sha256": "0747d41743d0deca432195268f7873e9aab9d15441b0a8992ebc9ba2093c1f2d",
+      "unchanged": true
+    },
+    {
+      "path": "asset/molcascade/src/molcascade/pipeline/revision.py",
+      "baseline_sha256": "43bd3bf0b3a7930a232d00fbd5b385b118d54431f054e631ef6262655fe60a4d",
+      "current_sha256": "43bd3bf0b3a7930a232d00fbd5b385b118d54431f054e631ef6262655fe60a4d",
+      "unchanged": true
+    },
+    {
+      "path": "asset/molcascade/src/molcascade/plugins/__init__.py",
+      "baseline_sha256": "53a8e559fc48fe02e854f1e24ca680b6d69f2dea2d4979abf59ffbf0553a64fc",
+      "current_sha256": "53a8e559fc48fe02e854f1e24ca680b6d69f2dea2d4979abf59ffbf0553a64fc",
+      "unchanged": true
+    },
+    {
+      "path": "asset/molcascade/src/molcascade/plugins/api.py",
+      "baseline_sha256": "835abd7487c1fca33a95ada8f4e8e352a9169be4214351b65a311d97ae928c72",
+      "current_sha256": "835abd7487c1fca33a95ada8f4e8e352a9169be4214351b65a311d97ae928c72",
+      "unchanged": true
+    },
+    {
+      "path": "asset/molcascade/src/molcascade/plugins/builtin/__init__.py",
+      "baseline_sha256": "e35b0dd0a0c861f09e40272af324178005552a8268ae920dde7e3f8941d82e76",
+      "current_sha256": "e35b0dd0a0c861f09e40272af324178005552a8268ae920dde7e3f8941d82e76",
+      "unchanged": true
+    },
+    {
+      "path": "asset/molcascade/src/molcascade/plugins/builtin/_bundles.py",
+      "baseline_sha256": "6eec8cd980188d75e45e716428fed54d58aa55c7982a1ded29b7b8b997bbad3c",
+      "current_sha256": "6eec8cd980188d75e45e716428fed54d58aa55c7982a1ded29b7b8b997bbad3c",
+      "unchanged": true
+    },
+    {
+      "path": "asset/molcascade/src/molcascade/plugins/builtin/_machine_paths.py",
+      "baseline_sha256": "546b798dd77bc398e505f3dedc12542221037c7254a22cfa475988eb9a4ac328",
+      "current_sha256": "546b798dd77bc398e505f3dedc12542221037c7254a22cfa475988eb9a4ac328",
+      "unchanged": true
+    },
+    {
+      "path": "asset/molcascade/src/molcascade/plugins/builtin/admet.py",
+      "baseline_sha256": "bac70e527ebb005961070050dc653e3eaa13913e45832b90a7b5d7458cc207fd",
+      "current_sha256": "bac70e527ebb005961070050dc653e3eaa13913e45832b90a7b5d7458cc207fd",
+      "unchanged": true
+    },
+    {
+      "path": "asset/molcascade/src/molcascade/plugins/builtin/aizynthfinder.py",
+      "baseline_sha256": "4d1cf7967fb7ec7744d6370fb16241fcd7b994d301edb73d603dca9749df7268",
+      "current_sha256": "4d1cf7967fb7ec7744d6370fb16241fcd7b994d301edb73d603dca9749df7268",
+      "unchanged": true
+    },
+    {
+      "path": "asset/molcascade/src/molcascade/plugins/builtin/boltz2.py",
+      "baseline_sha256": "267fe4bbee55bc65f4f97c94d5209460ea01b6d38a42b24d1149267d9408ee4f",
+      "current_sha256": "267fe4bbee55bc65f4f97c94d5209460ea01b6d38a42b24d1149267d9408ee4f",
+      "unchanged": true
+    },
+    {
+      "path": "asset/molcascade/src/molcascade/plugins/builtin/chembl_check.py",
+      "baseline_sha256": "6f0e429f63f6a858aa28a3124907b0d950334d0b386aaf8ea2f99507d234ca5f",
+      "current_sha256": "6f0e429f63f6a858aa28a3124907b0d950334d0b386aaf8ea2f99507d234ca5f",
+      "unchanged": true
+    },
+    {
+      "path": "asset/molcascade/src/molcascade/plugins/builtin/chemprop_model.py",
+      "baseline_sha256": "af00e7b4e755fe3f4a0d1f89d4fe491c5308661451bc65bf41afbf0e90229f09",
+      "current_sha256": "af00e7b4e755fe3f4a0d1f89d4fe491c5308661451bc65bf41afbf0e90229f09",
+      "unchanged": true
+    },
+    {
+      "path": "asset/molcascade/src/molcascade/plugins/builtin/custom_model.py",
+      "baseline_sha256": "2e5b95be33198f863dd8c6dc030253b7b87f679434abcccb90714083caa66e84",
+      "current_sha256": "2e5b95be33198f863dd8c6dc030253b7b87f679434abcccb90714083caa66e84",
+      "unchanged": true
+    },
+    {
+      "path": "asset/molcascade/src/molcascade/plugins/builtin/diversity.py",
+      "baseline_sha256": "66ebdeefa2f6b9539c6b120e67714e8b678986cc5203644ddb0e1ea50c652f7e",
+      "current_sha256": "66ebdeefa2f6b9539c6b120e67714e8b678986cc5203644ddb0e1ea50c652f7e",
+      "unchanged": true
+    },
+    {
+      "path": "asset/molcascade/src/molcascade/plugins/builtin/docking/__init__.py",
+      "baseline_sha256": "9b614b5fe75cb431df64348e57c79b6385421bc9398226338d35e8bd02c3eabf",
+      "current_sha256": "9b614b5fe75cb431df64348e57c79b6385421bc9398226338d35e8bd02c3eabf",
+      "unchanged": true
+    },
+    {
+      "path": "asset/molcascade/src/molcascade/plugins/builtin/docking/common.py",
+      "baseline_sha256": "e909b7a964b05039537e69f74498836ff077cb25e5d3e3bdb8f96e9f82b0aa75",
+      "current_sha256": "e909b7a964b05039537e69f74498836ff077cb25e5d3e3bdb8f96e9f82b0aa75",
+      "unchanged": true
+    },
+    {
+      "path": "asset/molcascade/src/molcascade/plugins/builtin/docking/gnina.py",
+      "baseline_sha256": "b39ef842e7964911a8942349b9188b75bafd9867e77ced9f73b9b3611e423c46",
+      "current_sha256": "b39ef842e7964911a8942349b9188b75bafd9867e77ced9f73b9b3611e423c46",
+      "unchanged": true
+    },
+    {
+      "path": "asset/molcascade/src/molcascade/plugins/builtin/docking/karmadock.py",
+      "baseline_sha256": "3b1b7b2650473bd1d24e45ee5919fbdfd292e656eb5978d5013d33b59888f616",
+      "current_sha256": "3b1b7b2650473bd1d24e45ee5919fbdfd292e656eb5978d5013d33b59888f616",
+      "unchanged": true
+    },
+    {
+      "path": "asset/molcascade/src/molcascade/plugins/builtin/docking/ligand_prep.py",
+      "baseline_sha256": "feebe6547958f13f1739bd3bade1c494a13986856aa42f49e9b235aefac0969b",
+      "current_sha256": "feebe6547958f13f1739bd3bade1c494a13986856aa42f49e9b235aefac0969b",
+      "unchanged": true
+    },
+    {
+      "path": "asset/molcascade/src/molcascade/plugins/builtin/docking/pose_quality.py",
+      "baseline_sha256": "56086cc8fbccdd89671fb3e4720e4479a6bf05d9b1ba8c5ec1af9b6f2571bb40",
+      "current_sha256": "56086cc8fbccdd89671fb3e4720e4479a6bf05d9b1ba8c5ec1af9b6f2571bb40",
+      "unchanged": true
+    },
+    {
+      "path": "asset/molcascade/src/molcascade/plugins/builtin/docking/redock.py",
+      "baseline_sha256": "d49c0582bc81d2c75df53e155b43c1d4d05eafbdf3c601c80cbb8482a349340b",
+      "current_sha256": "d49c0582bc81d2c75df53e155b43c1d4d05eafbdf3c601c80cbb8482a349340b",
+      "unchanged": true
+    },
+    {
+      "path": "asset/molcascade/src/molcascade/plugins/builtin/docking/unidock.py",
+      "baseline_sha256": "2cdcaa0123946a84b3a44fffbcf03d8a0f3e503e57b4484bc11ba59691c24919",
+      "current_sha256": "2cdcaa0123946a84b3a44fffbcf03d8a0f3e503e57b4484bc11ba59691c24919",
+      "unchanged": true
+    },
+    {
+      "path": "asset/molcascade/src/molcascade/plugins/builtin/druglikeness.py",
+      "baseline_sha256": "611a660e623d063365304ff95e0d8ab74375201739132f34ab9c676a7cef33ee",
+      "current_sha256": "611a660e623d063365304ff95e0d8ab74375201739132f34ab9c676a7cef33ee",
+      "unchanged": true
+    },
+    {
+      "path": "asset/molcascade/src/molcascade/plugins/builtin/evidence_gates.py",
+      "baseline_sha256": "cd00ba054ffdcab4afdcd4435280cc86deb88782ad5b78316fa0038df046329d",
+      "current_sha256": "cd00ba054ffdcab4afdcd4435280cc86deb88782ad5b78316fa0038df046329d",
+      "unchanged": true
+    },
+    {
+      "path": "asset/molcascade/src/molcascade/plugins/builtin/exporters.py",
+      "baseline_sha256": "0339dc2c4f65c46313c8b8d488bc988adc1a141636060c4c19d16313813fea69",
+      "current_sha256": "0339dc2c4f65c46313c8b8d488bc988adc1a141636060c4c19d16313813fea69",
+      "unchanged": true
+    },
+    {
+      "path": "asset/molcascade/src/molcascade/plugins/builtin/features.py",
+      "baseline_sha256": "d33c57ca288ed01951fb3ca36f77398b42eef77dc53caf661f27ab62f6839947",
+      "current_sha256": "d33c57ca288ed01951fb3ca36f77398b42eef77dc53caf661f27ab62f6839947",
+      "unchanged": true
+    },
+    {
+      "path": "asset/molcascade/src/molcascade/plugins/builtin/hard_gate.py",
+      "baseline_sha256": "2f83fea79877915ffdbd1f235f17a8e8cc27640af16a000230fc0afc4c21c5df",
+      "current_sha256": "2f83fea79877915ffdbd1f235f17a8e8cc27640af16a000230fc0afc4c21c5df",
+      "unchanged": true
+    },
+    {
+      "path": "asset/molcascade/src/molcascade/plugins/builtin/lilly_medchem.py",
+      "baseline_sha256": "2d0e0bbff13141cc293373a5bda72cf1091bf4b620f9df30e20b535b899ef8a6",
+      "current_sha256": "2d0e0bbff13141cc293373a5bda72cf1091bf4b620f9df30e20b535b899ef8a6",
+      "unchanged": true
+    },
+    {
+      "path": "asset/molcascade/src/molcascade/plugins/builtin/md_handoff.py",
+      "baseline_sha256": "0f0c45456aab34e3ad5e7f518c4f7bdfd86efe9737ef6aa54b6ca9bb47a8c730",
+      "current_sha256": "0f0c45456aab34e3ad5e7f518c4f7bdfd86efe9737ef6aa54b6ca9bb47a8c730",
+      "unchanged": true
+    },
+    {
+      "path": "asset/molcascade/src/molcascade/plugins/builtin/md_handoff_gate.py",
+      "baseline_sha256": "9b9e3035f1008a6d486dc71b5d044b9085b685438f7b5787313ea9d5382d837e",
+      "current_sha256": "9b9e3035f1008a6d486dc71b5d044b9085b685438f7b5787313ea9d5382d837e",
+      "unchanged": true
+    },
+    {
+      "path": "asset/molcascade/src/molcascade/plugins/builtin/medchem_alerts.py",
+      "baseline_sha256": "6e3c412daef1b5b8c1855dff211678762619d046e2898b802d434aa4284529ca",
+      "current_sha256": "6e3c412daef1b5b8c1855dff211678762619d046e2898b802d434aa4284529ca",
+      "unchanged": true
+    },
+    {
+      "path": "asset/molcascade/src/molcascade/plugins/builtin/medchem_rules.py",
+      "baseline_sha256": "52e46ea0515d130ed70ff395e81e225247e1a8eef0c02a0eb01263633a80ac31",
+      "current_sha256": "52e46ea0515d130ed70ff395e81e225247e1a8eef0c02a0eb01263633a80ac31",
+      "unchanged": true
+    },
+    {
+      "path": "asset/molcascade/src/molcascade/plugins/builtin/medchem_support.py",
+      "baseline_sha256": "1f0bcd51ed31c943a5fb19cb181adaf5adc1a6fe4e4a1e9c6bd62c7a732d1d4f",
+      "current_sha256": "1f0bcd51ed31c943a5fb19cb181adaf5adc1a6fe4e4a1e9c6bd62c7a732d1d4f",
+      "unchanged": true
+    },
+    {
+      "path": "asset/molcascade/src/molcascade/plugins/builtin/mordred_gate.py",
+      "baseline_sha256": "d9aa27b7ac79ccbe04e7116a7d278d546891c79d480a2491cc45c6981541bfa7",
+      "current_sha256": "d9aa27b7ac79ccbe04e7116a7d278d546891c79d480a2491cc45c6981541bfa7",
+      "unchanged": true
+    },
+    {
+      "path": "asset/molcascade/src/molcascade/plugins/builtin/normalized_docking_score.py",
+      "baseline_sha256": "7456427782fe6dc79aaff0aaa48b1f53f88ad50db9163a51bfa2447c547a541c",
+      "current_sha256": "7456427782fe6dc79aaff0aaa48b1f53f88ad50db9163a51bfa2447c547a541c",
+      "unchanged": true
+    },
+    {
+      "path": "asset/molcascade/src/molcascade/plugins/builtin/openadmet.py",
+      "baseline_sha256": "02d989823fe79df804b0e14e04788d1c2e0f0e768a6095a74d0bbdbeeb2512b7",
+      "current_sha256": "02d989823fe79df804b0e14e04788d1c2e0f0e768a6095a74d0bbdbeeb2512b7",
+      "unchanged": true
+    },
+    {
+      "path": "asset/molcascade/src/molcascade/plugins/builtin/policy.py",
+      "baseline_sha256": "0ff323c405285722f0161bc285e413162fbdb5cb78f52d8ec53b6a91907bccce",
+      "current_sha256": "0ff323c405285722f0161bc285e413162fbdb5cb78f52d8ec53b6a91907bccce",
+      "unchanged": true
+    },
+    {
+      "path": "asset/molcascade/src/molcascade/plugins/builtin/pose_strain.py",
+      "baseline_sha256": "95de59ee6778cf48110016aafb6f8a49bcf032536ee0413b10b14d37db439a10",
+      "current_sha256": "95de59ee6778cf48110016aafb6f8a49bcf032536ee0413b10b14d37db439a10",
+      "unchanged": true
+    },
+    {
+      "path": "asset/molcascade/src/molcascade/plugins/builtin/property_gate.py",
+      "baseline_sha256": "f76f6f638b1eff0d680a7b10c48187b7dcebfddcfe4a7233305568ae4028ed23",
+      "current_sha256": "f76f6f638b1eff0d680a7b10c48187b7dcebfddcfe4a7233305568ae4028ed23",
+      "unchanged": true
+    },
+    {
+      "path": "asset/molcascade/src/molcascade/plugins/builtin/rd_filters_alerts.py",
+      "baseline_sha256": "f9ed6117248f2440ad23d3ad103b96da8316290800ac2dadfea0dcf58427c909",
+      "current_sha256": "f9ed6117248f2440ad23d3ad103b96da8316290800ac2dadfea0dcf58427c909",
+      "unchanged": true
+    },
+    {
+      "path": "asset/molcascade/src/molcascade/plugins/builtin/ring_topology_gate.py",
+      "baseline_sha256": "fe618f87eddf2336b42a969f6c64b5eb7d0fad949456221efd41c376967a28af",
+      "current_sha256": "fe618f87eddf2336b42a969f6c64b5eb7d0fad949456221efd41c376967a28af",
+      "unchanged": true
+    },
+    {
+      "path": "asset/molcascade/src/molcascade/plugins/builtin/scscore.py",
+      "baseline_sha256": "b871310c91502755efaaf643f3244bc1e59a4cdff86a314a9edfb8e50c9cf5b3",
+      "current_sha256": "b871310c91502755efaaf643f3244bc1e59a4cdff86a314a9edfb8e50c9cf5b3",
+      "unchanged": true
+    },
+    {
+      "path": "asset/molcascade/src/molcascade/plugins/builtin/similarity.py",
+      "baseline_sha256": "2587c323dd272656efff71b68610d2bf0b5f2a59cc9fb830bd26b2985ade9f0a",
+      "current_sha256": "2587c323dd272656efff71b68610d2bf0b5f2a59cc9fb830bd26b2985ade9f0a",
+      "unchanged": true
+    },
+    {
+      "path": "asset/molcascade/src/molcascade/plugins/builtin/similarity_fpsim2.py",
+      "baseline_sha256": "d4d347dcd704d151914e4e2414eab66bed6148011ba7435b012bef5a54378c02",
+      "current_sha256": "d4d347dcd704d151914e4e2414eab66bed6148011ba7435b012bef5a54378c02",
+      "unchanged": true
+    },
+    {
+      "path": "asset/molcascade/src/molcascade/plugins/builtin/sources.py",
+      "baseline_sha256": "6632b43ea75099df2a6523873409319c50078e2530436128e484a52d0a0e3288",
+      "current_sha256": "6632b43ea75099df2a6523873409319c50078e2530436128e484a52d0a0e3288",
+      "unchanged": true
+    },
+    {
+      "path": "asset/molcascade/src/molcascade/plugins/builtin/specificity_panel.py",
+      "baseline_sha256": "fe547a37b0e509682c9d488d6c701d31821b397e39065df8aae4a3b72c17de1a",
+      "current_sha256": "fe547a37b0e509682c9d488d6c701d31821b397e39065df8aae4a3b72c17de1a",
+      "unchanged": true
+    },
+    {
+      "path": "asset/molcascade/src/molcascade/plugins/builtin/standardize.py",
+      "baseline_sha256": "cc1e48fefcedda6c1902a6106cac04c5f3a66cb5ebbdaf3961226349db4110c7",
+      "current_sha256": "cc1e48fefcedda6c1902a6106cac04c5f3a66cb5ebbdaf3961226349db4110c7",
+      "unchanged": true
+    },
+    {
+      "path": "asset/molcascade/src/molcascade/plugins/builtin/structural_alerts.py",
+      "baseline_sha256": "2b62efcc9b2acd20c3d2da768d53499a964e6c81d07137eb9ac60c978474994d",
+      "current_sha256": "2b62efcc9b2acd20c3d2da768d53499a964e6c81d07137eb9ac60c978474994d",
+      "unchanged": true
+    },
+    {
+      "path": "asset/molcascade/src/molcascade/plugins/builtin/synthesis.py",
+      "baseline_sha256": "92af0e2863eb8cbe55b672714a23076bb2cfa58fbf469a8d5bdb7c159ebd0e0d",
+      "current_sha256": "92af0e2863eb8cbe55b672714a23076bb2cfa58fbf469a8d5bdb7c159ebd0e0d",
+      "unchanged": true
+    },
+    {
+      "path": "asset/molcascade/src/molcascade/plugins/manifest.py",
+      "baseline_sha256": "8b311effe3ef1391ffeb1eae9b0e7b195bbbfab8b1e963d3647b2fd8cb7ba8ae",
+      "current_sha256": "8b311effe3ef1391ffeb1eae9b0e7b195bbbfab8b1e963d3647b2fd8cb7ba8ae",
+      "unchanged": true
+    },
+    {
+      "path": "asset/molcascade/src/molcascade/plugins/registry.py",
+      "baseline_sha256": "206ee0e4d0115d36d68aae754c2a0db8406e8430faaaa7f1ac89e2718bb9cc92",
+      "current_sha256": "206ee0e4d0115d36d68aae754c2a0db8406e8430faaaa7f1ac89e2718bb9cc92",
+      "unchanged": true
+    },
+    {
+      "path": "asset/molcascade/src/molcascade/py.typed",
+      "baseline_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "current_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "unchanged": true
+    },
+    {
+      "path": "asset/molcascade/src/molcascade/recall.py",
+      "baseline_sha256": "c4f16c918a82cee7640aff86f569bfd3892c9665267fd4365acb54cc36f18937",
+      "current_sha256": "c4f16c918a82cee7640aff86f569bfd3892c9665267fd4365acb54cc36f18937",
+      "unchanged": true
+    },
+    {
+      "path": "asset/molcascade/src/molcascade/runtime/__init__.py",
+      "baseline_sha256": "21878ff4e3e498ae83f383f2dd25fe39b6330004d9641609d194983737c2d92b",
+      "current_sha256": "21878ff4e3e498ae83f383f2dd25fe39b6330004d9641609d194983737c2d92b",
+      "unchanged": true
+    },
+    {
+      "path": "asset/molcascade/src/molcascade/runtime/audit.py",
+      "baseline_sha256": "c22a30c079e5c12129739b9132e8548e2a1d0826990567ff5fcab984e2f0276e",
+      "current_sha256": "c22a30c079e5c12129739b9132e8548e2a1d0826990567ff5fcab984e2f0276e",
+      "unchanged": true
+    },
+    {
+      "path": "asset/molcascade/src/molcascade/runtime/cache.py",
+      "baseline_sha256": "0d4f09993c9b9feb82a8613f5fc97caa4be092baca11c1d7a9ba7ac4e04270c4",
+      "current_sha256": "50cbb6eb92a5985173d3f366fe5f9677060ef99038119a52c7b5992eeabbdc59",
+      "unchanged": false
+    },
+    {
+      "path": "asset/molcascade/src/molcascade/runtime/locking.py",
+      "baseline_sha256": "fe697974b4ee254b3475fd51a8a38040dc0c6d11ae9414d38b6df2360c232ab7",
+      "current_sha256": "fe697974b4ee254b3475fd51a8a38040dc0c6d11ae9414d38b6df2360c232ab7",
+      "unchanged": true
+    },
+    {
+      "path": "asset/molcascade/src/molcascade/runtime/models.py",
+      "baseline_sha256": "3df3a40216e3cddaf3ea979438d6e17b86280d690e7b00437f06b56cb12a7bef",
+      "current_sha256": "3df3a40216e3cddaf3ea979438d6e17b86280d690e7b00437f06b56cb12a7bef",
+      "unchanged": true
+    },
+    {
+      "path": "asset/molcascade/src/molcascade/runtime/runner.py",
+      "baseline_sha256": "d495c03cfe2559f7abd38a6b82606debe18a209d1658094746917c67074c323b",
+      "current_sha256": "80ebeb15664ca0f650c9fca799e480cb3eedf84c57754b7c7988f18d835b37ed",
+      "unchanged": false
+    },
+    {
+      "path": "asset/molcascade/src/molcascade/runtime/validation.py",
+      "baseline_sha256": "1c9da7244720ea9d3aa34e59f50886b46a431d981caac46969e24047f37eb85f",
+      "current_sha256": "1c9da7244720ea9d3aa34e59f50886b46a431d981caac46969e24047f37eb85f",
+      "unchanged": true
+    },
+    {
+      "path": "asset/molcascade/src/molcascade/stereo.py",
+      "baseline_sha256": "1e6cc583364c1c294f6c7fc4d2d51c74ad134d6d184fe0481f046a751a9e4483",
+      "current_sha256": "1e6cc583364c1c294f6c7fc4d2d51c74ad134d6d184fe0481f046a751a9e4483",
+      "unchanged": true
+    },
+    {
+      "path": "asset/molcascade/src/molcascade/trace.py",
+      "baseline_sha256": "17a0a2a5a71a137c12afaef60d67ce8a4c2e81d39026799b8eff911cba489ee7",
+      "current_sha256": "17a0a2a5a71a137c12afaef60d67ce8a4c2e81d39026799b8eff911cba489ee7",
+      "unchanged": true
+    },
+    {
+      "path": "asset/molcascade/src/molcascade/ui/__init__.py",
+      "baseline_sha256": "c0c290e67172c83a0bb0c3d41c5af200da411eb4d5a64a9e3d8dbd813c331768",
+      "current_sha256": "c0c290e67172c83a0bb0c3d41c5af200da411eb4d5a64a9e3d8dbd813c331768",
+      "unchanged": true
+    },
+    {
+      "path": "asset/molcascade/src/molcascade/ui/assets/__init__.py",
+      "baseline_sha256": "041965368c3fad707fd91c4d57f1eb5a677131ae892a453a5a78813c0d36e60e",
+      "current_sha256": "041965368c3fad707fd91c4d57f1eb5a677131ae892a453a5a78813c0d36e60e",
+      "unchanged": true
+    },
+    {
+      "path": "asset/molcascade/src/molcascade/ui/assets/builder.css",
+      "baseline_sha256": "43ce9a9d00cf35c5421218304d31b13aba04e688d5c997a96ac4bae425cda2a3",
+      "current_sha256": "43ce9a9d00cf35c5421218304d31b13aba04e688d5c997a96ac4bae425cda2a3",
+      "unchanged": true
+    },
+    {
+      "path": "asset/molcascade/src/molcascade/ui/assets/builder.js",
+      "baseline_sha256": "39d57ecc1ae803b839884af0a0f8e39a278473097b5c28ef3e3cfedf76b9ed10",
+      "current_sha256": "39d57ecc1ae803b839884af0a0f8e39a278473097b5c28ef3e3cfedf76b9ed10",
+      "unchanged": true
+    },
+    {
+      "path": "asset/molcascade/src/molcascade/ui/assets/builder_rules.js",
+      "baseline_sha256": "cd3092b89515f0a92a628edec059fef48d42412741648de7c50e53a6516fb96f",
+      "current_sha256": "cd3092b89515f0a92a628edec059fef48d42412741648de7c50e53a6516fb96f",
+      "unchanged": true
+    },
+    {
+      "path": "asset/molcascade/src/molcascade/ui/assets/cascade.css",
+      "baseline_sha256": "938c6d208e600d2d23681b4afc6b1f859393cc20b0c626d3485b12be0b6a3ce2",
+      "current_sha256": "938c6d208e600d2d23681b4afc6b1f859393cc20b0c626d3485b12be0b6a3ce2",
+      "unchanged": true
+    },
+    {
+      "path": "asset/molcascade/src/molcascade/ui/assets/cascade.js",
+      "baseline_sha256": "b03bee1973f078dd850659163c5bac9b6244bbc7e6014d226c67f1865f04d2cb",
+      "current_sha256": "b03bee1973f078dd850659163c5bac9b6244bbc7e6014d226c67f1865f04d2cb",
+      "unchanged": true
+    },
+    {
+      "path": "asset/molcascade/src/molcascade/ui/assets/molcascade-mark.png",
+      "baseline_sha256": "4d4b2b2082185ebff53da96275fee04c33d220c2a65e5842b6df2a652b6f35f8",
+      "current_sha256": "4d4b2b2082185ebff53da96275fee04c33d220c2a65e5842b6df2a652b6f35f8",
+      "unchanged": true
+    },
+    {
+      "path": "asset/molcascade/src/molcascade/ui/assets/report.css",
+      "baseline_sha256": "69c0303cf91ed70526e35b1418c027f155dfcb48e8512fd4bf49d93610322792",
+      "current_sha256": "69c0303cf91ed70526e35b1418c027f155dfcb48e8512fd4bf49d93610322792",
+      "unchanged": true
+    },
+    {
+      "path": "asset/molcascade/src/molcascade/ui/assets/report.js",
+      "baseline_sha256": "af76c0530ad749d388a3f1c770b36f5f67c63a8ead8e0e02d8b70af4e1e90c4f",
+      "current_sha256": "af76c0530ad749d388a3f1c770b36f5f67c63a8ead8e0e02d8b70af4e1e90c4f",
+      "unchanged": true
+    },
+    {
+      "path": "asset/molcascade/src/molcascade/ui/builder.py",
+      "baseline_sha256": "5c572c1291630fd05e3ddc0f75e485385b8630fe9839300ef99b2f4dd564723a",
+      "current_sha256": "5c572c1291630fd05e3ddc0f75e485385b8630fe9839300ef99b2f4dd564723a",
+      "unchanged": true
+    },
+    {
+      "path": "asset/molcascade/src/molcascade/ui/cascade_builder.py",
+      "baseline_sha256": "c1dff979cb27cef4ebee7e6bae27ad6e719755905b69bd638a191a15acb0478a",
+      "current_sha256": "c1dff979cb27cef4ebee7e6bae27ad6e719755905b69bd638a191a15acb0478a",
+      "unchanged": true
+    },
+    {
+      "path": "asset/molcascade/src/molcascade/ui/report.py",
+      "baseline_sha256": "745d942c6ba91cf97309855171e382467e22cc46ad942bcadb0ddaf078b0eac8",
+      "current_sha256": "745d942c6ba91cf97309855171e382467e22cc46ad942bcadb0ddaf078b0eac8",
+      "unchanged": true
+    },
+    {
+      "path": "asset/molcascade/src/molcascade/ui/serve.py",
+      "baseline_sha256": "3252d647ccfe24bd80007d20a012bb62eb1afb006cfb7c05024a84653dfe66dc",
+      "current_sha256": "3252d647ccfe24bd80007d20a012bb62eb1afb006cfb7c05024a84653dfe66dc",
+      "unchanged": true
+    },
+    {
+      "path": "asset/molcascade/vendor/MANIFEST.md",
+      "baseline_sha256": "e519d972228f5ca2f98fa111dd3cfd9b487f3a626d0dba2ce924c4d30fcdd984",
+      "current_sha256": "e519d972228f5ca2f98fa111dd3cfd9b487f3a626d0dba2ce924c4d30fcdd984",
+      "unchanged": true
+    },
+    {
+      "path": "asset/molcascade/vendor/rd_filters/CITATION.md",
+      "baseline_sha256": "2b86bfbff1cf03d18c7943668aca91935d4ab83751ef302394815c4463cc9e12",
+      "current_sha256": "2b86bfbff1cf03d18c7943668aca91935d4ab83751ef302394815c4463cc9e12",
+      "unchanged": true
+    },
+    {
+      "path": "asset/molcascade/vendor/rd_filters/LICENSE",
+      "baseline_sha256": "2007d43a9ee2091bbf79ac4f356cea359bfca19aaa2e2ef400b17ecc7198674b",
+      "current_sha256": "2007d43a9ee2091bbf79ac4f356cea359bfca19aaa2e2ef400b17ecc7198674b",
+      "unchanged": true
+    },
+    {
+      "path": "asset/molcascade/vendor/rd_filters/data/alert_collection.csv",
+      "baseline_sha256": "92f292322b94e150bbb58f6726d034b7dbf3fd3aa7f87311028cb9ca736f837f",
+      "current_sha256": "92f292322b94e150bbb58f6726d034b7dbf3fd3aa7f87311028cb9ca736f837f",
+      "unchanged": true
+    },
+    {
+      "path": "asset/molcascade/vendor/rd_filters/data/rules.json",
+      "baseline_sha256": "60911b2d7dc92e342fc7c159a46a0e8ec877ab177bbd8fa1b05cb2d322cef4ee",
+      "current_sha256": "60911b2d7dc92e342fc7c159a46a0e8ec877ab177bbd8fa1b05cb2d322cef4ee",
+      "unchanged": true
+    },
+    {
+      "path": "asset/molcascade/vendor/rd_filters/rd_filters.py",
+      "baseline_sha256": "49d7c7b07009111c1177840bbbdbc5026c30b931ec6d08a83f185565c001629d",
+      "current_sha256": "49d7c7b07009111c1177840bbbdbc5026c30b931ec6d08a83f185565c001629d",
+      "unchanged": true
+    },
+    {
+      "path": "asset/molcascade/vendor/scscore/CITATION.md",
+      "baseline_sha256": "19bfb18ff336d87750525ae34e5c98542bcade6820b55013797616c160c61fd4",
+      "current_sha256": "19bfb18ff336d87750525ae34e5c98542bcade6820b55013797616c160c61fd4",
+      "unchanged": true
+    },
+    {
+      "path": "asset/molcascade/vendor/scscore/LICENSE",
+      "baseline_sha256": "df8e2cbb5c5f0b36aa6eabcd32bd80c8dbacb6a00b5d2269675716a8e19138aa",
+      "current_sha256": "df8e2cbb5c5f0b36aa6eabcd32bd80c8dbacb6a00b5d2269675716a8e19138aa",
+      "unchanged": true
+    },
+    {
+      "path": "asset/molcascade/vendor/scscore/standalone_model_numpy.py",
+      "baseline_sha256": "07eebba3c799760b1634541b7e8adb494c12c61f142de82795c4d17972e1027e",
+      "current_sha256": "07eebba3c799760b1634541b7e8adb494c12c61f142de82795c4d17972e1027e",
+      "unchanged": true
+    },
+    {
+      "path": "src/etalon/active/prism.py",
+      "baseline_sha256": "dfe69de8d5fab81c520e94d01fc99f21653573a84d3843f7b09113f2f00356ba",
+      "current_sha256": "dfe69de8d5fab81c520e94d01fc99f21653573a84d3843f7b09113f2f00356ba",
+      "unchanged": true
+    },
+    {
+      "path": "src/etalon/boundary/prism_v1.py",
+      "baseline_sha256": "4ed54ec83da216d79b140d987893f421971df018391c80c2a9a537691dc4d20f",
+      "current_sha256": "4ed54ec83da216d79b140d987893f421971df018391c80c2a9a537691dc4d20f",
+      "unchanged": true
+    },
+    {
+      "path": "src/etalon/data/design.py",
+      "baseline_sha256": "6d2804445820f36c4f0c80463c98eeb9d6dcd1b26072446a493c76c8ebde4cbe",
+      "current_sha256": "6d2804445820f36c4f0c80463c98eeb9d6dcd1b26072446a493c76c8ebde4cbe",
+      "unchanged": true
+    },
+    {
+      "path": "src/etalon/research/NEXT_DIAGNOSTIC.md",
+      "baseline_sha256": "f0a871f808fc44bca62cd529e895faae8bbe5ecc6991b5890e85d3daa9829fe0",
+      "current_sha256": "f0a871f808fc44bca62cd529e895faae8bbe5ecc6991b5890e85d3daa9829fe0",
+      "unchanged": true
+    },
+    {
+      "path": "src/etalon/research/R3B.md",
+      "baseline_sha256": "e537356d7c810da24187ec0c0342d586f45e9267d435ff94debbc5f8f59fe068",
+      "current_sha256": "e537356d7c810da24187ec0c0342d586f45e9267d435ff94debbc5f8f59fe068",
+      "unchanged": true
+    },
+    {
+      "path": "src/etalon/research/R4.md",
+      "baseline_sha256": "6dbe00f13292fda09eed35d0a4dbbbcfb4afa777c27967af9d665e3aaba05695",
+      "current_sha256": "6dbe00f13292fda09eed35d0a4dbbbcfb4afa777c27967af9d665e3aaba05695",
+      "unchanged": true
+    },
+    {
+      "path": "src/etalon/research/R4B.md",
+      "baseline_sha256": "d74ee61f5f51798d6241ed7275f0288f0162a2d2fb6f33ce9620a52f90a1ed90",
+      "current_sha256": "d74ee61f5f51798d6241ed7275f0288f0162a2d2fb6f33ce9620a52f90a1ed90",
+      "unchanged": true
+    },
+    {
+      "path": "src/etalon/research/README.md",
+      "baseline_sha256": "da3b8c98b09f516dcef4c01c12994f1ff2c1fd10b6b211c09ae310bb30e007d8",
+      "current_sha256": "da3b8c98b09f516dcef4c01c12994f1ff2c1fd10b6b211c09ae310bb30e007d8",
+      "unchanged": true
+    },
+    {
+      "path": "src/etalon/research/__init__.py",
+      "baseline_sha256": "2c354550738735b48da5bb3d21974eec77ad69f9e288cd219cde9d0814d03236",
+      "current_sha256": "2c354550738735b48da5bb3d21974eec77ad69f9e288cd219cde9d0814d03236",
+      "unchanged": true
+    },
+    {
+      "path": "src/etalon/research/baseline_feedback.py",
+      "baseline_sha256": "affe1f50f5dad0644136c7e8817807ecbee1b29608b066dc22bed0f842972dd1",
+      "current_sha256": "affe1f50f5dad0644136c7e8817807ecbee1b29608b066dc22bed0f842972dd1",
+      "unchanged": true
+    },
+    {
+      "path": "src/etalon/research/calibration.py",
+      "baseline_sha256": "701d921a5ea57aad23e7c13063644ce6fd07b6698c8ee3ca321fc59b5e739f8c",
+      "current_sha256": "701d921a5ea57aad23e7c13063644ce6fd07b6698c8ee3ca321fc59b5e739f8c",
+      "unchanged": true
+    },
+    {
+      "path": "src/etalon/research/contracts/diagnostic-action-request-v1.schema.json",
+      "baseline_sha256": "b947ceed663c91c047ecacdc0cd557f2cf659a861bd1b4744a526681f00a8a72",
+      "current_sha256": "b947ceed663c91c047ecacdc0cd557f2cf659a861bd1b4744a526681f00a8a72",
+      "unchanged": true
+    },
+    {
+      "path": "src/etalon/research/contracts/diagnostic-action-result-v1.schema.json",
+      "baseline_sha256": "7c873911ea733ac9cec558acf4e5c495af00ff8114431282f43707c9a67a1cd9",
+      "current_sha256": "7c873911ea733ac9cec558acf4e5c495af00ff8114431282f43707c9a67a1cd9",
+      "unchanged": true
+    },
+    {
+      "path": "src/etalon/research/contracts/fixed-pool-request-v1.schema.json",
+      "baseline_sha256": "c6a6df5135d68a1c00fa86b6e740da70089bbd412b61431c21ad35b054836d07",
+      "current_sha256": "c6a6df5135d68a1c00fa86b6e740da70089bbd412b61431c21ad35b054836d07",
+      "unchanged": true
+    },
+    {
+      "path": "src/etalon/research/contracts/fixed-pool-result-v1.schema.json",
+      "baseline_sha256": "fa89690d97cc51b01cab271125a7fdd25ec74a57f3f19780b9e180a2ec4bc307",
+      "current_sha256": "fa89690d97cc51b01cab271125a7fdd25ec74a57f3f19780b9e180a2ec4bc307",
+      "unchanged": true
+    },
+    {
+      "path": "src/etalon/research/contracts/pose-diagnostic-request-v1.schema.json",
+      "baseline_sha256": "776292f3f5e4fe9fd58813ee37615eb570312a03910da39e8550d46f05e64c0f",
+      "current_sha256": "776292f3f5e4fe9fd58813ee37615eb570312a03910da39e8550d46f05e64c0f",
+      "unchanged": true
+    },
+    {
+      "path": "src/etalon/research/contracts/pose-diagnostic-result-v1.schema.json",
+      "baseline_sha256": "2bfd4dc64cb671509390c44adf31b72c45429fa2c3955c2796642a664fc3fe3a",
+      "current_sha256": "2bfd4dc64cb671509390c44adf31b72c45429fa2c3955c2796642a664fc3fe3a",
+      "unchanged": true
+    },
+    {
+      "path": "src/etalon/research/contracts/receptor-preparation-request-v1.schema.json",
+      "baseline_sha256": "cbdc53a126d433004e86b9d5e8f9717e69626f15486ace5a3fc855ac16598c7c",
+      "current_sha256": "cbdc53a126d433004e86b9d5e8f9717e69626f15486ace5a3fc855ac16598c7c",
+      "unchanged": true
+    },
+    {
+      "path": "src/etalon/research/contracts/receptor-preparation-result-v1.schema.json",
+      "baseline_sha256": "4aa44d4b60668be8f8dc5b3e9fb021120db75eae12b52ea4e7dafad0a58e2791",
+      "current_sha256": "4aa44d4b60668be8f8dc5b3e9fb021120db75eae12b52ea4e7dafad0a58e2791",
+      "unchanged": true
+    },
+    {
+      "path": "src/etalon/research/controller.py",
+      "baseline_sha256": "1dc0e7b465d87725fb28016b0f9d333770b9b97658b29a4239276cd19eb1109a",
+      "current_sha256": "1dc0e7b465d87725fb28016b0f9d333770b9b97658b29a4239276cd19eb1109a",
+      "unchanged": true
+    },
+    {
+      "path": "src/etalon/research/diagnostics.py",
+      "baseline_sha256": "8138b3c9f9b1f8170d62d767b2724ae1f473c0e4320b1df7c6ac9b6c8df4e34e",
+      "current_sha256": "8138b3c9f9b1f8170d62d767b2724ae1f473c0e4320b1df7c6ac9b6c8df4e34e",
+      "unchanged": true
+    },
+    {
+      "path": "src/etalon/research/feedback.py",
+      "baseline_sha256": "bb1ab1747e7ca839c8f9d5c93227877e6066f44b794e19863931c4567ef7844d",
+      "current_sha256": "bb1ab1747e7ca839c8f9d5c93227877e6066f44b794e19863931c4567ef7844d",
+      "unchanged": true
+    },
+    {
+      "path": "src/etalon/research/fixed_pool.py",
+      "baseline_sha256": "52bc2c2ea0ccf9944e55220166819b69bb5723498bddfa6a005075f7e5e7aa60",
+      "current_sha256": "52bc2c2ea0ccf9944e55220166819b69bb5723498bddfa6a005075f7e5e7aa60",
+      "unchanged": true
+    },
+    {
+      "path": "src/etalon/research/journal.py",
+      "baseline_sha256": "35df36ddc1c361e4aa06a9fe3bf3c12d851cf26017d4cb439f2042761f86081d",
+      "current_sha256": "35df36ddc1c361e4aa06a9fe3bf3c12d851cf26017d4cb439f2042761f86081d",
+      "unchanged": true
+    },
+    {
+      "path": "src/etalon/research/online.py",
+      "baseline_sha256": "0b2786f9318259e649ea64bf42defe87642a19ff6ea9f760547ceccc8f392ccf",
+      "current_sha256": "0b2786f9318259e649ea64bf42defe87642a19ff6ea9f760547ceccc8f392ccf",
+      "unchanged": true
+    },
+    {
+      "path": "src/etalon/research/panel.py",
+      "baseline_sha256": "4ff8121b11f7efa11a56f029ef2777bee858de27b58bbdc041ae5f35a6fe1772",
+      "current_sha256": "4ff8121b11f7efa11a56f029ef2777bee858de27b58bbdc041ae5f35a6fe1772",
+      "unchanged": true
+    },
+    {
+      "path": "src/etalon/research/pool.py",
+      "baseline_sha256": "aaaf3873569024b267136d34e3cd9a0b11fac3f32d7faff8d96ac3ddbe364dd5",
+      "current_sha256": "aaaf3873569024b267136d34e3cd9a0b11fac3f32d7faff8d96ac3ddbe364dd5",
+      "unchanged": true
+    },
+    {
+      "path": "src/etalon/research/pose.py",
+      "baseline_sha256": "c18d2f33b3b57503be45b6a1e7539ac827c02807a5c6207730b8b3cc907f8124",
+      "current_sha256": "c18d2f33b3b57503be45b6a1e7539ac827c02807a5c6207730b8b3cc907f8124",
+      "unchanged": true
+    },
+    {
+      "path": "src/etalon/research/pose_selection.py",
+      "baseline_sha256": "34169f1b7eed82db1b985bcf05412b2e181dda56323e36a878baa9e53404b27d",
+      "current_sha256": "34169f1b7eed82db1b985bcf05412b2e181dda56323e36a878baa9e53404b27d",
+      "unchanged": true
+    },
+    {
+      "path": "src/etalon/research/preparation.py",
+      "baseline_sha256": "772b459c9ae0480afc1bbfb230246fd881189d454c8fb35d668f0c6cfe26e3fc",
+      "current_sha256": "772b459c9ae0480afc1bbfb230246fd881189d454c8fb35d668f0c6cfe26e3fc",
+      "unchanged": true
+    },
+    {
+      "path": "src/etalon/research/producer.py",
+      "baseline_sha256": "ab5d85b9a403f2d6c14d82efa6df21fe5fc97bb64b7a7bc21148f3d8ed0a9337",
+      "current_sha256": "ab5d85b9a403f2d6c14d82efa6df21fe5fc97bb64b7a7bc21148f3d8ed0a9337",
+      "unchanged": true
+    },
+    {
+      "path": "src/etalon/research/retained_baseline.py",
+      "baseline_sha256": "6694ce999b1a0449af14e345ee58e640ae314e0508ab96672a089171dec525ca",
+      "current_sha256": "6694ce999b1a0449af14e345ee58e640ae314e0508ab96672a089171dec525ca",
+      "unchanged": true
+    },
+    {
+      "path": "src/etalon/research/rows.py",
+      "baseline_sha256": "635d57595cb0f4d7b9a1ea21b1d6d2cef22fc00ad33491c6156d637942eebb8b",
+      "current_sha256": "635d57595cb0f4d7b9a1ea21b1d6d2cef22fc00ad33491c6156d637942eebb8b",
+      "unchanged": true
+    },
+    {
+      "path": "src/etalon/research/runtime.py",
+      "baseline_sha256": "c76a8c93158e05a63ceb723c5fe0520671310fddd7c64ad3c06cd2130f08a38a",
+      "current_sha256": "c76a8c93158e05a63ceb723c5fe0520671310fddd7c64ad3c06cd2130f08a38a",
+      "unchanged": true
+    },
+    {
+      "path": "src/etalon/research/schema.py",
+      "baseline_sha256": "60e5c6ec273903ee7cdd649406763f06586c35eb0baafa09cc89904d3bc0975f",
+      "current_sha256": "60e5c6ec273903ee7cdd649406763f06586c35eb0baafa09cc89904d3bc0975f",
+      "unchanged": true
+    },
+    {
+      "path": "src/etalon/research/seen.py",
+      "baseline_sha256": "88121401f3fd9e7ce747b0cced89e5f057a341fb18dc59a27be9236e0fad618d",
+      "current_sha256": "88121401f3fd9e7ce747b0cced89e5f057a341fb18dc59a27be9236e0fad618d",
+      "unchanged": true
+    },
+    {
+      "path": "src/etalon/research/support.py",
+      "baseline_sha256": "eec8f3c1a038f7a4c6a4cf790e7f531a1e239af8e70c5d2915f5a37986314124",
+      "current_sha256": "eec8f3c1a038f7a4c6a4cf790e7f531a1e239af8e70c5d2915f5a37986314124",
+      "unchanged": true
+    },
+    {
+      "path": "src/etalon/research/transfer.py",
+      "baseline_sha256": "3917a52b20248897824255d604558a0bd5eaa3bd91987e875ae8cafaa701b0fa",
+      "current_sha256": "3917a52b20248897824255d604558a0bd5eaa3bd91987e875ae8cafaa701b0fa",
+      "unchanged": true
+    },
+    {
+      "path": "src/etalon/research/transfer_checks.py",
+      "baseline_sha256": "b89e27d5e5491d7bc7d4de1413bab3d33aab0fd58c10d8138e1bc351b0d1c901",
+      "current_sha256": "b89e27d5e5491d7bc7d4de1413bab3d33aab0fd58c10d8138e1bc351b0d1c901",
+      "unchanged": true
+    },
+    {
+      "path": "src/etalon/research/validation.py",
+      "baseline_sha256": "f95d777766904d95adc536a03a967351787db502fedf7abd14bb297870b3a034",
+      "current_sha256": "f95d777766904d95adc536a03a967351787db502fedf7abd14bb297870b3a034",
+      "unchanged": true
+    },
+    {
+      "path": "src/etalon/research/workflows.py",
+      "baseline_sha256": "c814140e4fedcbf90bc2eb49fae9445db08b5a318ed95b7bebdcb486d8cf6591",
+      "current_sha256": "c814140e4fedcbf90bc2eb49fae9445db08b5a318ed95b7bebdcb486d8cf6591",
+      "unchanged": true
+    }
+  ],
+  "modules": {
+    "etalon.boundary.screen": {
+      "path": "F:\\life_healthy\\ETALON\\src\\etalon\\boundary\\screen.py",
+      "sha256": "0ea9cc5bad25fd76cf72eb5505a82c1c677fc5e5824083a27b176d4a13ba0a9c"
+    },
+    "etalon.campaign.sweep": {
+      "path": "F:\\life_healthy\\ETALON\\src\\etalon\\campaign\\sweep.py",
+      "sha256": "9db48faf72fdd1e39bed227f5034b97f5c32ff90683f8ff6017892ea951db402"
+    },
+    "etalon.campaign.calibrate": {
+      "path": "F:\\life_healthy\\ETALON\\src\\etalon\\campaign\\calibrate.py",
+      "sha256": "27fb78018bdd74893c32bf8fa52c0b1e26ca28c6732576924cee9ce6cf2123e7"
+    },
+    "etalon.research.journal": {
+      "path": "F:\\life_healthy\\ETALON\\src\\etalon\\research\\journal.py",
+      "sha256": "35df36ddc1c361e4aa06a9fe3bf3c12d851cf26017d4cb439f2042761f86081d"
+    },
+    "etalon.mcp.sweep": {
+      "path": "F:\\life_healthy\\ETALON\\src\\etalon\\mcp\\sweep.py",
+      "sha256": "71ba17527c482eecee10253f577cc274bdb44fa67da3ff433dba01f3cf47c7e5"
+    },
+    "molcascade.runtime.runner": {
+      "path": "F:\\life_healthy\\ETALON\\asset\\molcascade\\src\\molcascade\\runtime\\runner.py",
+      "sha256": "80ebeb15664ca0f650c9fca799e480cb3eedf84c57754b7c7988f18d835b37ed"
+    },
+    "molcascade.runtime.cache": {
+      "path": "F:\\life_healthy\\ETALON\\asset\\molcascade\\src\\molcascade\\runtime\\cache.py",
+      "sha256": "50cbb6eb92a5985173d3f366fe5f9677060ef99038119a52c7b5992eeabbdc59"
+    },
+    "molcascade.artifacts.store": {
+      "path": "F:\\life_healthy\\ETALON\\asset\\molcascade\\src\\molcascade\\artifacts\\store.py",
+      "sha256": "66d25df7fa338efdb877510ca06f36014f95b6429b9aeda95112a03baa7efa98"
+    }
+  },
+  "independent_test_attempts": {
+    "independent-first.xml": {
+      "tests": 5,
+      "failures": 2,
+      "errors": 0
+    },
+    "independent-second.xml": {
+      "tests": 5,
+      "failures": 1,
+      "errors": 0
+    },
+    "independent-final.xml": {
+      "tests": 5,
+      "failures": 0,
+      "errors": 0
+    }
+  },
+  "independent_failure_attribution": [
+    "first: expected recall0 but later tier has no population; correct None plus observed first-tier0 and unavailable later tier",
+    "first: persisted JSON lists versus dataclass tuples; compare stored parent before/after",
+    "second: export lacks balance key; capture actual balance before/after"
+  ],
+  "asset_diff_review": "Compared to this round baseline.zip, not HEAD. Three asset changes add default-compatible create flag and extract existing canonical/size/run identity reader; original Windows cache/checkpoint transforms retained."
+}

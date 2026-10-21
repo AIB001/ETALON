@@ -1,0 +1,478 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "properties": {
+    "schema": {
+      "const": "prism-receptor-preparation-result/1"
+    },
+    "execution_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "task_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "state_key": {
+      "type": "string",
+      "minLength": 1
+    },
+    "resource_id": {
+      "enum": [
+        "p0",
+        "p1"
+      ]
+    },
+    "stage": {
+      "const": "precompile"
+    },
+    "protocol_sha256": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "inputs": {
+      "type": "object",
+      "additionalProperties": {
+        "type": "object",
+        "properties": {
+          "path": {
+            "type": "string",
+            "minLength": 1
+          },
+          "sha256": {
+            "type": "string",
+            "pattern": "^[0-9a-f]{64}$"
+          },
+          "bytes": {
+            "type": "integer",
+            "minimum": 0
+          }
+        },
+        "required": [
+          "path",
+          "sha256",
+          "bytes"
+        ],
+        "additionalProperties": false
+      }
+    },
+    "parent_state": {
+      "anyOf": [
+        {
+          "type": "null"
+        },
+        {
+          "type": "object",
+          "properties": {
+            "state_key": {
+              "type": "string",
+              "minLength": 1
+            },
+            "execution_id": {
+              "type": "string",
+              "minLength": 1
+            },
+            "receipt_sha256": {
+              "type": "string",
+              "pattern": "^[0-9a-f]{64}$"
+            }
+          },
+          "required": [
+            "state_key",
+            "execution_id",
+            "receipt_sha256"
+          ],
+          "additionalProperties": false
+        }
+      ]
+    },
+    "request_sha256": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "status": {
+      "enum": [
+        "PREPARED",
+        "NOT_APPLICABLE",
+        "FAILED"
+      ]
+    },
+    "reason": {
+      "anyOf": [
+        {
+          "type": "null"
+        },
+        {
+          "type": "object",
+          "properties": {
+            "code": {
+              "type": "string",
+              "minLength": 1
+            },
+            "message": {
+              "type": "string",
+              "minLength": 1
+            }
+          },
+          "required": [
+            "code",
+            "message"
+          ],
+          "additionalProperties": false
+        }
+      ]
+    },
+    "cost": {
+      "type": "object",
+      "properties": {
+        "wall_second": {
+          "type": "number",
+          "minimum": 0
+        },
+        "cpu_second": {
+          "type": [
+            "number",
+            "null"
+          ],
+          "minimum": 0
+        },
+        "scope": {
+          "const": "whole preparation execution including child processes; excludes ledger operations and prior research inspection"
+        }
+      },
+      "required": [
+        "wall_second",
+        "cpu_second",
+        "scope"
+      ],
+      "additionalProperties": false
+    },
+    "artifacts": {
+      "type": "object",
+      "additionalProperties": {
+        "type": "object",
+        "properties": {
+          "path": {
+            "type": "string",
+            "minLength": 1
+          },
+          "sha256": {
+            "type": "string",
+            "pattern": "^[0-9a-f]{64}$"
+          },
+          "bytes": {
+            "type": "integer",
+            "minimum": 0
+          }
+        },
+        "required": [
+          "path",
+          "sha256",
+          "bytes"
+        ],
+        "additionalProperties": false
+      },
+      "required": [
+        "request",
+        "certificate",
+        "execution_log"
+      ]
+    },
+    "input_identity": {
+      "anyOf": [
+        {
+          "type": "null"
+        },
+        {
+          "type": "object",
+          "properties": {
+            "receptor_state_id": {
+              "type": "string",
+              "minLength": 1
+            },
+            "coordinate_frame_id": {
+              "type": "string",
+              "minLength": 1
+            }
+          },
+          "required": [
+            "receptor_state_id",
+            "coordinate_frame_id"
+          ],
+          "additionalProperties": false
+        }
+      ]
+    },
+    "grid": {
+      "anyOf": [
+        {
+          "type": "null"
+        },
+        {
+          "type": "object",
+          "properties": {
+            "center_A": {
+              "type": "array",
+              "items": {
+                "type": "number"
+              },
+              "minItems": 3,
+              "maxItems": 3
+            },
+            "size_A": {
+              "type": "array",
+              "items": {
+                "type": "number",
+                "exclusiveMinimum": 0
+              },
+              "minItems": 3,
+              "maxItems": 3
+            },
+            "spacing_A": {
+              "type": "number",
+              "exclusiveMinimum": 0
+            }
+          },
+          "required": [
+            "center_A",
+            "size_A",
+            "spacing_A"
+          ],
+          "additionalProperties": false
+        }
+      ]
+    },
+    "command": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "minLength": 1
+      },
+      "minItems": 1
+    },
+    "toolchain": {
+      "type": "object",
+      "properties": {
+        "python": {
+          "type": "string",
+          "minLength": 1
+        },
+        "modules": {
+          "type": "object",
+          "minProperties": 1,
+          "additionalProperties": {
+            "type": "object",
+            "properties": {
+              "version": {
+                "type": "string",
+                "minLength": 1
+              },
+              "path": {
+                "type": "string",
+                "minLength": 1
+              },
+              "sha256": {
+                "type": "string",
+                "pattern": "^[0-9a-f]{64}$"
+              }
+            },
+            "required": [
+              "version",
+              "path",
+              "sha256"
+            ],
+            "additionalProperties": false
+          }
+        }
+      },
+      "required": [
+        "python",
+        "modules"
+      ],
+      "additionalProperties": false
+    },
+    "source_pins": {
+      "type": "object",
+      "minProperties": 1,
+      "additionalProperties": {
+        "type": "object",
+        "properties": {
+          "path": {
+            "type": "string",
+            "minLength": 1
+          },
+          "sha256": {
+            "type": "string",
+            "pattern": "^[0-9a-f]{64}$"
+          },
+          "bytes": {
+            "type": "integer",
+            "minimum": 0
+          }
+        },
+        "required": [
+          "path",
+          "sha256",
+          "bytes"
+        ],
+        "additionalProperties": false
+      }
+    },
+    "scope": {
+      "const": "precompiled receptor resource; online scoring only"
+    }
+  },
+  "required": [
+    "schema",
+    "execution_id",
+    "task_id",
+    "state_key",
+    "resource_id",
+    "stage",
+    "protocol_sha256",
+    "inputs",
+    "parent_state",
+    "request_sha256",
+    "status",
+    "reason",
+    "cost",
+    "artifacts",
+    "input_identity",
+    "grid",
+    "command",
+    "toolchain",
+    "source_pins",
+    "scope"
+  ],
+  "additionalProperties": false,
+  "allOf": [
+    {
+      "if": {
+        "properties": {
+          "status": {
+            "const": "PREPARED"
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "reason": {
+            "type": "null"
+          },
+          "input_identity": {
+            "type": "object",
+            "properties": {
+              "receptor_state_id": {
+                "type": "string",
+                "minLength": 1
+              },
+              "coordinate_frame_id": {
+                "type": "string",
+                "minLength": 1
+              }
+            },
+            "required": [
+              "receptor_state_id",
+              "coordinate_frame_id"
+            ],
+            "additionalProperties": false
+          },
+          "grid": {
+            "type": "object",
+            "properties": {
+              "center_A": {
+                "type": "array",
+                "items": {
+                  "type": "number"
+                },
+                "minItems": 3,
+                "maxItems": 3
+              },
+              "size_A": {
+                "type": "array",
+                "items": {
+                  "type": "number",
+                  "exclusiveMinimum": 0
+                },
+                "minItems": 3,
+                "maxItems": 3
+              },
+              "spacing_A": {
+                "type": "number",
+                "exclusiveMinimum": 0
+              }
+            },
+            "required": [
+              "center_A",
+              "size_A",
+              "spacing_A"
+            ],
+            "additionalProperties": false
+          },
+          "artifacts": {
+            "required": [
+              "receptor_source",
+              "scorer_receptor",
+              "scorer_manifest",
+              "native_parameters"
+            ]
+          }
+        }
+      },
+      "else": {
+        "properties": {
+          "reason": {
+            "type": "object",
+            "properties": {
+              "code": {
+                "type": "string",
+                "minLength": 1
+              },
+              "message": {
+                "type": "string",
+                "minLength": 1
+              }
+            },
+            "required": [
+              "code",
+              "message"
+            ],
+            "additionalProperties": false
+          },
+          "input_identity": {
+            "type": "null"
+          },
+          "grid": {
+            "type": "null"
+          },
+          "artifacts": {
+            "not": {
+              "anyOf": [
+                {
+                  "required": [
+                    "receptor_source"
+                  ]
+                },
+                {
+                  "required": [
+                    "scorer_receptor"
+                  ]
+                },
+                {
+                  "required": [
+                    "scorer_manifest"
+                  ]
+                },
+                {
+                  "required": [
+                    "native_parameters"
+                  ]
+                }
+              ]
+            }
+          }
+        }
+      }
+    }
+  ]
+}

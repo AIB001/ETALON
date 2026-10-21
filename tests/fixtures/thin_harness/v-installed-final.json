@@ -1,0 +1,57 @@
+{
+  "status": "passed",
+  "wheel_sha256": "6b71961494f11ff0fdbdea692adea1f05f4d2c74712e389c663597656807c9f2",
+  "source_and_installed_bytes_checked": 325,
+  "python": "F:\\life_healthy\\ETALON\\.venv\\Scripts\\python.exe",
+  "cwd": "F:\\life_healthy\\integration\\thin-harness-engineering-20261020",
+  "modules": {
+    "etalon.runtime.api": "F:\\life_healthy\\integration\\thin-harness-engineering-20261020\\install-final\\etalon\\runtime\\api.py",
+    "etalon.research.journal": "F:\\life_healthy\\integration\\thin-harness-engineering-20261020\\install-final\\etalon\\research\\journal.py",
+    "etalon.skills": "F:\\life_healthy\\integration\\thin-harness-engineering-20261020\\install-final\\etalon\\skills.py",
+    "etalon.host": "F:\\life_healthy\\integration\\thin-harness-engineering-20261020\\install-final\\etalon\\host.py",
+    "etalon.mcp.server": "F:\\life_healthy\\integration\\thin-harness-engineering-20261020\\install-final\\etalon\\mcp\\server.py"
+  },
+  "bundles": {
+    "campaign": "6fb8594704ae8125d83abaf5eaf5c862b36c31a79746b673f04efdd3e69ef696",
+    "sweep": "43c64a154fd235d3785f70c3000ebfb17c59a609ec2b23de7a1a562eb21fce2a",
+    "gate-calibration": "d39ce9bd7b240c17971db690a44ca31ae760220913f526101248e04b6c8e4a02",
+    "generation-planning": "26796fba98307394c28bede6cbfd4fbee8d9ca2cec049942d5ada6a378c80efd",
+    "monitoring": "e4d312c4663ebae4930d68390673f2bfae0f1333ca62c3e5bfe2ed9f0d9b8d54",
+    "install": "3869d34e45d75916aae903816a4b004bbe45382a503af8f62bb5ebc32aeb75a6"
+  },
+  "exports": {
+    "codex": {
+      "target": "F:\\life_healthy\\integration\\thin-harness-engineering-20261020\\installed-final-codex",
+      "export_matches_manifest": true,
+      "matches_current_source": true,
+      "runtime_matches": true,
+      "changed": [],
+      "missing": [],
+      "unexpected": [],
+      "catalog_sha256": "e3bf060a7ce75a0b85f409b0d11f2b28cbaa04538cacf35e8dd623649915d20a",
+      "current_catalog_sha256": "e3bf060a7ce75a0b85f409b0d11f2b28cbaa04538cacf35e8dd623649915d20a",
+      "host_validation": "not performed; export is not evidence of native host discovery",
+      "current_file_count": 14
+    },
+    "claude": {
+      "target": "F:\\life_healthy\\integration\\thin-harness-engineering-20261020\\installed-final-claude",
+      "export_matches_manifest": true,
+      "matches_current_source": true,
+      "runtime_matches": true,
+      "changed": [],
+      "missing": [],
+      "unexpected": [],
+      "catalog_sha256": "e3bf060a7ce75a0b85f409b0d11f2b28cbaa04538cacf35e8dd623649915d20a",
+      "current_catalog_sha256": "e3bf060a7ce75a0b85f409b0d11f2b28cbaa04538cacf35e8dd623649915d20a",
+      "host_validation": "not performed; export is not evidence of native host discovery",
+      "current_file_count": 14
+    }
+  },
+  "real_mcp": {
+    "tool_count": 65,
+    "read_bundle_reference": "passed"
+  },
+  "native_codex": "not_run",
+  "native_claude": "not_run",
+  "scientific_execution": "not_run"
+}

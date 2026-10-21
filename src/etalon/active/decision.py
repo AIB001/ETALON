@@ -104,6 +104,11 @@ def choose_decision(spec: CampaignSpec, candidates: Mapping[str, Candidate],
     # No claim of guaranteed successful confirmation: actual cost can overrun the quote and
     # scientific QC can reject the result. At the end buy the best actionable prediction.
     terminal_cost = reserve + high_cost
+    # The arguments are deliberately the other way round from ``fits_budget(cost, remaining)``, and
+    # the question is the mirror of affordability: not "can the balance pay for this" but "has the
+    # balance fallen to what this costs", which is the signal to stop buying proxy labels and buy
+    # the confirmation. Written out because it reads like a bug and is not, and a reader who
+    # "fixed" the order would invert the stopping rule.
     if guarded and (not math.isfinite(terminal_cost) or fits_budget(remaining, terminal_cost)):
         key = max(available[spec.objective], key=lambda key: (utility[index[key]], sd[index[key]], key))
         return [choice(key, spec.objective, utility[index[key]], "terminal-confirmation")]

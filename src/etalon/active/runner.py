@@ -13,7 +13,7 @@ from pathlib import Path
 from time import perf_counter
 from typing import Any, Protocol
 
-from etalon.active.budget import cost_quote
+from etalon.active.budget import cost_quote, fits_budget
 from etalon.active.model import MultiEndpointGP
 from etalon.active.policy import Choice, choose
 from etalon.active.schema import Action, Candidate, Endpoint, Evaluation
@@ -26,6 +26,10 @@ from etalon.judgment.waiver import WaiverSet
 class Executor(Protocol):
     def __call__(self, action: Action, candidate: Candidate, endpoint: Endpoint,
                  grant: SpendAuthorization | None) -> Evaluation: ...
+
+
+class ExecutionPending(RuntimeError):
+    """External outcome is unresolved. Preserve the action and its reservation for reconciliation."""
 
 
 class ActiveCampaign:
@@ -72,12 +76,19 @@ class ActiveCampaign:
             executable = [endpoint for endpoint in endpoints.values() if endpoint.queryable]
             if not executable:
                 reason = "no_executable_endpoints"
+            # Through ``fits_budget``, not a raw ``<``. These two pick the reason string a
+            # campaign records for why it stopped, and a bare comparison disagrees with the
+            # predicate every actual spend is gated on at the roundoff boundary and for a
+            # negative balance -- so a campaign that really had run out could be recorded as
+            # having had "no eligible actions", which is a different diagnosis with a different
+            # remedy.
             elif (spec.policy == "decision_aware" and spec.confirmation_reserve
                     and endpoints[spec.objective].queryable
-                    and remaining < cost_quote(endpoints[spec.objective], observations)):
+                    and not fits_budget(cost_quote(endpoints[spec.objective], observations), remaining)):
                 reason = "confirmation_unaffordable"
             else:
-                reason = "budget_exhausted" if remaining < min(cost_quote(e, observations) for e in executable) else "no_eligible_actions"
+                cheapest = min(cost_quote(e, observations) for e in executable)
+                reason = "budget_exhausted" if not fits_budget(cheapest, remaining) else "no_eligible_actions"
             return model, [], reason
         choices = [replace(choice, evidence={**choice.evidence, "planning_event_cutoff": state["event_cutoff"]})
                    for choice in choices]
@@ -158,54 +169,80 @@ class ActiveCampaign:
                 # began. Do not retry, dispatch a stale choice or strand an empty round.
                 reason, reservation_error = "state_changed", str(error)
                 break
-            candidate, endpoint = candidates[action.candidate_id], endpoints[action.endpoint_id]
-            checks = ()
-            grant = None
-            if endpoint.requires_handoff:
-                try:
-                    if self.receptor_path is None:
-                        raise ValueError("a live handoff endpoint requires the actual receptor_path")
-                    checks = check_record(candidate.handoff, receptor_path=self.receptor_path,
-                                          toolchain_active=self.toolchain_active)
-                    authorized = authorize([candidate.handoff], receptor_path=self.receptor_path,
-                                           toolchain_active=self.toolchain_active, waivers=self.waivers)
-                    grant = require(candidate.handoff, authorized.grants, receptor_path=self.receptor_path)
-                except (OSError, ValueError, PermissionError) as error:
-                    result = Evaluation(candidate.id, endpoint.id, None, endpoint.units,
-                        0.0, status="blocked", checks=checks,
-                        provenance={"phase": "preflight", "error": str(error)})
-                    if self.result_observer is not None:
-                        self.result_observer(action, result)
-                    self.store.resolve(action.id, result, waivers=self.waivers)
-                    executed.append(action.id)
-                    continue
-            self.store.start_action(action.id)
-            try:
-                result = self.executor(action, candidate, endpoint, grant)
-                if not isinstance(result, Evaluation):
-                    raise TypeError("executor must return an Evaluation")
-                if (result.candidate_id, result.endpoint_id, result.units) != (candidate.id, endpoint.id, endpoint.units):
-                    result = Evaluation(candidate.id, endpoint.id, None, endpoint.units, result.cost,
-                                        status="invalid", provenance={"error": "executor returned mismatched identity or units",
-                                                                      "raw_result": result.as_dict()})
-            except Exception as error:
-                # No automatic retry, and no fictional free failed calculation. An executor that
-                # can measure partial cost should return a failed Evaluation with that cost.
-                result = Evaluation(candidate.id, endpoint.id, None, endpoint.units, action.reserved_cost,
-                                    status="failed", provenance={"error": f"{type(error).__name__}: {error}",
-                                                                 "cost_basis": "reservation; actual cost unavailable"})
-            result = replace(result, checks=checks + result.checks, provenance={
-                **result.provenance, "endpoint_protocol": endpoint.protocol,
-                "authorization": grant.as_dict() if grant else None,
-            })
-            if self.result_observer is not None:
-                self.result_observer(action, result)
-            self.store.resolve(action.id, result, waivers=self.waivers)
+            self._execute_reserved(action, candidates[action.candidate_id], endpoints[action.endpoint_id])
             executed.append(action.id)
         summary = {"actions": executed, "balance": self.store.balance(), "stop_reason": reason,
                    "admitted_total": len(self.store.observations(admitted_only=True))}
         if reservation_error is not None:
             summary["reservation_error"] = reservation_error
+        self.store.finish_round(round_id, summary)
+        return {"round_id": round_id, **summary}
+
+    def _execute_reserved(self, action: Action, candidate: Candidate, endpoint: Endpoint) -> None:
+        checks = ()
+        grant = None
+        if endpoint.requires_handoff:
+            try:
+                if self.receptor_path is None:
+                    raise ValueError("a live handoff endpoint requires the actual receptor_path")
+                checks = check_record(candidate.handoff, receptor_path=self.receptor_path,
+                                      toolchain_active=self.toolchain_active)
+                authorized = authorize([candidate.handoff], receptor_path=self.receptor_path,
+                                       toolchain_active=self.toolchain_active, waivers=self.waivers)
+                grant = require(candidate.handoff, authorized.grants, receptor_path=self.receptor_path)
+            except (OSError, ValueError, PermissionError) as error:
+                result = Evaluation(candidate.id, endpoint.id, None, endpoint.units,
+                    0.0, status="blocked", checks=checks,
+                    provenance={"phase": "preflight", "error": str(error)})
+                if self.result_observer is not None:
+                    self.result_observer(action, result)
+                self.store.resolve(action.id, result, waivers=self.waivers)
+                return
+        self.store.start_action(action.id)
+        try:
+            result = self.executor(action, candidate, endpoint, grant)
+            if not isinstance(result, Evaluation):
+                raise TypeError("executor must return an Evaluation")
+            if (result.candidate_id, result.endpoint_id, result.units) != (candidate.id, endpoint.id, endpoint.units):
+                result = Evaluation(candidate.id, endpoint.id, None, endpoint.units, result.cost,
+                                    status="invalid", provenance={"error": "executor returned mismatched identity or units",
+                                                                  "raw_result": result.as_dict()})
+        except ExecutionPending:
+            raise
+        except Exception as error:
+            # No automatic retry, and no fictional free failed calculation. An executor that
+            # can measure partial cost should return a failed Evaluation with that cost.
+            result = Evaluation(candidate.id, endpoint.id, None, endpoint.units, action.reserved_cost,
+                                status="failed", provenance={"error": f"{type(error).__name__}: {error}",
+                                                             "cost_basis": "reservation; actual cost unavailable"})
+        result = replace(result, checks=checks + result.checks, provenance={
+            **result.provenance, "endpoint_protocol": endpoint.protocol,
+            "authorization": grant.as_dict() if grant else None,
+        })
+        if self.result_observer is not None:
+            self.result_observer(action, result)
+        self.store.resolve(action.id, result, waivers=self.waivers)
+
+    def evaluate(self, candidate_id: str, endpoint_id: str, *, decision: dict | None = None,
+                 max_cost: float | None = None) -> dict:
+        """Execute a host-selected pair through the same reservation and admission path."""
+        if self.executor is None:
+            raise ValueError("execution requires an explicit executor")
+        if self.checkpoint is not None:
+            self.checkpoint()
+        state = self.store.snapshot()
+        if candidate_id not in state["candidates"] or endpoint_id not in state["endpoints"]:
+            raise ValueError("evaluation requires a registered candidate and endpoint")
+        round_id = self.store.start_round({"selection": "host", "model": None,
+                                          "decision": decision or {}})
+        try:
+            action = self.store.reserve(round_id, candidate_id, endpoint_id,
+                                        {"selection": "host", **(decision or {})}, max_cost=max_cost)
+        except Exception:
+            self.store.finish_round(round_id, {"actions": [], "stop_reason": "reservation_rejected"})
+            raise
+        self._execute_reserved(action, state["candidates"][candidate_id], state["endpoints"][endpoint_id])
+        summary = {"actions": [action.id], "balance": self.store.balance(), "stop_reason": "selected_action"}
         self.store.finish_round(round_id, summary)
         return {"round_id": round_id, **summary}
 

@@ -106,19 +106,55 @@ def _safe_exception_text(error: BaseException) -> str:
         return f"<unprintable {error_type}>"
 
 
-def _ensure_workspace_child(workspace: Path, name: str) -> Path:
+def _ensure_workspace_child(workspace: Path, name: str, *, create: bool = True) -> Path:
     """Create one direct control-plane directory without following symlinks."""
 
     child = workspace / name
     if child.is_symlink():
         raise ValueError(f"workspace directory may not be a symlink: {child}")
-    child.mkdir(exist_ok=True)
+    if create:
+        child.mkdir(exist_ok=True)
     if child.is_symlink() or not child.is_dir():
         raise ValueError(f"workspace path is not a real directory: {child}")
     resolved = child.resolve(strict=True)
     if resolved.parent != workspace:
         raise ValueError(f"workspace directory escapes its root: {child}")
     return child
+
+
+def read_run_state(workspace: str | Path, run_id: str) -> RunState:
+    """Read a durable state without creating executor directories or an artifact store."""
+    root = Path(workspace).expanduser()
+    if root.is_symlink() or (root / "runs").is_symlink():
+        raise ValueError("workspace and runs directory may not be symlinks")
+    if not root.is_dir():
+        raise FileNotFoundError(f"no screening workspace at {root}")
+    checked = LocalRunner._checked_run_id(run_id)
+    path = root / "runs" / f"{checked}.json"
+    if path.is_symlink() or not path.is_file():
+        raise PipelineError(
+            f"run does not exist: {checked}",
+            code="RUN_NOT_FOUND",
+            context={"run_id": checked},
+        )
+    try:
+        if path.stat().st_size > _STATE_SIZE_LIMIT:
+            raise ValueError("run state is unreasonably large")
+        content = path.read_bytes()
+        state = RunState.model_validate_json(content)
+    except (OSError, ValueError, ValidationError) as error:
+        raise ArtifactIntegrityError(
+            f"run state is invalid for {checked}: {error}",
+            code="RUNTIME_STATE_INVALID",
+            context={"run_id": checked},
+        ) from error
+    if state.run_id != checked or content != canonical_json_bytes(state):
+        raise ArtifactIntegrityError(
+            f"run state is not canonical for {checked}",
+            code="RUNTIME_STATE_INVALID",
+            context={"run_id": checked},
+        )
+    return state
 
 
 class LocalRunner:
@@ -140,6 +176,7 @@ class LocalRunner:
         resources: StageResources | None = None,
         permitted_licenses: Mapping[str, str] | None = None,
         environment: HostEnvironment | None = None,
+        create: bool = True,
     ) -> None:
         if not isinstance(plugins, PluginRegistry):
             raise TypeError("plugins must be a PluginRegistry")
@@ -159,7 +196,8 @@ class LocalRunner:
         requested = Path(workspace).expanduser()
         if requested.is_symlink():
             raise ValueError("workspace may not be a symlink")
-        requested.mkdir(parents=True, exist_ok=True)
+        if create:
+            requested.mkdir(parents=True, exist_ok=True)
         self.workspace = requested.resolve(strict=True)
         if not self.workspace.is_dir():
             raise ValueError(f"workspace is not a directory: {self.workspace}")
@@ -169,17 +207,17 @@ class LocalRunner:
         self.compiler = PipelineCompiler(plugins)
         # The artifact store owns workspace/artifacts, .staging, and .locks;
         # run control files live alongside those directories.
-        self.store = LocalArtifactStore(self.workspace)
-        self.revisions_root = _ensure_workspace_child(self.workspace, "revisions")
-        self.runs_root = _ensure_workspace_child(self.workspace, "runs")
-        self.events_root = _ensure_workspace_child(self.workspace, "events")
-        self.cache_root = _ensure_workspace_child(self.workspace, "cache")
-        self.run_locks_root = _ensure_workspace_child(self.workspace, ".run-locks")
+        self.store = LocalArtifactStore(self.workspace, create=create)
+        self.revisions_root = _ensure_workspace_child(self.workspace, "revisions", create=create)
+        self.runs_root = _ensure_workspace_child(self.workspace, "runs", create=create)
+        self.events_root = _ensure_workspace_child(self.workspace, "events", create=create)
+        self.cache_root = _ensure_workspace_child(self.workspace, "cache", create=create)
+        self.run_locks_root = _ensure_workspace_child(self.workspace, ".run-locks", create=create)
         # Keyed by invocation cache key, not by run id: an interrupted run and
         # the run that resumes it are two run ids computing the same stage, and
         # sharing shards between them is the entire point.
-        self.checkpoints_root = _ensure_workspace_child(self.workspace, "checkpoints")
-        self.cache = LocalStageCache(self.cache_root)
+        self.checkpoints_root = _ensure_workspace_child(self.workspace, "checkpoints", create=create)
+        self.cache = LocalStageCache(self.cache_root, create=create)
         self.resources = resources or StageResources()
         # Which copyleft backends this run was deliberately allowed to link, by
         # SPDX identifier.  Recorded rather than merely enforced: a screening
@@ -227,8 +265,10 @@ class LocalRunner:
         trust must not be handed pieces of it back.
         """
 
+        from molcascade.runtime.cache import checkpoint_directory_name
+
         return self.resources.replace(
-            checkpoint_dir=self.checkpoints_root / cache_key,
+            checkpoint_dir=self.checkpoints_root / checkpoint_directory_name(cache_key),
             reuse_checkpoints=not force,
         )
 
@@ -396,32 +436,7 @@ class LocalRunner:
     def load_run(self, run_id: str) -> RunState:
         """Load and validate a durable run state file."""
 
-        checked = self._checked_run_id(run_id)
-        path = self._state_path(checked)
-        if path.is_symlink() or not path.is_file():
-            raise PipelineError(
-                f"run does not exist: {checked}",
-                code="RUN_NOT_FOUND",
-                context={"run_id": checked},
-            )
-        try:
-            if path.stat().st_size > _STATE_SIZE_LIMIT:
-                raise ValueError("run state is unreasonably large")
-            content = path.read_bytes()
-            state = RunState.model_validate_json(content)
-        except (OSError, ValueError, ValidationError) as error:
-            raise ArtifactIntegrityError(
-                f"run state is invalid for {checked}: {error}",
-                code="RUNTIME_STATE_INVALID",
-                context={"run_id": checked},
-            ) from error
-        if state.run_id != checked or content != canonical_json_bytes(state):
-            raise ArtifactIntegrityError(
-                f"run state is not canonical for {checked}",
-                code="RUNTIME_STATE_INVALID",
-                context={"run_id": checked},
-            )
-        return state
+        return read_run_state(self.workspace, run_id)
 
     def read_events(self, run_id: str) -> tuple[AuditEvent, ...]:
         """Return a validated, monotonically sequenced audit trail."""
@@ -1370,4 +1385,4 @@ class LocalRunner:
                 raise public_error from raw_error
 
 
-__all__ = ["LocalRunner"]
+__all__ = ["LocalRunner", "read_run_state"]

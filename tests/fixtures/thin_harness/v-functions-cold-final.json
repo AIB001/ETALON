@@ -1,0 +1,430 @@
+{
+  "status": "passed_for_corrected_cold_path",
+  "source_archive_sha256": "943225fc55c0146c78e4d4ce3e19eb5d86c0433f10a1a31d10c2b08f9fcca24e",
+  "fixed_source_files_checked": 1168,
+  "production_difference_from_first_native": [
+    "src/etalon/generate/audit.py"
+  ],
+  "audit_source_sha256": "5c141540996d685ddee2c7418bfe03a278072f0d0482518e228cd54bdd983470",
+  "native_prompt_sha256": "559796c4e1f1ba1fe2d59705692e8fa8c7b83688a3043ddf8ee4d7a73ff776c9",
+  "native_stdout_sha256": "cb55920abe3a3674bed1f2f6f21c60953ce609ecb2712e77ec72ea5e2c4472af",
+  "native_exit": {
+    "returncode": 0,
+    "wall_seconds": 26.480470895767212,
+    "ended_unix": 1792523069.9318457
+  },
+  "native_calls": [
+    {
+      "line": 7,
+      "tool": "etalon_capabilities",
+      "arguments": {},
+      "error": null,
+      "result": {
+        "catalog_sha256": "d2198731f4da1c5a85608e1b979a5e6627099ac61c243e149ce81ac549d0a258",
+        "load_evidence": "server-read-bytes; host discovery and invocation are not observed",
+        "ok": true,
+        "operations": {
+          "active.evaluate": {
+            "optional": [],
+            "required": [
+              "candidate_id",
+              "database",
+              "endpoint_id"
+            ]
+          },
+          "active.run": {
+            "optional": [
+              "min_new_admitted"
+            ],
+            "required": [
+              "database",
+              "max_rounds"
+            ]
+          },
+          "campaign.assays": {
+            "optional": [],
+            "required": [
+              "database",
+              "review",
+              "snapshot"
+            ]
+          },
+          "campaign.create": {
+            "optional": [],
+            "required": [
+              "endpoints",
+              "executors",
+              "spec"
+            ]
+          },
+          "campaign.handoffs": {
+            "optional": [
+              "candidate_ids"
+            ],
+            "required": [
+              "artifact_id",
+              "database",
+              "rationale",
+              "workspace"
+            ]
+          },
+          "campaign.import": {
+            "optional": [
+              "candidate_ids"
+            ],
+            "required": [
+              "database",
+              "snapshot"
+            ]
+          },
+          "data.acquire": {
+            "optional": [
+              "allow_partial",
+              "min_records"
+            ],
+            "required": [
+              "budget",
+              "request"
+            ]
+          },
+          "data.prepare": {
+            "optional": [
+              "allow_partial",
+              "id_field",
+              "identity_policy",
+              "min_records",
+              "smiles_field"
+            ],
+            "required": [
+              "snapshot"
+            ]
+          },
+          "design.import": {
+            "optional": [
+              "mode"
+            ],
+            "required": [
+              "bundle_path",
+              "database"
+            ]
+          },
+          "screen.export": {
+            "optional": [],
+            "required": [
+              "run_id",
+              "workspace"
+            ]
+          },
+          "screen.run": {
+            "optional": [
+              "allow_copyleft",
+              "devices",
+              "workers"
+            ],
+            "required": [
+              "config_path",
+              "library_path"
+            ]
+          }
+        },
+        "runtime": {
+          "durable_workers": "Linux /proc and POSIX locks required",
+          "module": "F:\\life_healthy\\integration\\thin-harness-functions-20261021\\c\\fixed-source-v2\\src\\etalon\\mcp\\host.py",
+          "python": "F:\\life_healthy\\ETALON\\.venv\\Scripts\\python.exe"
+        },
+        "schema": "etalon-capability-catalog/1",
+        "skills": [
+          {
+            "description": "Inspect scientific evidence and prepare bounded expensive execution through ETALON registered executors, including handoff validation, budget protection and result admission.",
+            "entrypoint": "SKILL.md",
+            "files": [
+              {
+                "bytes": 2576,
+                "path": "SKILL.md",
+                "sha256": "b8ff4f1c02b89ac5deb9907889ffd6149bcc2b9730d5f12d29b4461a33212db5"
+              },
+              {
+                "bytes": 2609,
+                "path": "references/factorial-diagnostic.md",
+                "sha256": "28ac72a4c2c15b80adc5cbab100af7884110b8541cb320b3c49c627835dea36b"
+              },
+              {
+                "bytes": 35076,
+                "path": "references/legacy-workflow.md",
+                "sha256": "193a437c63cc6cdf5f6c741fa4f6fbe3eae413cb8558ecb4728a472e575792e1"
+              }
+            ],
+            "kind": "domain_skill",
+            "manifest_sha256": "f2f28041e42e16ad8cf3401352022582d2cef9ea0983e02659babe2f41e6f8fd",
+            "name": "etalon-campaign",
+            "schema": "etalon-capability-version/1",
+            "slug": "campaign"
+          },
+          {
+            "description": "Prepare and supervise bounded MolCascade screening batches, including calibrated gates, batch reservations, duplicate submission and recovery.",
+            "entrypoint": "SKILL.md",
+            "files": [
+              {
+                "bytes": 3273,
+                "path": "SKILL.md",
+                "sha256": "64ff636a6dbe3a59fbb096876de28abb207d8e7016909b6c25fe3f503ccd0073"
+              },
+              {
+                "bytes": 20099,
+                "path": "references/legacy-workflow.md",
+                "sha256": "04c89c4be945267e4dc4d95abe53cd07de83b46aa2a8734e5557874c7e1111b7"
+              }
+            ],
+            "kind": "domain_skill",
+            "manifest_sha256": "0c05670d799901667db6d12e27ebf9169764b6ae1626ea92a50d191d03cea699",
+            "name": "etalon-screening-sweep",
+            "schema": "etalon-capability-version/1",
+            "slug": "sweep"
+          },
+          {
+            "description": "Evaluate whether a proposed screening gate rejects known controls and whether its scoring engines rank a relevant calibration panel.",
+            "entrypoint": "SKILL.md",
+            "files": [
+              {
+                "bytes": 2952,
+                "path": "SKILL.md",
+                "sha256": "348df11bc10ff249ef21da85174b594f52f7513e4d7b8e9c7de79f21063e13c4"
+              },
+              {
+                "bytes": 8246,
+                "path": "references/legacy-workflow.md",
+                "sha256": "18741f2734b2183843bf7abe30d49bdd8319f3187b6a3419b9c11f51f7bcae62"
+              }
+            ],
+            "kind": "domain_skill",
+            "manifest_sha256": "ed695eb354612135dc9ce99d90b2d45dbcf917d8f46f4642fba889b8c473ce38",
+            "name": "etalon-gate-calibration",
+            "schema": "etalon-capability-version/1",
+            "slug": "gate-calibration"
+          },
+          {
+            "description": "Compare or retire molecular generators using measured valid unique yield, real-pocket feasibility, cost and uncertainty.",
+            "entrypoint": "SKILL.md",
+            "files": [
+              {
+                "bytes": 2949,
+                "path": "SKILL.md",
+                "sha256": "4e195642fbd41820fd8057926faf36143ad1dd78bbeb56761701acc0f59cf961"
+              },
+              {
+                "bytes": 8918,
+                "path": "references/legacy-workflow.md",
+                "sha256": "5905d2aeb319a8709b512cb89e5ca3e9c29112a4ddfb0b021bf46ce2e96802f3"
+              }
+            ],
+            "kind": "domain_skill",
+            "manifest_sha256": "67a892bc1c669a65330824b5fb580e04ccf058718778b92e5618b65222b15372",
+            "name": "etalon-generation-planning",
+            "schema": "etalon-capability-version/1",
+            "slug": "generation-planning"
+          },
+          {
+            "description": "Inspect long-running ETALON jobs and distinguish progress, stalled work, partial results and uncertain outcomes before recovery.",
+            "entrypoint": "SKILL.md",
+            "files": [
+              {
+                "bytes": 3118,
+                "path": "SKILL.md",
+                "sha256": "59df17728d06d72ade36b5c23a003a81794d6901c6331a48e2651bfedb3e243b"
+              },
+              {
+                "bytes": 10860,
+                "path": "references/legacy-workflow.md",
+                "sha256": "ee883468956fe38a3d8a85b8cccf406e190ce8ecd2e4ccdd8ea69e2a5bb69900"
+              }
+            ],
+            "kind": "domain_skill",
+            "manifest_sha256": "e9a859608f9db06e514c5240cdf5fa2fa27b7d00091c91d37334c1ea76a938b4",
+            "name": "etalon-campaign-monitoring",
+            "schema": "etalon-capability-version/1",
+            "slug": "monitoring"
+          },
+          {
+            "description": "Set up or diagnose ETALON host access and selected scientific backends, checking interpreter paths, vendored sources and platform limits.",
+            "entrypoint": "SKILL.md",
+            "files": [
+              {
+                "bytes": 2006,
+                "path": "SKILL.md",
+                "sha256": "4bcb34ac4d4a3ac7fe2b8cc81af71cde1bd09c80bc711163206d996d2d388dac"
+              },
+              {
+                "bytes": 14078,
+                "path": "references/legacy-workflow.md",
+                "sha256": "5b880d8073abc730d8130521530b4850be7628018f345db9c1c2e5b7275e27e4"
+              }
+            ],
+            "kind": "domain_skill",
+            "manifest_sha256": "3869d34e45d75916aae903816a4b004bbe45382a503af8f62bb5ebc32aeb75a6",
+            "name": "etalon-install",
+            "schema": "etalon-capability-version/1",
+            "slug": "install"
+          }
+        ],
+        "tools": {
+          "etalon_action_prepare": "free",
+          "etalon_action_result": "free",
+          "etalon_action_submit": "spends",
+          "etalon_active_create": "cheap",
+          "etalon_active_execution_plan": "cheap",
+          "etalon_active_plan": "cheap",
+          "etalon_active_replay": "cheap",
+          "etalon_active_status": "free",
+          "etalon_active_submit": "spends",
+          "etalon_authorize_gates": "free",
+          "etalon_authorize_spend": "free",
+          "etalon_calibrate_gates": "free",
+          "etalon_campaign_plan": "free",
+          "etalon_capabilities": "free",
+          "etalon_check_handoff": "free",
+          "etalon_check_stability": "free",
+          "etalon_council_adjudicate": "free",
+          "etalon_council_reliability": "free",
+          "etalon_data_attach_handoffs": "cheap",
+          "etalon_data_import_assays": "cheap",
+          "etalon_data_import_candidates": "cheap",
+          "etalon_data_plan": "cheap",
+          "etalon_data_prepare": "cheap",
+          "etalon_data_review_template": "free",
+          "etalon_data_run": "cheap",
+          "etalon_data_sources": "free",
+          "etalon_data_status": "free",
+          "etalon_design_fep_network": "cheap",
+          "etalon_devices": "free",
+          "etalon_doctor": "cheap",
+          "etalon_events_read": "free",
+          "etalon_executor_list": "free",
+          "etalon_executor_prepare": "cheap",
+          "etalon_executor_register": "cheap",
+          "etalon_generation_productivity": "free",
+          "etalon_infrastructure": "free",
+          "etalon_method_read": "free",
+          "etalon_method_record": "cheap",
+          "etalon_plan_campaign": "free",
+          "etalon_recommend_waiver": "never-by-a-model",
+          "etalon_rule_admissible": "free",
+          "etalon_screen_configure": "cheap",
+          "etalon_screen_export": "cheap",
+          "etalon_screen_plan": "cheap",
+          "etalon_screen_status": "free",
+          "etalon_screen_submit": "spends",
+          "etalon_skill_read": "free",
+          "etalon_stages": "free",
+          "etalon_sweep_admit": "cheap",
+          "etalon_sweep_claim": "free",
+          "etalon_sweep_emit": "cheap",
+          "etalon_sweep_progress": "free",
+          "etalon_sweep_record": "free",
+          "etalon_sweep_recover": "free",
+          "etalon_sweep_status": "free",
+          "etalon_tune_screen": "free",
+          "etalon_workflow_advance": "spends",
+          "etalon_workflow_artifact": "cheap",
+          "etalon_workflow_cancel": "cheap",
+          "etalon_workflow_capabilities": "free",
+          "etalon_workflow_observe": "free",
+          "etalon_workflow_plan": "cheap",
+          "etalon_workflow_reconcile": "spends",
+          "etalon_workflow_status": "free",
+          "etalon_workflow_submit": "spends"
+        },
+        "usage_method": {
+          "bytes": 2988,
+          "kind": "usage_method",
+          "name": "etalon-host-guidance",
+          "sha256": "eb8fffca6a3aa74fc604ae2244b534ccaeaab9f0071160d62225a14a134faa72",
+          "uri": "etalon://host"
+        }
+      }
+    },
+    {
+      "line": 9,
+      "tool": "etalon_generation_productivity",
+      "arguments": {
+        "cost_ceiling": 2,
+        "loops_json": "[{\"tag\":\"loop-fixture\",\"model\":\"synthetic\",\"pocket\":\"fixed-condition-A\",\"chunks\":[{\"requested\":100,\"delivered\":100,\"unique\":0,\"seconds\":60},{\"requested\":100,\"delivered\":100,\"unique\":0,\"seconds\":60},{\"requested\":100,\"delivered\":100,\"unique\":0,\"seconds\":60}]}]"
+      },
+      "error": null,
+      "result": {
+        "loops": [
+          {
+            "chunks": 3,
+            "delivered": 300,
+            "delivery": {
+              "rate": 1.0,
+              "viable": true,
+              "wilson95": [
+                0.9874,
+                1.0
+              ]
+            },
+            "hours": 0.05,
+            "model": "synthetic",
+            "pocket": "fixed-condition-A",
+            "requested": 300,
+            "retire": [
+              "uniqueness 0.0% costs unbounded per screenable molecule, above the 2.0x ceiling. This model has covered the space its conditioning reaches on this pocket."
+            ],
+            "tag": "loop-fixture",
+            "unique": 0,
+            "unique_per_hour": 0.0,
+            "uniqueness": {
+              "cost_multiplier": null,
+              "exhausted": true,
+              "rate": 0.0,
+              "trend": 0.0,
+              "wilson95": [
+                0.0,
+                0.0126
+              ]
+            }
+          }
+        ],
+        "median_unique_per_hour": null,
+        "note": "Ranked on unique molecules per hour. Use etalon.generate.audit.compare for hit rates, and act on it only where its intervals are disjoint.",
+        "ok": true,
+        "retire": {
+          "loop-fixture": [
+            "uniqueness 0.0% costs unbounded per screenable molecule, above the 2.0x ceiling. This model has covered the space its conditioning reaches on this pocket."
+          ]
+        }
+      }
+    }
+  ],
+  "native_messages": [
+    "I\u2019ll inspect `input.json`, find a relevant ETALON numerical check, and use its feedback to decide whether another chunk is justified. I won\u2019t launch any work.",
+    "**Another chunk is not justified.** I would stop this loop and use the existing inventory of 20 usable molecules.\n\nReal ETALON MCP `etalon_generation_productivity` returned:\n\n- Delivery: 300/300 (100%).\n- Globally new molecules: 0/300; uniqueness 95% Wilson interval **0\u20131.26%**.\n- Duplicate-cost multiplier: **unbounded** (`null` numerically), exceeding the **2\u00d7** ceiling; marked `exhausted` and recommended retirement.\n\nThis supports stopping under unchanged conditioning, though it does not prove future novelty is impossible.\n\nSkipped skills, exported bundles, planning, campaign creation, generation, screening, scoring, actions, replay and recovery. No files changed.\n\nMonetary cost remains unknown. ETALON\u2019s 0.05 hours derives from synthetic input seconds, not actual expenditure. These results describe only this engineering fixture."
+  ],
+  "usage": [
+    {
+      "input_tokens": 155072,
+      "cached_input_tokens": 127872,
+      "cache_write_input_tokens": 0,
+      "output_tokens": 555,
+      "reasoning_output_tokens": 0
+    }
+  ],
+  "exact_same_input_as_timeout_attempt": true,
+  "source_diff_review": "--- \n\n+++ \n\n@@ -42,6 +42,7 @@\n\n import math\n from collections.abc import Mapping, Sequence\n from dataclasses import dataclass, field\n+from statistics import NormalDist\n \n \n def wilson(successes: int, trials: int, *, confidence: float = 0.95) -> tuple[float, float]:\n@@ -53,13 +54,15 @@\n\n     decides whether a campaign may act on a generator's share of its final survivors.\n     \"\"\"\n \n-    from scipy import stats\n-\n     if trials < 1:\n         raise ValueError(\"a rate needs at least one trial\")\n     if not 0 <= successes <= trials:\n         raise ValueError(f\"{successes} successes in {trials} trials is not a rate\")\n-    z = float(stats.norm.isf((1.0 - confidence) / 2.0))\n+    if not math.isfinite(confidence) or not 0.0 < confidence < 1.0:\n+        raise ValueError(\"confidence must be finite and strictly between zero and one\")\n+    # Use the lower tail: (1 + confidence) / 2 can round to 1 near full confidence.\n+    # This scalar quantile needs no NumPy/SciPy initialization in a cold tool process.\n+    z = -NormalDist().inv_cdf((1.0 - confidence) / 2.0)\n     rate = successes / trials\n     denominator = 1.0 + z * z / trials\n     centre = (rate + z * z / (2 * trials)) / denominator",
+  "junit": {
+    "a/wilson.xml": {
+      "tests": 69,
+      "failed": 0,
+      "errors": 0
+    },
+    "v/independent-cold-final.xml": {
+      "tests": 7,
+      "failed": 0,
+      "errors": 0
+    }
+  },
+  "first_timeout_retained": "c/native-productivity",
+  "scope": "Actual native MCP numerical response and feedback-based stopping on synthetic chunks; no real generation or scientific gain",
+  "model": null,
+  "monetary_cost": null
+}

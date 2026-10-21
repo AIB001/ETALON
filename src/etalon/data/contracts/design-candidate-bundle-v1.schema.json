@@ -1,0 +1,1035 @@
+{
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "schema_version": {
+      "const": "prism-design-candidate-bundle/1"
+    },
+    "bundle_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "generation_action_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "design_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "source": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "kind": {
+          "enum": [
+            "fixture",
+            "existing_real_artifact"
+          ]
+        },
+        "run_status": {
+          "enum": [
+            "COMPLETED",
+            "FAILED"
+          ]
+        },
+        "label_kind": {
+          "const": "unverified_design_requirement"
+        },
+        "task": {
+          "enum": [
+            "fragment_replacement",
+            "fragment_growing"
+          ]
+        },
+        "seed": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "legacy_design_id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "annotation": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "path": {
+              "type": "string",
+              "minLength": 1,
+              "pattern": "^(?!/)(?!.*\\\\)(?!.*:)(?!.*(?:^|/)\\.\\.(?:/|$)).+$"
+            },
+            "sha256": {
+              "type": "string",
+              "pattern": "^[0-9a-f]{64}$"
+            },
+            "bytes": {
+              "type": "integer",
+              "minimum": 0
+            }
+          },
+          "required": [
+            "path",
+            "sha256",
+            "bytes"
+          ]
+        },
+        "compiled_plan": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "path": {
+              "type": "string",
+              "minLength": 1,
+              "pattern": "^(?!/)(?!.*\\\\)(?!.*:)(?!.*(?:^|/)\\.\\.(?:/|$)).+$"
+            },
+            "sha256": {
+              "type": "string",
+              "pattern": "^[0-9a-f]{64}$"
+            },
+            "bytes": {
+              "type": "integer",
+              "minimum": 0
+            }
+          },
+          "required": [
+            "path",
+            "sha256",
+            "bytes"
+          ]
+        },
+        "results": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "path": {
+              "type": "string",
+              "minLength": 1,
+              "pattern": "^(?!/)(?!.*\\\\)(?!.*:)(?!.*(?:^|/)\\.\\.(?:/|$)).+$"
+            },
+            "sha256": {
+              "type": "string",
+              "pattern": "^[0-9a-f]{64}$"
+            },
+            "bytes": {
+              "type": "integer",
+              "minimum": 0
+            }
+          },
+          "required": [
+            "path",
+            "sha256",
+            "bytes"
+          ]
+        },
+        "manifest": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "path": {
+              "type": "string",
+              "minLength": 1,
+              "pattern": "^(?!/)(?!.*\\\\)(?!.*:)(?!.*(?:^|/)\\.\\.(?:/|$)).+$"
+            },
+            "sha256": {
+              "type": "string",
+              "pattern": "^[0-9a-f]{64}$"
+            },
+            "bytes": {
+              "type": "integer",
+              "minimum": 0
+            }
+          },
+          "required": [
+            "path",
+            "sha256",
+            "bytes"
+          ]
+        },
+        "slot_ledger": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "path": {
+              "type": "string",
+              "minLength": 1,
+              "pattern": "^(?!/)(?!.*\\\\)(?!.*:)(?!.*(?:^|/)\\.\\.(?:/|$)).+$"
+            },
+            "sha256": {
+              "type": "string",
+              "pattern": "^[0-9a-f]{64}$"
+            },
+            "bytes": {
+              "type": "integer",
+              "minimum": 0
+            }
+          },
+          "required": [
+            "path",
+            "sha256",
+            "bytes"
+          ]
+        },
+        "backend_records": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "path": {
+                "type": "string",
+                "minLength": 1,
+                "pattern": "^(?!/)(?!.*\\\\)(?!.*:)(?!.*(?:^|/)\\.\\.(?:/|$)).+$"
+              },
+              "sha256": {
+                "type": "string",
+                "pattern": "^[0-9a-f]{64}$"
+              },
+              "bytes": {
+                "type": "integer",
+                "minimum": 0
+              }
+            },
+            "required": [
+              "path",
+              "sha256",
+              "bytes"
+            ]
+          }
+        },
+        "source_bindings": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "path": {
+                "type": "string",
+                "minLength": 1,
+                "pattern": "^(?!/)(?!.*\\\\)(?!.*:)(?!.*(?:^|/)\\.\\.(?:/|$)).+$"
+              },
+              "sha256": {
+                "type": "string",
+                "pattern": "^[0-9a-f]{64}$"
+              },
+              "bytes": {
+                "type": "integer",
+                "minimum": 0
+              }
+            },
+            "required": [
+              "path",
+              "sha256",
+              "bytes"
+            ]
+          }
+        },
+        "identity_derivation": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "algorithm": {
+              "const": "prism-design-bundle-identity/1"
+            },
+            "design_preimage": {
+              "type": "object"
+            },
+            "action_preimage": {
+              "type": "object"
+            }
+          },
+          "required": [
+            "algorithm",
+            "design_preimage",
+            "action_preimage"
+          ]
+        }
+      },
+      "required": [
+        "kind",
+        "run_status",
+        "label_kind",
+        "task",
+        "seed",
+        "legacy_design_id",
+        "annotation",
+        "compiled_plan",
+        "results",
+        "manifest",
+        "slot_ledger",
+        "backend_records",
+        "source_bindings",
+        "identity_derivation"
+      ]
+    },
+    "identity_policy": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "algorithm": {
+          "const": "rdkit-exact-observed-graph/1"
+        },
+        "rdkit_version": {
+          "type": "string",
+          "minLength": 1
+        },
+        "normalization": {
+          "const": "sanitize; remove atom maps; RemoveHs; canonical isomeric SMILES; preserve charge/isotopes/stereo; no neutralization/tautomer/salt merging"
+        },
+        "state_semantics": {
+          "const": "observed valence/charge graph; pH-dependent state unresolved"
+        },
+        "pose_semantics": {
+          "const": "raw file hash plus observed state and receptor frame; no alignment; conservative byte identity"
+        }
+      },
+      "required": [
+        "algorithm",
+        "rdkit_version",
+        "normalization",
+        "state_semantics",
+        "pose_semantics"
+      ]
+    },
+    "receptor": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "receptor_state_id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "receptor": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "path": {
+              "type": "string",
+              "minLength": 1,
+              "pattern": "^(?!/)(?!.*\\\\)(?!.*:)(?!.*(?:^|/)\\.\\.(?:/|$)).+$"
+            },
+            "sha256": {
+              "type": "string",
+              "pattern": "^[0-9a-f]{64}$"
+            },
+            "bytes": {
+              "type": "integer",
+              "minimum": 0
+            }
+          },
+          "required": [
+            "path",
+            "sha256",
+            "bytes"
+          ]
+        },
+        "pocket": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "path": {
+              "type": "string",
+              "minLength": 1,
+              "pattern": "^(?!/)(?!.*\\\\)(?!.*:)(?!.*(?:^|/)\\.\\.(?:/|$)).+$"
+            },
+            "sha256": {
+              "type": "string",
+              "pattern": "^[0-9a-f]{64}$"
+            },
+            "bytes": {
+              "type": "integer",
+              "minimum": 0
+            }
+          },
+          "required": [
+            "path",
+            "sha256",
+            "bytes"
+          ]
+        },
+        "reference_ligand": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "path": {
+              "type": "string",
+              "minLength": 1,
+              "pattern": "^(?!/)(?!.*\\\\)(?!.*:)(?!.*(?:^|/)\\.\\.(?:/|$)).+$"
+            },
+            "sha256": {
+              "type": "string",
+              "pattern": "^[0-9a-f]{64}$"
+            },
+            "bytes": {
+              "type": "integer",
+              "minimum": 0
+            }
+          },
+          "required": [
+            "path",
+            "sha256",
+            "bytes"
+          ]
+        },
+        "atom_mapping_record": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "path": {
+              "type": "string",
+              "minLength": 1,
+              "pattern": "^(?!/)(?!.*\\\\)(?!.*:)(?!.*(?:^|/)\\.\\.(?:/|$)).+$"
+            },
+            "sha256": {
+              "type": "string",
+              "pattern": "^[0-9a-f]{64}$"
+            },
+            "bytes": {
+              "type": "integer",
+              "minimum": 0
+            }
+          },
+          "required": [
+            "path",
+            "sha256",
+            "bytes"
+          ]
+        },
+        "reference_atom_map_to_backend_index_0based": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "integer",
+            "minimum": 0
+          }
+        },
+        "coordinate_frame": {
+          "const": "original_receptor_frame_no_ligand_alignment"
+        },
+        "length_unit": {
+          "const": "angstrom"
+        },
+        "protonation_status": {
+          "const": "unresolved"
+        }
+      },
+      "required": [
+        "receptor_state_id",
+        "receptor",
+        "pocket",
+        "reference_ligand",
+        "atom_mapping_record",
+        "reference_atom_map_to_backend_index_0based",
+        "coordinate_frame",
+        "length_unit",
+        "protonation_status"
+      ]
+    },
+    "counts": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "requested": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "raw_slots": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "decoded": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "decode_failed": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "serialize_failed": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "not_attempted": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "hard_constraints_passed": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "design_selection_passed": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "design_and_qc_passed": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "unique_selected": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "duplicate_selected_chemistry": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "md_hydrogen_files": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "failure_counts_nonexclusive": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "integer",
+            "minimum": 0
+          }
+        }
+      },
+      "required": [
+        "requested",
+        "raw_slots",
+        "decoded",
+        "decode_failed",
+        "serialize_failed",
+        "not_attempted",
+        "hard_constraints_passed",
+        "design_selection_passed",
+        "design_and_qc_passed",
+        "unique_selected",
+        "duplicate_selected_chemistry",
+        "md_hydrogen_files",
+        "failure_counts_nonexclusive"
+      ]
+    },
+    "candidates": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "candidate_id": {
+            "type": "string",
+            "minLength": 1
+          },
+          "source_slot_id": {
+            "type": "string",
+            "minLength": 1
+          },
+          "slot": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "raw_status": {
+            "enum": [
+              "DECODED",
+              "DECODE_FAILED",
+              "SERIALIZE_FAILED",
+              "NOT_ATTEMPTED"
+            ]
+          },
+          "selected_by_source": {
+            "type": "boolean"
+          },
+          "duplicate_of": {
+            "anyOf": [
+              {
+                "type": "string",
+                "minLength": 1
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "identity": {
+            "anyOf": [
+              {
+                "type": "object",
+                "additionalProperties": false,
+                "properties": {
+                  "molecule_id": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "chemical_state_id": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "pose_id": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "canonical_isomeric_smiles": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "formal_charge": {
+                    "type": "integer"
+                  },
+                  "protonation_status": {
+                    "const": "unresolved"
+                  },
+                  "identity_policy": {
+                    "type": "string",
+                    "minLength": 1
+                  }
+                },
+                "required": [
+                  "molecule_id",
+                  "chemical_state_id",
+                  "pose_id",
+                  "canonical_isomeric_smiles",
+                  "formal_charge",
+                  "protonation_status",
+                  "identity_policy"
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "raw": {
+            "anyOf": [
+              {
+                "type": "object",
+                "additionalProperties": false,
+                "properties": {
+                  "path": {
+                    "type": "string",
+                    "minLength": 1,
+                    "pattern": "^(?!/)(?!.*\\\\)(?!.*:)(?!.*(?:^|/)\\.\\.(?:/|$)).+$"
+                  },
+                  "sha256": {
+                    "type": "string",
+                    "pattern": "^[0-9a-f]{64}$"
+                  },
+                  "bytes": {
+                    "type": "integer",
+                    "minimum": 0
+                  }
+                },
+                "required": [
+                  "path",
+                  "sha256",
+                  "bytes"
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "processed": {
+            "anyOf": [
+              {
+                "type": "object",
+                "additionalProperties": false,
+                "properties": {
+                  "path": {
+                    "type": "string",
+                    "minLength": 1,
+                    "pattern": "^(?!/)(?!.*\\\\)(?!.*:)(?!.*(?:^|/)\\.\\.(?:/|$)).+$"
+                  },
+                  "sha256": {
+                    "type": "string",
+                    "pattern": "^[0-9a-f]{64}$"
+                  },
+                  "bytes": {
+                    "type": "integer",
+                    "minimum": 0
+                  }
+                },
+                "required": [
+                  "path",
+                  "sha256",
+                  "bytes"
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "transformations": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "kind": {
+                  "const": "valence_hydrogen_addition"
+                },
+                "source": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "properties": {
+                    "path": {
+                      "type": "string",
+                      "minLength": 1,
+                      "pattern": "^(?!/)(?!.*\\\\)(?!.*:)(?!.*(?:^|/)\\.\\.(?:/|$)).+$"
+                    },
+                    "sha256": {
+                      "type": "string",
+                      "pattern": "^[0-9a-f]{64}$"
+                    },
+                    "bytes": {
+                      "type": "integer",
+                      "minimum": 0
+                    }
+                  },
+                  "required": [
+                    "path",
+                    "sha256",
+                    "bytes"
+                  ]
+                },
+                "target": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "properties": {
+                    "path": {
+                      "type": "string",
+                      "minLength": 1,
+                      "pattern": "^(?!/)(?!.*\\\\)(?!.*:)(?!.*(?:^|/)\\.\\.(?:/|$)).+$"
+                    },
+                    "sha256": {
+                      "type": "string",
+                      "pattern": "^[0-9a-f]{64}$"
+                    },
+                    "bytes": {
+                      "type": "integer",
+                      "minimum": 0
+                    }
+                  },
+                  "required": [
+                    "path",
+                    "sha256",
+                    "bytes"
+                  ]
+                },
+                "provenance_record": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "properties": {
+                    "path": {
+                      "type": "string",
+                      "minLength": 1,
+                      "pattern": "^(?!/)(?!.*\\\\)(?!.*:)(?!.*(?:^|/)\\.\\.(?:/|$)).+$"
+                    },
+                    "sha256": {
+                      "type": "string",
+                      "pattern": "^[0-9a-f]{64}$"
+                    },
+                    "bytes": {
+                      "type": "integer",
+                      "minimum": 0
+                    }
+                  },
+                  "required": [
+                    "path",
+                    "sha256",
+                    "bytes"
+                  ]
+                },
+                "verification": {
+                  "enum": [
+                    "pass",
+                    "fail",
+                    "unknown",
+                    "not_evaluated"
+                  ]
+                },
+                "heavy_atom_map_0based": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "properties": {
+                      "raw": {
+                        "type": "integer",
+                        "minimum": 0
+                      },
+                      "processed": {
+                        "type": "integer",
+                        "minimum": 0
+                      }
+                    },
+                    "required": [
+                      "raw",
+                      "processed"
+                    ]
+                  }
+                },
+                "heavy_atom_max_displacement_A": {
+                  "type": "number",
+                  "minimum": 0
+                },
+                "protonation_status": {
+                  "const": "unresolved"
+                }
+              },
+              "required": [
+                "kind",
+                "source",
+                "target",
+                "provenance_record",
+                "verification",
+                "heavy_atom_map_0based",
+                "heavy_atom_max_displacement_A",
+                "protonation_status"
+              ]
+            }
+          },
+          "validation": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "status": {
+                "enum": [
+                  "pass",
+                  "fail",
+                  "unknown",
+                  "not_evaluated"
+                ]
+              },
+              "hard_status": {
+                "enum": [
+                  "pass",
+                  "fail",
+                  "unknown",
+                  "not_evaluated"
+                ]
+              },
+              "selection_status": {
+                "enum": [
+                  "pass",
+                  "fail",
+                  "unknown",
+                  "not_evaluated"
+                ]
+              },
+              "qc_status": {
+                "type": "string",
+                "minLength": 1
+              },
+              "source_record": {
+                "type": "object",
+                "additionalProperties": false,
+                "properties": {
+                  "path": {
+                    "type": "string",
+                    "minLength": 1,
+                    "pattern": "^(?!/)(?!.*\\\\)(?!.*:)(?!.*(?:^|/)\\.\\.(?:/|$)).+$"
+                  },
+                  "sha256": {
+                    "type": "string",
+                    "pattern": "^[0-9a-f]{64}$"
+                  },
+                  "bytes": {
+                    "type": "integer",
+                    "minimum": 0
+                  }
+                },
+                "required": [
+                  "path",
+                  "sha256",
+                  "bytes"
+                ]
+              },
+              "revalidation_record": {
+                "anyOf": [
+                  {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "properties": {
+                      "path": {
+                        "type": "string",
+                        "minLength": 1,
+                        "pattern": "^(?!/)(?!.*\\\\)(?!.*:)(?!.*(?:^|/)\\.\\.(?:/|$)).+$"
+                      },
+                      "sha256": {
+                        "type": "string",
+                        "pattern": "^[0-9a-f]{64}$"
+                      },
+                      "bytes": {
+                        "type": "integer",
+                        "minimum": 0
+                      }
+                    },
+                    "required": [
+                      "path",
+                      "sha256",
+                      "bytes"
+                    ]
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "checks": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "properties": {
+                    "id": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "priority": {
+                      "enum": [
+                        "hard",
+                        "soft"
+                      ]
+                    },
+                    "status": {
+                      "enum": [
+                        "pass",
+                        "fail",
+                        "unknown",
+                        "not_evaluated"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "id",
+                    "priority",
+                    "status"
+                  ]
+                }
+              },
+              "core_atom_mapping": {
+                "type": "object",
+                "additionalProperties": {
+                  "type": "integer",
+                  "minimum": 0
+                }
+              }
+            },
+            "required": [
+              "status",
+              "hard_status",
+              "selection_status",
+              "qc_status",
+              "source_record",
+              "revalidation_record",
+              "checks",
+              "core_atom_mapping"
+            ]
+          },
+          "readiness": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "pool_admission": {
+                "enum": [
+                  "eligible",
+                  "rejected",
+                  "unresolved",
+                  "not_evaluated"
+                ]
+              },
+              "followup_evaluations": {
+                "type": "array",
+                "items": {
+                  "enum": [
+                    "structure_review",
+                    "state_preparation"
+                  ]
+                }
+              },
+              "md": {
+                "type": "object",
+                "additionalProperties": false,
+                "properties": {
+                  "status": {
+                    "const": "unsupported"
+                  },
+                  "capability": {
+                    "const": "bounded-5jwt-benzene/1"
+                  },
+                  "reason": {
+                    "type": "string",
+                    "minLength": 1
+                  }
+                },
+                "required": [
+                  "status",
+                  "capability",
+                  "reason"
+                ]
+              }
+            },
+            "required": [
+              "pool_admission",
+              "followup_evaluations",
+              "md"
+            ]
+          }
+        },
+        "required": [
+          "candidate_id",
+          "source_slot_id",
+          "slot",
+          "raw_status",
+          "selected_by_source",
+          "duplicate_of",
+          "identity",
+          "raw",
+          "processed",
+          "transformations",
+          "validation",
+          "readiness"
+        ]
+      }
+    },
+    "observations": {
+      "const": []
+    },
+    "producer": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "module": {
+          "type": "string",
+          "minLength": 1
+        },
+        "module_sha256": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$"
+        },
+        "python_version": {
+          "type": "string",
+          "minLength": 1
+        },
+        "rdkit_version": {
+          "type": "string",
+          "minLength": 1
+        }
+      },
+      "required": [
+        "module",
+        "module_sha256",
+        "python_version",
+        "rdkit_version"
+      ]
+    }
+  },
+  "required": [
+    "schema_version",
+    "bundle_id",
+    "generation_action_id",
+    "design_id",
+    "source",
+    "identity_policy",
+    "receptor",
+    "counts",
+    "candidates",
+    "observations",
+    "producer"
+  ],
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:prism:design-candidate-bundle:1",
+  "title": "Lossless M0 design candidate bundle v1"
+}

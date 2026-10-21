@@ -1,0 +1,81 @@
+{
+  "schema": "etalon-independent-acceptance-protocol/1",
+  "phase": "efficiency-20261021",
+  "owner": "V",
+  "frozen_before_results": true,
+  "baseline": {"archive": "integration/thin-harness-efficiency-20261021/i/baseline.zip", "sha256": "087729eabbff1c89157e58634af393c6428d65f052585fa099e0e971edd03a2c", "files": 1186},
+  "scope": "Optional scoped discovery, runnable SDK guidance and task-local batch composition, plus independent pre-review and post-review of E's bounded G0/G1/G2 experiment. This does not preselect a model, create an evaluation framework, or predetermine an efficiency result.",
+  "coordination": "R review and necessary thread notifications are restored by current REQUEST; routine implementation does not wait for individual approval. E owns its evidence/protocol and designated pilot files; V does not edit them or launch another E chat.",
+  "implementation_cases": [
+    {
+      "ids": ["INT-01", "INT-02", "INT-03", "HOST-01"],
+      "case": "default-compatibility-and-local-discovery",
+      "require": [
+        "Old omitted/default call parameters retain their previous full behavior and compatible fields. New compact/scope modes are explicit and reject invalid ambiguous values.",
+        "A requested local scope must not open/hash/traverse unrelated bundle content. Use an unrelated unreadable/tampered/missing sentinel or instrument file access, not output length alone.",
+        "Known tools remain directly usable without a discovery, skill read or method-registration prerequisite.",
+        "Compact candidates retain actual entrypoint/version/content reference needed to request full original content; expand/read round trip matches underlying bytes.",
+        "External/revised bundles remain discoverable/readable via their existing explicit mechanism, not silently restricted to six built-in slugs. Old snapshots remain unchanged and a revision obtains a distinct identity."
+      ]
+    },
+    {
+      "ids": ["RES-02", "RES-07", "RES-08", "ACT-06"],
+      "case": "compact-result-preserves-decision-critical-state",
+      "require": [
+        "Compact output must retain failure/NOT_APPLICABLE/unknown/pending distinctions, actual or unknown cost and reservation state, plus stable references to detailed evidence.",
+        "Do not encode null/unknown/not-applicable as numeric zero, suppress partial failures or imply that omitted histories never occurred.",
+        "Original detailed result remains retrievable; compact views do not mutate ledger, advance event cursor without a successful consumer decision, settle work or alter admission state.",
+        "Report bytes and timing from actual calls with defined encoding/scope; fewer output characters alone does not prove lower total latency or better task quality."
+      ]
+    },
+    {
+      "ids": ["MET-03", "MET-04", "HOST-01", "INT-02"],
+      "case": "runnable-local-sdk-guidance",
+      "require": [
+        "Run new minimal input snippets against actual functions in an isolated fixture and noneditable installation, recording interpreter and module paths. Documentation-only plausibility is insufficient.",
+        "Each selected method works independently without a full workflow, fit, skill or MethodVersion gate. Necessary scientific identity/unit/evidence/dependency checks remain enforced.",
+        "Inputs/outputs distinguish pure computation, provenance append, execution, validation and admission. A synthetic scientific fixture remains engineering evidence.",
+        "Reference reading, actual function calls and host self-report are separately observable. Do not count import as use or a returned resource as full skill adoption."
+      ]
+    },
+    {
+      "ids": ["ACT-02", "ACT-03", "ACT-06", "RES-07", "INT-03", "HOST-01"],
+      "case": "task-local-batch-with-feedback-and-one-failure",
+      "require": [
+        "The host may author/modify one local script using real SDK calls and conditional feedback branches; a meaningful branch inside one script is valid and needs no artificial extra LLM round.",
+        "Actual dependencies remain ordered; only independent calls may run concurrently. Failure in one item remains individually reported with its identity and real/unknown costs.",
+        "Repeated stable requests and retries do not duplicate charged execution/admission; an unresolved action keeps reservation and cannot be hidden by successes in the same batch.",
+        "A batch is not atomic unless the underlying contract actually guarantees it; preserve prior successful partial effects when another item fails.",
+        "Do not add an arbitrary-code MCP, global router, unified science DAG, background agent loop, event bus or second ledger. Existing authorization and recovery apply.",
+        "Unconditionally executing two alternatives in one script is an explicit comparison, not evidence that the second choice depended on first feedback. Inspect the actual code branch."
+      ]
+    }
+  ],
+  "e_pre_result_review": {
+    "status_at_freeze": "frequency inventory available; complete experimental protocol not yet seen by V",
+    "required_before_formal_comparison": [
+      "E specifies one bounded useful task family, semantic success/abstain/error categories and critical-error costs before results. Same criteria and input visibility apply to G0/G1/G2.",
+      "Frequency evidence has real time window, denominators, raw hashes and deduplication by original call/event identity; category labels and composite-command limitations are explicit. Two engineering tasks cannot establish production frequency.",
+      "Split by underlying task/source/event group, not prompts or variants; no related event in development/calibration and evaluation. Historical seen material stays known engineering data. Manual counterexamples are separate.",
+      "Freeze finite host calls/inference/compute budgets, stopping/timeouts and exclusions; all arms include failures, abstentions, fallback and preparation/adaptation cost. Do not exclude a difficult case after one arm fails.",
+      "G0 uses fixed pre-change baseline and G1/G2 use fixed delivered snapshot/install. Same host model/settings, hardware/resource policy and comparable task inputs; unresolved actual model identity is disclosed and limits causal attribution.",
+      "Do not use old sessions with unknown resolved model and differing prompts/caches as if they were matched current controls. Randomize/counterbalance execution order or explicitly constrain the conclusion.",
+      "All arms may freely skip/combine/modify methods and stop; do not sabotage G0 with prescribed waste or force G2 to call the model on every item.",
+      "Record exact Jev/Laya model repository/checkpoint/revision/architecture/tokenizer/runtime and measured local support, input and option-length limits. No assumed Qwen identity or unsupported speed claim.",
+      "G2 candidates are task-local; include not-applicable/unknown/return-to-host. Thresholds fixed using development/calibration only, not self-reported confidence or evaluated labels.",
+      "Long input/options must have explicit rejection/chunking/fallback and accounted cost, not silent truncation. Record actual use rate, non-adoption, unavailable model and fallback overhead.",
+      "Cold/warm startup and caching are separately defined; report elapsed end-to-end and available segments, host/model round trips, tool counts/returned UTF-8 bytes, cumulative/cached/noncached tokens, model latency/resources and known/unknown fees. Batch latency is not per-item latency.",
+      "Compare G1-G0 interface/use effect separately from G2-G1 model increment; Jev and Laya results remain separate. With too few independent groups, report per-case descriptive paired results and uncertainty, not population superiority."
+    ],
+    "applicable_counterexamples": ["known interface direct call", "no skill", "all candidates unsuitable", "external or revised method", "missing key information", "semantic negation", "oversized input/options", "classifier unavailable", "one failed batch item", "unknown outcome with paid cost/pending", "duplicate stable request"],
+    "decision_policy": "Permit benefit, no benefit or insufficient evidence. Scope adoption recommendations to observed quality/cost and actual frequency; engineering efficiency does not certify scientific M/S/phi/G improvement."
+  },
+  "evidence_and_status": {
+    "passed": "Actual independently checked scoped behavior or comparison; raw artifacts and identities available.",
+    "failed": "Observed unmet requirement; retain original failure and distinguish checker assumptions from product failures.",
+    "not_run": "No actual run or required information missing; never filled by older passing evidence.",
+    "blocked": "Concrete external dependency/auth/resource obstacle, stated narrowly.",
+    "freeze_rule": "Do not change criteria to fit outcomes. New scope/clarification uses an explicit dated addendum before its relevant results, preserving this original."
+  },
+  "limits": ["R4b remains paused", "No new scientific scoring or CRO", "No shared dependencies/auth/deployment changes", "No old-job restart or broad process termination", "Only explicitly authorized isolated bounded decision-model inference resources", "No commit/push", "V never changes tested implementation or owner tests to make acceptance pass"]
+}

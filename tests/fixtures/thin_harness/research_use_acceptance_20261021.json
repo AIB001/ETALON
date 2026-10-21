@@ -1,0 +1,92 @@
+{
+  "schema": "etalon-independent-acceptance-protocol/1",
+  "phase": "research-use-20261021",
+  "owner": "V",
+  "frozen_before_results": true,
+  "baseline": {
+    "archive": "integration/thin-harness-research-use-20261021/baseline.zip",
+    "sha256": "089c4589259232649bc6659e296441efb3578c4bcff2c93da7754eb15e9459e2",
+    "files": 1178,
+    "relation": "byte-identical source entries to previous final 7d7777c382dd6ed59197b2391f8075fdccd318c6c9d5cb403c0db242bcf22740",
+    "index_bytes": 0
+  },
+  "existing_acceptance_ids": ["ACT-02", "ACT-03", "ACT-06", "ACT-08", "RES-02", "RES-07", "RES-08", "MET-03", "MET-04", "HOST-01", "INT-01", "INT-02", "INT-03", "LEARN-01", "LEARN-02", "LEARN-03"],
+  "scope": "Actual use of existing empirical joint-model and recorded-program/first-segment/feedback seams on explicitly synthetic persistent evidence. No new orchestration framework; do not require full method selection or complete sequence. Alternative useful existing method choices must retain these applicable boundaries and be identified before their result is claimed.",
+  "cases": [
+    {
+      "case": "paired-model-provenance-and-independence",
+      "ids": ["RES-08", "MET-04", "LEARN-03"],
+      "positive": "Build an actual empirical_model from explicit paired task rows with independent loss definition and recorded evidence; downstream actual calculation must use that returned model. State which rows are synthetic, which groups are declared assumptions, and which file/role checks are enforced only when admitted via record_program.",
+      "counterexamples": [
+        "One development task, duplicate task ids, one independence group, or overlapping/empty heldout declaration cannot be claimed to establish fitted independent evidence.",
+        "Correlated rows from the same group cannot receive independent-task weight by default. If group_balanced is selected, verify group mass sums equally and within-group weights correctly; this does not prove real independence.",
+        "Incomplete paired probe outcomes, inconsistent decision-loss space, missing evidence membership, invalid resource units or unpriced dependencies must reject, not silently impute.",
+        "An artifact with diagnostic role does not establish independence or heldout provenance. A declared heldout split does not certify real freeze or generalization.",
+        "Wrong artifact role/hash/path at journal admission must reject without partial model/program/event writes. Pure model construction must not be advertised as evidence admission."
+      ]
+    },
+    {
+      "case": "recording-is-not-dispatch-or-gain",
+      "ids": ["ACT-02", "MET-04", "RES-08", "LEARN-01", "LEARN-02"],
+      "positive": "record_program binds unchanged actual plan/model identity and real artifact verification; idempotent replay leaves old records unchanged. Recording alone appends allowed metadata/events only.",
+      "counterexamples": [
+        "Changed model_id, forged plan id, mutated plan body, stale original artifact or reused-artifact identity must reject atomically.",
+        "No action, worker, scalar scientific observation, reservation debit or posterior success may be created by merely saving the plan.",
+        "Stored MethodVersion/Use/Evaluation or plan records are not evidence of independent improvement, actual execution or scientific validation."
+      ]
+    },
+    {
+      "case": "first-segment-boundary",
+      "ids": ["ACT-02", "ACT-03", "ACT-08", "RES-02", "INT-03"],
+      "positive": "compile_first_segment receives explicit reviewed operation bindings and compiles only the selected root query into the existing runtime schema, retaining quoted unit/cost and program/probe identity. Compiled receipt remains compiled_not_executed. Caller may skip compilation or stop.",
+      "counterexamples": [
+        "Missing/malformed binding, future-node reference, unregistered operation and stop/model-challenge/no-root plans must have explicit bounded rejection or no-segment result, not accidental TypeError or partial ledger writes.",
+        "Descendant branches cannot become extra nodes, queued actions, reservations, execution results or fictitious observations.",
+        "Probe scientific semantics and reviewed concrete operation arguments must agree for the claimed example. Caller-supplied mapping is not automatic semantic certification; limits must be explicit.",
+        "Do not remove necessary probe/resource/executor authorization, evidence, budget or dependency checks to permit partial use. No global MethodVersion/skill/fit/full-Campaign prerequisite."
+      ]
+    },
+    {
+      "case": "actual-feedback-identity-and-outcome-semantics",
+      "ids": ["ACT-06", "RES-07", "RES-08", "MET-04"],
+      "positive": "Feed actual admitted synthetic Observation or validated derived outcome into the supported feedback seam. Clearly document whether the interface uses direct categorical labels, raw numeric readouts, or explicit frozen OutcomeRule mapping. Continue/stop using its actual returned feedback, with requires_replanning retained.",
+      "counterexamples": [
+        "Same probe_id alone must not justify associating another task/condition/measurement method or unrelated execution with the current selected query. Test the identities actually declared by the model/segment contract; additional identity requirements cannot be invented post hoc solely to make a test fail.",
+        "bind_outcome threshold labels low/high cannot be assumed equivalent to str(raw_numeric_readout). A mismatch must be explicit model challenge/rejection or handled by an explicit validated rule; never silently fabricate the branch label.",
+        "Failed/missing/unsupported/unknown outcomes stay explicit, not low/zero or a successful future branch. Null root and absent readout require deliberate handling without mutation.",
+        "Wrong record type or artifact role/hash must not enter as admitted feedback. Replaying an old observation is not an independently repeated measurement.",
+        "A returned descendant query is advice requiring replanning/authorization. No automatic execution, global router, event bus or second science ledger."
+      ]
+    },
+    {
+      "case": "accounting-and-compatibility",
+      "ids": ["ACT-06", "RES-02", "RES-07", "INT-03"],
+      "positive": "Use original persistent synthetic ledger with explicit pending/unknown reservation and failed measured cost. Compare before/after state, prior metadata/event prefix and budget. Preserve legacy valid entry points or explain minimal compatible migration.",
+      "counterexamples": [
+        "Method/model/plan operations must not release pending reservation, zero failed fees, count original reused artifact cost twice or turn quotes into actual expenditure.",
+        "Observer/recovery receipt admission remains distinct from ordinary hook processing and research advice; no callback may waive core validation.",
+        "If a real fixture worker is authorized and used, report admitted/executed/verified separately. Compilation or an exit code alone cannot establish execution success."
+      ]
+    },
+    {
+      "case": "native-and-package-evidence",
+      "ids": ["HOST-01", "MET-03", "MET-04", "INT-01", "INT-02"],
+      "positive": "One useful native task may select a subset of supplied optional content and actual SDK methods, then switch or stop from actual feedback. Preserve prompt, raw calls, scripts, source snapshot, outputs and ledger deltas. Packaged new content must be readable from noneditable installation outside checkout.",
+      "counterexamples": [
+        "A full prescribed tool sequence cannot be claimed as autonomous composition; native shell SDK calls are not MCP scientific tools.",
+        "Imported functions are not necessarily called; tool-provided reference content is not proof of full skill reading or internalization.",
+        "Self-report, CLI exit zero or config presence without actual responses and persistent artifacts cannot pass actual use.",
+        "Unknown model/cost stays unknown; prompt constraints and failed attempts remain visible. Do not rerun old successful cases merely to increase totals.",
+        "Source/wheel/install identity mismatch, omitted new reference, changed protected unrelated source or absent legacy compatibility evidence blocks the corresponding claim."
+      ]
+    }
+  ],
+  "status_policy": {
+    "passed": "Only an actual checked scoped claim with raw evidence.",
+    "failed": "Observed unmet condition; preserve first failure and attributable subsequent fix/retest.",
+    "not_run": "No relevant actual execution, including independent S/phi/G benefit and real new science.",
+    "blocked": "Concrete external impediment, e.g. prior Claude authentication failure; do not relabel as passed."
+  },
+  "authorization_limits": ["R4b remains paused", "No new PRISM scoring or CRO orders", "No shared dependency upgrade/deployment or old-job restart", "Preserve active PRISM_review processes", "No commit/push", "No V edits to tested implementation or owner tests"],
+  "v_output_ownership": ["tests/test_thin_harness_research_use.py", "tests/fixtures/thin_harness/research_use_acceptance_20261021.json", "tests/fixtures/thin_harness/v-research-use-*.json", "docs/thin-harness/DELIVERY_V.md", "integration/thin-harness-research-use-20261021/v/"]
+}

@@ -1,0 +1,207 @@
+{
+  "slot": 1,
+  "status": "DECODED",
+  "sdf": "F:\\life_healthy\\PRISM\\.agent-local\\round2\\shared-fixture\\source\\run\\backend\\raw1.sdf",
+  "candidate_id": "flowr_root_0001",
+  "validation": {
+    "schema": "prism-design-validation/1",
+    "design_id": "synthetic-test-only",
+    "evaluation_context": "raw_generated_pose",
+    "ligand_superposition": false,
+    "chemical_repair": false,
+    "rdkit_version": "2026.09.1",
+    "checks": [
+      {
+        "id": "chemical_validity",
+        "priority": "hard",
+        "status": "pass",
+        "measured": true,
+        "requested": true,
+        "detail": null
+      },
+      {
+        "id": "fixed_subgraph",
+        "priority": "hard",
+        "status": "pass",
+        "measured": true,
+        "requested": true,
+        "detail": null
+      },
+      {
+        "id": "single_attachment_boundary",
+        "priority": "hard",
+        "status": "pass",
+        "measured": 1,
+        "requested": 1,
+        "detail": null
+      },
+      {
+        "id": "formal_charge",
+        "priority": "hard",
+        "status": "pass",
+        "measured": 0,
+        "requested": 0,
+        "detail": null
+      },
+      {
+        "id": "new_unspecified_stereocenter_count",
+        "priority": "hard",
+        "status": "pass",
+        "measured": 0,
+        "requested": 0,
+        "detail": null
+      },
+      {
+        "id": "core_rmsd",
+        "priority": "hard",
+        "status": "pass",
+        "measured": 0.0,
+        "requested": 0.5,
+        "detail": null
+      },
+      {
+        "id": "new_fragment_heavy_atoms",
+        "priority": "hard",
+        "status": "pass",
+        "measured": 3,
+        "requested": [
+          2,
+          6
+        ],
+        "detail": null
+      }
+    ],
+    "core_mapping": {
+      "mapping": {
+        "16": 3,
+        "18": 4,
+        "20": 5,
+        "22": 6,
+        "24": 7,
+        "26": 8
+      },
+      "core_rmsd_A": 0.0,
+      "boundary_correct": true,
+      "boundary": [
+        [
+          3,
+          2,
+          1.0
+        ]
+      ],
+      "new_fragment_heavy_atoms": 3
+    },
+    "design_hard_pass": true,
+    "all_soft_objectives_pass": true,
+    "selection_pass": true,
+    "experimental_activity_improvement": null,
+    "canonical_smiles": "NCCc1ccccc1",
+    "descriptors": {
+      "crippen_logp": 1.1878,
+      "rotatable_bonds_strict": 2,
+      "formal_charge": 0,
+      "heavy_atoms": 9
+    },
+    "reference_descriptors": {
+      "crippen_logp": 2.639100000000001,
+      "rotatable_bonds_strict": 2,
+      "formal_charge": 0,
+      "heavy_atoms": 9
+    },
+    "mapping_search_truncated": false,
+    "fixed_candidate_indices": [
+      3,
+      4,
+      5,
+      6,
+      7,
+      8
+    ],
+    "selection_quality": {
+      "nearest_protein_heavy_distance_A": 3.200500012498047,
+      "bad_bond_lengths": [],
+      "pose_screen_pass": true,
+      "changed_from_reference": true,
+      "protocol": "pilot-extra-screen/1; min protein distance 2A; covalent radius ratio 0.60..1.45",
+      "not_a_binding_energy_or_full_pose_validation": true
+    },
+    "soft_objective_count": 0,
+    "status": "PASS"
+  },
+  "qc": {
+    "status": "PASS",
+    "flags": [],
+    "parse_mode": "strict",
+    "sanitize_status": "passed",
+    "canonical_smiles": "NCCc1ccccc1",
+    "integrity": {
+      "atom_count": 9,
+      "bond_count": 9,
+      "declared_atoms": 9,
+      "declared_bonds": 9,
+      "counts_match": true,
+      "fragments": 1,
+      "dummy_atoms": 0,
+      "radical_electrons": 0,
+      "explicit_h": 0,
+      "finite_coordinates": true,
+      "duplicate_coordinate_pairs": 0,
+      "is_3d": true
+    },
+    "hydrogen": {
+      "status": "added",
+      "hydrogens_added": 11,
+      "heavy_atom_max_displacement_a": 0.0,
+      "note": "RDKit valence-based; pH-dependent protomers and tautomers not enumerated"
+    },
+    "geometry": {
+      "bad_bond_lengths": 0,
+      "min_bond_ratio": 0.9169,
+      "max_bond_ratio": 1.0343,
+      "internal_clashes": 0,
+      "angle_outliers": 0,
+      "worst_angle_deviation_deg": 2.19,
+      "aromatic_planarity_rms_a": 0.0018
+    },
+    "plausibility": {
+      "molecular_weight": 121.183,
+      "clogp": 1.188,
+      "tpsa": 26.02,
+      "h_bond_donors": 1,
+      "h_bond_acceptors": 1,
+      "rotatable_bonds": 2,
+      "rings": 1,
+      "aromatic_rings": 1,
+      "fraction_csp3": 0.25,
+      "heavy_atoms": 9,
+      "qed": 0.6245,
+      "synthetic_accessibility": 1.292,
+      "formal_charge": 0,
+      "lipinski_violations": 0,
+      "veber_violations": 0,
+      "structural_alerts": [],
+      "reactive_groups": [],
+      "stereocenters": 0,
+      "unspecified_stereocenters": 0
+    },
+    "pose": {
+      "min_protein_distance_a": 3.201,
+      "protein_hard_clashes": 0,
+      "protein_close_contacts": 0,
+      "pocket_center_offset_a": 0.0
+    },
+    "repair": null
+  },
+  "selected": true,
+  "duplicate_of": null,
+  "hydrogenation": {
+    "status": "added",
+    "hydrogens_added": 11,
+    "heavy_atom_max_displacement_a": 0.0,
+    "note": "RDKit valence-based; pH-dependent protomers and tautomers not enumerated"
+  },
+  "raw_file": {
+    "path": "F:\\life_healthy\\PRISM\\.agent-local\\round2\\shared-fixture\\source\\run\\backend\\raw1.sdf",
+    "sha256": "e72a6c4398c985dbebf0b35867ecd099380f90f53297aa9e418b13f690a787de"
+  }
+}

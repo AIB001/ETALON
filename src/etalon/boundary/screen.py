@@ -36,6 +36,7 @@ expensive one, and it is where a campaign can refuse a molecule for free.
 from __future__ import annotations
 
 import re
+import uuid
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -58,6 +59,17 @@ from etalon.boundary.infra import Infra, load
 #: a measurement -- every docking score it computed is committed in the artifact store, and the
 #: campaign's next decision depends on reading them rather than on retrying anything.
 _EXHAUSTION = re.compile(r"\A[A-Z0-9_]*EMPTY_(PARENT_)?INPUT\Z")
+
+#: The run statuses that mean the run is over, whichever way it went.
+#:
+#: One definition because two readers need the same one and they disagreed. :meth:`Screen.progress`
+#: had it inline, as the ``terminal`` key a monitor reads before deciding whether to intervene,
+#: while :mod:`etalon.campaign.drivers` had no notion of it at all and treated any run record as a
+#: finished run. ``FAILED`` is in the set: a run that failed is over, and an exhausted run -- every
+#: molecule gated out -- is a ``FAILED`` run whose error code matches :data:`_EXHAUSTION`, which is
+#: a measurement rather than a defect. Whether a terminal run succeeded is
+#: :attr:`ScreenResult.outcome`'s question, not this one's.
+TERMINAL_RUN_STATUSES = frozenset({"SUCCEEDED", "FAILED"})
 
 
 def _within(candidate: Path, root: Path) -> bool:
@@ -138,6 +150,17 @@ class ScreenResult:
     stages: tuple[StageOutcome, ...]
 
     @property
+    def terminal(self) -> bool:
+        """Whether the run is over. See :data:`TERMINAL_RUN_STATUSES`.
+
+        Not the same question as whether it succeeded, and not the same as whether a run record
+        exists. A record in ``RUNNING`` is a run still going, and a caller that reads it as a result
+        has a number for a batch that is not finished producing one.
+        """
+
+        return self.status in TERMINAL_RUN_STATUSES
+
+    @property
     def failed(self) -> tuple[StageOutcome, ...]:
         return tuple(stage for stage in self.stages if stage.error is not None)
 
@@ -212,11 +235,22 @@ class Screen:
         *,
         infra: Infra | None = None,
         allow_copyleft: bool = False,
+        read_only: bool = False,
     ) -> None:
         self.infra = infra or load("molcascade")
-        self.workspace = Path(workspace).expanduser().resolve()
-        self.workspace.mkdir(parents=True, exist_ok=True)
+        requested = Path(workspace).expanduser()
+        if read_only and (requested.is_symlink() or not requested.is_dir()):
+            raise FileNotFoundError(f"no real screening workspace at {requested}")
+        self.workspace = requested.resolve()
+        self.read_only = read_only
+        if not read_only:
+            self.workspace.mkdir(parents=True, exist_ok=True)
         self.allow_copyleft = allow_copyleft
+
+    @classmethod
+    def open_existing(cls, workspace: str | Path, *, infra: Infra | None = None) -> Screen:
+        """Open an existing workspace for verified reads, without directory creation or execution."""
+        return cls(workspace, infra=infra, read_only=True)
 
     # -- plan ---------------------------------------------------------------
 
@@ -335,6 +369,8 @@ class Screen:
         """
 
         import yaml
+        if self.read_only:
+            raise ValueError("read-only Screen cannot write a handoff configuration")
         from molcascade.cascade.catalog import CRITERIA_BY_ID
         from molcascade.cascade.defaults import build_criterion
         from molcascade.cascade.models import CascadeConfig
@@ -433,6 +469,8 @@ class Screen:
         falling back to the library's own default when there are none.
         """
 
+        if self.read_only:
+            raise ValueError("read-only Screen cannot execute a run")
         from molcascade.parallel.models import StageResources
         from molcascade.runtime import LocalRunner
 
@@ -446,7 +484,22 @@ class Screen:
             plugins=plan._internal["registry"],
             resources=resources,
         )
-        result = runner.run(plan._internal["pipeline"], run_id=run_id, resume=resume)
+        execution_id = uuid.uuid4().hex if run_id is None else run_id
+        previous = self.state(execution_id)
+        try:
+            result = runner.run(plan._internal["pipeline"], run_id=execution_id, resume=resume)
+        except Exception as error:
+            if ((previous is not None and not resume)
+                    or getattr(error, "code", None) in {"RUN_ALREADY_EXISTS", "RUN_LOCKED", "RUN_LOCK_FAILED"}):
+                raise
+            # The executor persists a failed stage before raising. Preserve that actual result,
+            # including exhausted input and paid partial artifacts, rather than losing the receipt
+            # at the adapter boundary. A refusal before execution must never reuse an old result.
+            failed = self.state(execution_id)
+            if (failed is not None and failed != previous and failed.status == "FAILED"
+                    and failed.revision_id == plan.revision_id):
+                return failed
+            raise
         state = runner.load_run(result.run_id)
         return ScreenResult(
             run_id=result.run_id,
@@ -481,14 +534,41 @@ class Screen:
         was right in both cases.
         """
 
-        from molcascade.plugins import create_builtin_registry
-        from molcascade.runtime import LocalRunner
+        return self.read_state(self.workspace, run_id)
 
-        runner = LocalRunner(self.workspace, plugins=create_builtin_registry())
+    @staticmethod
+    def read_state(workspace: str | Path, run_id: str) -> ScreenResult | None:
+        """Read validated persisted state without constructing an executor or creating paths."""
+        load("molcascade")
+        from molcascade.runtime.runner import read_run_state
+
         try:
-            state = runner.load_run(run_id)
-        except Exception:  # noqa: BLE001 -- RUN_NOT_FOUND and an unreadable state are both "no answer"
-            return None
+            state = read_run_state(workspace, run_id)
+        except Exception as error:
+            # Only a run that does not exist is "no answer". This used to swallow every exception
+            # and return ``None`` for all of them, on the reasoning that RUN_NOT_FOUND and an
+            # unreadable state are both "no answer" -- and for the caller that matters they are
+            # opposite answers.
+            #
+            # ``Sweep.recover`` acts on the difference. ``None`` means "claimed but no run was
+            # ever started", and its action is ``requeued``: release the claim and re-offer the
+            # batch. A state file that exists and cannot be read belongs to a run that *did*
+            # start, may have committed stages, and may still be committing them -- so requeueing
+            # it re-screens committed work and puts a second writer on one run id, which is the
+            # case ``_start_screens`` has a whole paragraph about containing. A truncated write, a
+            # state file over MolCascade's size limit, or one failing validation all took that
+            # path silently.
+            #
+            # It also made a mistyped run id read as ``exists: false`` through
+            # ``Screen.progress``, which a reader takes for "no progress yet".
+            #
+            # MolCascade raises ``PipelineError`` with ``code="RUN_NOT_FOUND"`` for the one case
+            # that really is absence, and something else for every other failure. Anything else
+            # propagates: ``Supervisor.tick`` contains it as a note, which is loud and survivable,
+            # and the alternative was a silent re-screen.
+            if str(getattr(error, "code", "")) == "RUN_NOT_FOUND":
+                return None
+            raise
         return ScreenResult(
             run_id=run_id,
             revision_id=str(state.revision_id),
@@ -515,7 +595,15 @@ class Screen:
         finished" for a batch at stage 27 was wrong twice in one night from exactly that read.
         """
 
-        result = self.state(run_id)
+        return self._progress_result(run_id, self.state(run_id))
+
+    @staticmethod
+    def read_progress(workspace: str | Path, run_id: str) -> dict[str, Any]:
+        """Inspect one existing workspace; absence/corruption never starts or recovers a run."""
+        return Screen._progress_result(run_id, Screen.read_state(workspace, run_id))
+
+    @staticmethod
+    def _progress_result(run_id: str, result: ScreenResult | None) -> dict[str, Any]:
         if result is None:
             return {"run_id": run_id, "exists": False}
         running = next((stage.stage_id for stage in result.stages if stage.status == "RUNNING"), None)
@@ -544,7 +632,7 @@ class Screen:
             "stage": reached + (1 if running else 0),
             "stages": len(result.stages),
             "current": running,
-            "terminal": result.status in ("SUCCEEDED", "FAILED"),
+            "terminal": result.terminal,
         }
 
     def recall(self, run_id: str, *, panel_size: int | None = None) -> dict[str, Any]:
@@ -565,7 +653,7 @@ class Screen:
         from molcascade.runtime import LocalRunner
 
         report = measure_recall(
-            LocalRunner(self.workspace, plugins=create_builtin_registry()),
+            LocalRunner(self.workspace, plugins=create_builtin_registry(), create=not self.read_only),
             run_id,
             panel_size=panel_size,
         )
@@ -597,6 +685,8 @@ class Screen:
         SDF export remains an identity file, not an MD-ready pose or an affinity measurement.
         Existing outputs are never overwritten.
         """
+        if self.read_only:
+            raise ValueError("read-only Screen cannot export a shortlist")
         from molcascade.handoff import materialize_shortlist
         from molcascade.plugins import create_builtin_registry
         from molcascade.runtime import LocalRunner
@@ -628,7 +718,7 @@ class Screen:
         import pyarrow.parquet as pq
         from molcascade.artifacts.store import LocalArtifactStore
 
-        store = LocalArtifactStore(self.workspace)
+        store = LocalArtifactStore(self.workspace, create=not self.read_only)
         # verify=True re-hashes the bundle. That is the point.
         directory = store.artifact_directory(artifact_id, verify=True)
         manifest = store.get_manifest(artifact_id)
@@ -685,7 +775,7 @@ class Screen:
 
         from molcascade.artifacts.store import LocalArtifactStore
 
-        store = LocalArtifactStore(self.workspace)
+        store = LocalArtifactStore(self.workspace, create=not self.read_only)
         carrying: list[str] = []
         for stage in result.committed:
             assert stage.artifact_id is not None
@@ -777,6 +867,30 @@ class Screen:
         ligand-only round: there is no screen number, so nothing can be calibrated and the
         campaign has to say so rather than invent one.
 
+        **A docking score is used only when the run carries exactly one docking stage, and only
+        when that stage's score is in kcal/mol.** Both halves are corrections, and both were
+        measured on one real run. ``docking_score/v1`` was looked for with
+        :meth:`artifact_carrying`, which is last-wins, so a cascade running two engines had its
+        comparator chosen by stage order: on the ALK2 panel run that is KarmaDock's MDN
+        confidence, a score that rises with affinity, returned here as though it ran down like a
+        kcal/mol number. Sorted ascending -- the only reading consistent with the binding free
+        energy on the other axis -- it puts the panel's declared negative controls first and every
+        known active last: ``neg_aspirin`` 17.285, ``neg_caffeine`` 23.325, ``act_SARACATINIB``
+        around 67. An active-learning loop fed that would have learned the panel backwards.
+
+        Negating the rising score instead is not the fix. A KarmaDock MDN of -67.33 appears in no
+        artifact, carries no units, and sits in the plausible range for an MM/PBSA number, so the
+        error would survive every downstream sanity check. Refusing is what leaves the campaign
+        able to say what happened; :mod:`etalon.campaign.loop` already turns a ``ValueError`` here
+        into the note "No comparator for the screen", after which ``admissible.rule`` records
+        ``NO_CHEAP_VALUE`` and withholds the measurement instead of learning from it.
+
+        Stages are told apart by ``stage_id`` rather than by ``engine_id``, because
+        ``engine_id`` is a class attribute on each MolCascade docking plugin: two Uni-Dock stages
+        at different ``search_mode`` carry the same one, and grouping on it merged them -- 15 of
+        15 molecules silently took the later stage's score. ``stage_id`` is unique by
+        construction, with duplicates rejected when the cascade is compiled.
+
         A ``derived_metric/v1`` value is never used unless ``metric_id`` names it, even when
         the run carries exactly one. Being the only candidate is not an argument for being
         the right one.
@@ -786,18 +900,17 @@ class Screen:
                 several metrics present, this refuses rather than picking: which of a
                 demerit total and a predicted affinity a campaign is calibrating is a
                 decision, and silently taking the first to appear would make it invisibly.
+
+        Raises:
+            ValueError: If the run carries more than one docking stage, if its docking score is
+                not in kcal/mol, or if it has no docking score and its derived metrics are
+                unnamed.
         """
 
-        docking = self.artifact_carrying(result, "docking_score/v1")
-        if docking is not None and metric_id is None:
-            rows = self.read(docking, contract_id="docking_score/v1")
-            # Rank 0 only: a lower-ranked pose is a different hypothesis about the same
-            # molecule, and averaging hypotheses is not a score.
-            return {
-                str(row["parent_id"]): float(row["score"])
-                for row in rows
-                if row.get("score") is not None and int(row.get("pose_rank") or 0) == 0
-            }
+        if metric_id is None:
+            docking = self._docking_metrics(result)
+            if docking is not None:
+                return docking
 
         # Every artifact that carries the contract, not the last one. Taking the last was
         # the first implementation and it silently chose a metric: a cascade commits a
@@ -845,6 +958,64 @@ class Screen:
             )
         return dict(available[metric_id])
 
+    #: The subset of ``docking_score/v1.score_kind`` that has kcal/mol units, mirroring
+    #: MolCascade's own ``_SUPPORTED_SCORE_KINDS`` in its normalized-docking-score plugin. Every
+    #: other kind -- ``KARMADOCK_MDN``, ``CNN_SCORE``, ``CNN_AFFINITY`` -- is a confidence or a
+    #: classifier output, on no energy scale and in some cases pointing the other way.
+    _KCAL_MOL_KINDS = frozenset({"VINA_KCAL_MOL", "VINARDO_KCAL_MOL", "AD4_KCAL_MOL"})
+
+    def _docking_metrics(self, result: ScreenResult) -> dict[str, float] | None:
+        """The run's one docking score per molecule, or ``None`` when it has no docking stage.
+
+        Separate from :meth:`metrics` so the refusals have somewhere to be read. See that
+        method's docstring for what each one is about.
+        """
+
+        carrying = set(self.artifacts_carrying(result, "docking_score/v1"))
+        if not carrying:
+            return None
+
+        # Keyed on stage_id, not engine_id: see metrics(). Grouped by artifact so two stages
+        # that resolved to one cache key -- the same table under two names -- are one score
+        # table rather than an ambiguity. Stage order is preserved, so a refusal names the
+        # stages in the order the cascade ran them.
+        staged: dict[str, list[str]] = {}
+        for stage in result.committed:
+            if stage.artifact_id in carrying:
+                assert stage.artifact_id is not None
+                staged.setdefault(stage.artifact_id, []).append(stage.stage_id)
+        if len(staged) > 1:
+            named = ", ".join("/".join(names) for names in staged.values())
+            raise ValueError(
+                f"this run carries docking scores from {len(staged)} stages ({named}), and which "
+                "one a binding free energy is being calibrated against is a decision rather than "
+                "a lookup. Taking the last to commit is what reported a KarmaDock confidence as "
+                "a kcal/mol score. Name a derived metric with metric_id, or screen with one "
+                "docking stage."
+            )
+
+        artifact_id, stage_ids = next(iter(staged.items()))
+        rows = self.read(artifact_id, contract_id="docking_score/v1")
+        kinds = {str(row.get("score_kind") or "").strip().upper() for row in rows}
+        foreign = sorted(kind for kind in kinds if kind not in self._KCAL_MOL_KINDS)
+        if foreign:
+            shown = ", ".join(kind or "an unnamed score" for kind in foreign)
+            raise ValueError(
+                f"the docking stage {'/'.join(stage_ids)} writes {shown}, which is not in "
+                "kcal/mol and so is not comparable with a binding free energy. Negating it would "
+                "put a number on no scale into the range a real one occupies, where nothing "
+                "downstream could catch it; name a derived metric with metric_id instead, or add "
+                "a docking stage whose score is an energy."
+            )
+
+        # Rank 0 only: a lower-ranked pose is a different hypothesis about the same
+        # molecule, and averaging hypotheses is not a score.
+        return {
+            str(row["parent_id"]): float(row["score"])
+            for row in rows
+            if row.get("score") is not None and int(row.get("pose_rank") or 0) == 0
+        }
+
     def durability(self) -> dict[str, object]:
         """Whether this workspace will still exist tomorrow, and why it might not.
 
@@ -883,4 +1054,4 @@ class Screen:
         return self.infra.provenance()
 
 
-__all__ = ["Screen", "ScreenPlan", "ScreenResult", "StageOutcome"]
+__all__ = ["TERMINAL_RUN_STATUSES", "Screen", "ScreenPlan", "ScreenResult", "StageOutcome"]

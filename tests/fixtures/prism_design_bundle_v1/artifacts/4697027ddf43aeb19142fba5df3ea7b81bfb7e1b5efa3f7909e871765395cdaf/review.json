@@ -1,0 +1,26 @@
+{
+  "pdb_id": "0tst",
+  "review_tier": "candidate_for_m0_pilot",
+  "objective_code": "local_shape",
+  "evidence": {
+    "path": "F:\\life_healthy\\PRISM\\.agent-local\\round2\\shared-fixture\\source\\annotation\\evidence.json",
+    "sha256": "e07c32711422e41f21b711d84ac2d1ae6609c1dda2a364c62367cd3c38153e35"
+  },
+  "selected_candidate_evidence": {
+    "fixed_atom_maps": [
+      16,
+      18,
+      20,
+      22,
+      24,
+      26
+    ],
+    "editable_atom_maps": [
+      10,
+      12,
+      14
+    ],
+    "retained_attachment_atom_map": 16,
+    "replaced_attachment_atom_map": 14
+  }
+}

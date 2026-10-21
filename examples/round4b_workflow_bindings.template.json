@@ -1,0 +1,179 @@
+{
+  "schema": "etalon-r4b-config-extension-template/1",
+  "scope": "NOT A SCIENTIFIC FREEZE; add these keys to root config; candidate state/input freeze remains unchanged",
+  "evaluation_cost_weight": 0.001,
+  "support_guard": {
+    "fallback_decision": "fixed_pool_vina",
+    "unknown_world_probability": null,
+    "unknown_loss_bounds": {
+      "fixed_pool_vina": [
+        0,
+        1
+      ],
+      "abstain": [
+        0,
+        1
+      ],
+      "reviewed_receptor_vina": [
+        0,
+        1
+      ]
+    }
+  },
+  "workflow_bindings": {
+    "candidate_count": 6,
+    "resources": {
+      "r0": {
+        "scorer": "vina",
+        "candidate_indices": [
+          0,
+          1,
+          2,
+          3,
+          4,
+          5
+        ],
+        "receptor_key": "original"
+      },
+      "r1": {
+        "scorer": "vina",
+        "candidate_indices": [
+          0,
+          1,
+          2
+        ],
+        "receptor_key": "reviewed_variant"
+      },
+      "r2": {
+        "scorer": "vina",
+        "candidate_indices": [
+          3,
+          4,
+          5
+        ],
+        "receptor_key": "reviewed_variant"
+      }
+    },
+    "decision_scores": {
+      "fixed_pool_vina": [
+        "r0"
+      ],
+      "abstain": [],
+      "reviewed_receptor_vina": [
+        "r1",
+        "r2"
+      ]
+    },
+    "probes": {
+      "q1": {
+        "reference_resources": [
+          "r0"
+        ],
+        "comparison_resources": [
+          "r1"
+        ],
+        "candidate_indices": [
+          0,
+          1,
+          2
+        ]
+      },
+      "q2": {
+        "reference_resources": [
+          "r0"
+        ],
+        "comparison_resources": [
+          "r2"
+        ],
+        "candidate_indices": [
+          3,
+          4,
+          5
+        ]
+      }
+    },
+    "cold_start_decision_resources": {
+      "fixed_pool_vina": [
+        "r0"
+      ],
+      "reviewed_receptor_vina": [
+        "r1",
+        "r2"
+      ],
+      "abstain": []
+    },
+    "task_states": {
+      "TASK_ID": {
+        "receptor_states": {
+          "original": {
+            "availability": "TO_BE_REVIEWED_BEFORE_LABEL_RELEASE",
+            "coupling": "same ligand graph/pose; receptor intervention factors require root freeze",
+            "preparation_evidence": [
+              "TO_BE_PINNED_REAL_CERTIFICATE"
+            ],
+            "input_identity": {
+              "receptor_state_id": "TO_BE_FROZEN",
+              "coordinate_frame_id": "TO_BE_FROZEN"
+            },
+            "inputs": {
+              "receptor_source": {
+                "sha256": "TO_BE_PINNED",
+                "bytes": null
+              },
+              "scorer_receptor": {
+                "sha256": "TO_BE_PINNED",
+                "bytes": null
+              },
+              "scorer_manifest": {
+                "sha256": "TO_BE_PINNED",
+                "bytes": null
+              }
+            },
+            "grid": {
+              "center_A": null,
+              "size_A": null,
+              "spacing_A": 0.375
+            }
+          },
+          "reviewed_variant": {
+            "availability": "TO_BE_REVIEWED_BEFORE_LABEL_RELEASE",
+            "coupling": "same ligand graph/pose; receptor intervention factors require root freeze",
+            "preparation_evidence": [
+              "TO_BE_PINNED_REAL_CERTIFICATE"
+            ],
+            "input_identity": {
+              "receptor_state_id": "TO_BE_FROZEN",
+              "coordinate_frame_id": "TO_BE_FROZEN"
+            },
+            "inputs": {
+              "receptor_source": {
+                "sha256": "TO_BE_PINNED",
+                "bytes": null
+              },
+              "scorer_receptor": {
+                "sha256": "TO_BE_PINNED",
+                "bytes": null
+              },
+              "scorer_manifest": {
+                "sha256": "TO_BE_PINNED",
+                "bytes": null
+              }
+            },
+            "grid": {
+              "center_A": null,
+              "size_A": null,
+              "spacing_A": 0.375
+            }
+          }
+        }
+      }
+    }
+  },
+  "planning_requirement": {
+    "cost_weight": 0.001,
+    "calibration_cost_weights": [
+      0.001
+    ]
+  },
+  "preparation_accounting_dependency": "Each new preparation requires same-H actual receipt and explicit resource/dependency or declared upfront fee; current template does not claim free preparation"
+}

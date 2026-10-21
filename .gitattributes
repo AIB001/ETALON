@@ -1,0 +1,3 @@
+# Capability identities are byte-based across checkout, wheel and host exports.
+/.claude/skills/etalon-*/** text=auto eol=lf
+/src/etalon/HOST.md text eol=lf

@@ -410,3 +410,26 @@ def test_durable_process_receipt_releases_gate_and_preserves_pid(tmp_path):
     actual = json.loads(marker.read_text())
     assert captured.status == "completed"
     assert actual == {"pid": identities[0]["pid"], "group": identities[0]["group"]}
+
+
+def test_partial_measured_cost_is_part_of_final_failure_total_not_added_twice(tmp_path):
+    campaign, runtime, ctx, actions = pending_active(tmp_path)
+    campaign.record_execution_costs(actions[0].id, [{"execution_id": "partial", "wall_seconds": .25}])
+    settlement = {"costs": {"campaign:credits": .75}, "action_costs": {actions[0].id: .75},
+                  "reason": "Final fixture total includes the previously recorded partial charge",
+                  "evidence": "failure-evidence.txt"}
+    service._settle_failure(ctx, runtime.get("audit")["nodes"][0], settlement)
+    assert campaign.balance()["spent"] == .75 and campaign.balance()["reserved"] == 0
+    assert runtime.get("audit")["resources"]["campaign:credits"]["spent"] == .75
+    assert campaign.observations()[0]["result"]["value"] is None
+
+
+def test_final_failure_cost_below_measured_partial_is_rejected_before_freezing(tmp_path):
+    campaign, runtime, ctx, actions = pending_active(tmp_path)
+    campaign.record_execution_costs(actions[0].id, [{"execution_id": "partial", "wall_seconds": .25}])
+    before = campaign.export()
+    settlement = {"costs": {"campaign:credits": .1}, "action_costs": {actions[0].id: .1},
+                  "reason": "Invalid lower fixture cost", "evidence": "failure-evidence.txt"}
+    with pytest.raises(ValueError, match="already measured"):
+        service._settle_failure(ctx, runtime.get("audit")["nodes"][0], settlement)
+    assert campaign.export() == before and "failure_settlement" not in ctx.receipts()

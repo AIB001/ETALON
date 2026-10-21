@@ -96,7 +96,9 @@ class RuntimeStore:
         with self.connection(write=True) as db:
             old = db.execute("SELECT plan_id,plan FROM jobs WHERE id=?", (job,)).fetchone()
             if old:
-                if old["plan_id"] != plan["plan_id"] or old["plan"] != canonical(plan):
+                recorded = json.loads(old["plan"])
+                attributed_action = "action_request" in recorded["spec"] and "action_request" in plan["spec"]
+                if old["plan_id"] != plan["plan_id"] or (not attributed_action and old["plan"] != canonical(plan)):
                     raise StateError("job id already belongs to a different workflow or input plan")
             else:
                 if self.job_root(job).exists():

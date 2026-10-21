@@ -1,0 +1,59 @@
+{
+  "status": "passed",
+  "wheel_sha256": "194f6c97aff8c6ea7ffda19e142a41ab1e77652a36a1ba04fd33a810cdc70f3c",
+  "source_wheel_installed_files": 325,
+  "cwd": "F:\\life_healthy\\integration\\thin-harness-native-20261021",
+  "python": "F:\\life_healthy\\ETALON\\.venv\\Scripts\\python.exe",
+  "modules": {
+    "etalon.runtime.service": "F:\\life_healthy\\integration\\thin-harness-native-20261021\\install\\etalon\\runtime\\service.py",
+    "etalon.mcp.runtime": "F:\\life_healthy\\integration\\thin-harness-native-20261021\\install\\etalon\\mcp\\runtime.py",
+    "etalon.research.journal": "F:\\life_healthy\\integration\\thin-harness-native-20261021\\install\\etalon\\research\\journal.py",
+    "etalon.host": "F:\\life_healthy\\integration\\thin-harness-native-20261021\\install\\etalon\\host.py",
+    "etalon.skills": "F:\\life_healthy\\integration\\thin-harness-native-20261021\\install\\etalon\\skills.py"
+  },
+  "module_sha256": {
+    "etalon.runtime.service": "ffff910947feeb153f535dc8b1e15eb4c8fd07ac54b779ce515dadb2623f50fa",
+    "etalon.mcp.runtime": "d2b66f0d78d941b22aba06d36b190a0a8e1409f5cbf2a4803afbe412fecc41d6",
+    "etalon.research.journal": "35df36ddc1c361e4aa06a9fe3bf3c12d851cf26017d4cb439f2042761f86081d",
+    "etalon.host": "cf8a3c6301b055bf9be45dafc31b8c92f215bd1302a0bc52592c24509b7ebf8b",
+    "etalon.skills": "80ab822243b57e837a774921c3dfd69210a72592b72cc0be946a7d87eebbdfa8"
+  },
+  "bundle_count": 6,
+  "exports": {
+    "codex": {
+      "target": "F:\\life_healthy\\integration\\thin-harness-native-20261021\\installed-codex",
+      "export_matches_manifest": true,
+      "matches_current_source": true,
+      "runtime_matches": true,
+      "changed": [],
+      "missing": [],
+      "unexpected": [],
+      "catalog_sha256": "e3bf060a7ce75a0b85f409b0d11f2b28cbaa04538cacf35e8dd623649915d20a",
+      "current_catalog_sha256": "e3bf060a7ce75a0b85f409b0d11f2b28cbaa04538cacf35e8dd623649915d20a",
+      "host_validation": "not performed; export is not evidence of native host discovery",
+      "current_file_count": 14
+    },
+    "claude": {
+      "target": "F:\\life_healthy\\integration\\thin-harness-native-20261021\\installed-claude",
+      "export_matches_manifest": true,
+      "matches_current_source": true,
+      "runtime_matches": true,
+      "changed": [],
+      "missing": [],
+      "unexpected": [],
+      "catalog_sha256": "e3bf060a7ce75a0b85f409b0d11f2b28cbaa04538cacf35e8dd623649915d20a",
+      "current_catalog_sha256": "e3bf060a7ce75a0b85f409b0d11f2b28cbaa04538cacf35e8dd623649915d20a",
+      "host_validation": "not performed; export is not evidence of native host discovery",
+      "current_file_count": 14
+    }
+  },
+  "stdio": {
+    "tools": 65,
+    "descriptions": {
+      "etalon_action_result": "FREE. Read execution, verification, admission and accounting as separate existing facts.\n\nPass the complete handle object returned by etalon_action_submit unchanged. A campaign\naction ID or an offline etalon_active_replay result is not a runtime action handle.\nInspect replay outcomes through campaign status and campaign events instead.\n",
+      "etalon_events_read": "FREE. Page committed events with log identity; this does not run hooks or restart work.\n\nlog_ref is {\"kind\": \"campaign\", \"database\": \"/absolute/path/campaign.sqlite\"} or\n{\"kind\": \"runtime\", \"workspace\": \"/absolute/path/runtime\", \"job_id\": \"optional-job-id\"}.\nStart with after_sequence=0; for subsequent pages pass the returned cursor unchanged.\nOnly campaign and runtime are valid kinds. Paths must name existing logs.\n"
+    },
+    "actual_reference_read": "passed"
+  },
+  "native_host_run": "not represented by this protocol client"
+}

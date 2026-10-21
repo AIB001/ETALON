@@ -1,0 +1,176 @@
+{
+  "schema": "etalon-independent-native-acceptance/1",
+  "date": "2026-10-21",
+  "owner": "V",
+  "phase": "protocol_before_native_results",
+  "authority": "User continuation authorizes native host checks, isolated engineering fixtures on existing authorized Linux resources, and regression attribution. R4b remains paused.",
+  "contracts": [
+    "docs/thin-harness/ACTION_CONTRACT.md",
+    "docs/thin-harness/RESULT_CONTRACT.md",
+    "docs/thin-harness/METHOD_CONTRACT.md",
+    "docs/thin-harness/ACCEPTANCE.md"
+  ],
+  "starting_evidence": {
+    "entry_state": "integration/thin-harness-native-20261021/entry-state.json",
+    "reported_baseline_files": 1153,
+    "reported_changed_or_missing": [],
+    "reported_new_paths": [],
+    "reported_staged_diff_bytes": 0,
+    "interpretation": "Current continuation baseline, not a new native-host or process reliability result."
+  },
+  "status_rules": {
+    "passed": "All required observations for the named case, exact host/platform and tested scope have raw evidence.",
+    "failed": "An executed applicable check contradicts a required invariant. Preserve original logs even after a corrected rerun.",
+    "not_run": "The check was not attempted; name the missing evidence and do not infer success from another check.",
+    "blocked": "A concrete prerequisite prevents execution, such as absent CLI, unavailable existing authorization, inaccessible authorized Linux, or unsupported platform. Preserve the actual failed attempt separately.",
+    "partial_scope": "Report subcase statuses separately. One host, capability or platform does not certify the others.",
+    "cost": "Preserve actual known usage, failed attempts, and outstanding reservations. Unavailable billing or overhead is null/unknown; quote is not measurement."
+  },
+  "shared_evidence_requirements": [
+    "Exact command, working directory, executable path and version, source/package hash and actual imported module paths.",
+    "Run identifiers, UTC or explicitly zoned timestamps, exit status and application status separately.",
+    "Raw structured host/process logs, actual tool requests and responses, fixture inputs and output hashes, relevant receipts and ledger before/after.",
+    "Record fixture executor identity and every injected failure. Real OS processes plus synthetic scientific output remain engineering fixtures.",
+    "Preserve original attempts and diagnostic failures. A retry is a new attempt linked to its predecessor, never an overwrite.",
+    "Do not collect credentials or full ambient environment dumps.",
+    "No writes to PRISM, historical science evidence, shared source/environment, old scientific jobs, or global host configuration.",
+    "No new cloud resources, WSL installation, shared dependency upgrades, R4b restart, paid scientific tasks, CRO orders, auto-commit or push."
+  ],
+  "host_protocol": {
+    "cases_per_host": ["Codex", "Claude Code"],
+    "entry": "The actual official native CLI launches or connects the ETALON MCP configuration in an isolated project. A Python MCP client is not the native host.",
+    "prompt_policy": {
+      "supply": [
+        "A bounded engineering task goal and fixture inputs.",
+        "Available resource and filesystem scope, cost/termination limits, and scientific pause boundary.",
+        "A short normal host guide and discoverable optional methods."
+      ],
+      "do_not_supply": [
+        "A complete ordered list of calls or a fixed successor DAG.",
+        "A required choice of every skill or a full injection of all method content.",
+        "Fabricated tool results, predefined success text, or assertions that the host must claim improvement."
+      ],
+      "feedback_policy": "A fixture can intentionally reveal a contradiction, missing support or changed result through an actual executed tool response. Preserve that response and the subsequent visible decision. Do not inject a scripted instruction that merely tells the host which next method to select.",
+      "selection_boundary": "This protocol checks observable capability and bounded response to feedback, not superiority of phi, S, G, internal reasoning quality or scientific discovery."
+    },
+    "subcases": [
+      {
+        "id": "HOST-01/native-entry",
+        "required": [
+          "The named native CLI executable/version and invocation are recorded.",
+          "The native run discovers the actual ETALON MCP surface and makes at least one substantive successful supported call with auditable output.",
+          "Raw host/tool logs bind the call to the actual server/package version and isolated fixture."
+        ],
+        "insufficient": [
+          "Configuration existence, export verification, an MCP server launched alone, or a Python protocol client.",
+          "Exit code zero or narrative claims without an observable tool request and response.",
+          "Capabilities discovery alone."
+        ]
+      },
+      {
+        "id": "HOST-01/no-skill",
+        "required": [
+          "A native run performs a substantive supported ETALON operation without adopting a method first.",
+          "Where ActionRequest is used, method_use_refs is empty and the same authoritative execution/receipt path is used.",
+          "Output, execution state, verification and admission are interpreted at their actual levels."
+        ],
+        "interpretation": "A successful substantive read/validation operation establishes direct tool freedom only. It does not replace ACT-01 scientific-action execution. An unsupported active execution honestly reported is blocked for that action, not a successful execution."
+      },
+      {
+        "id": "HOST-01/optional-methods",
+        "required": [
+          "The native host can discover and selectively read relevant content without loading every skill.",
+          "Partial use and composition are represented by actual method references and visible bounded choices; evaluate each exercised behavior separately.",
+          "A local method outside the six-entry catalog can be read or tried within authorization without mandatory promotion.",
+          "If the host modifies a reference or script, actual bytes/manifest identity change and the old snapshot remains addressable."
+        ],
+        "interpretation": "Server returning bytes proves a read, not full adoption. Record a host-reported adoption as host_reported. Only directly witnessed script/action behavior receives its specific tool-observed description; do not assert that all private reasoning followed the skill."
+      },
+      {
+        "id": "HOST-01/feedback-adaptation",
+        "required": [
+          "An actual tool response supplies information relevant to the task.",
+          "The visible next behavior uses that information to add an unplanned step, change method/scope, or stop with a reason.",
+          "The changed behavior is within original authority and budget; a clear unsupported or insufficient-evidence stop is valid.",
+          "References connect the feedback output, subsequent choice and resulting action or stop."
+        ],
+        "insufficient": [
+          "Following an evaluator-provided full script.",
+          "Claiming a change only in a final paragraph with no corresponding subsequent action or explicit stop.",
+          "Treating failure, unsupported operation or NOT_APPLICABLE as a zero scientific value.",
+          "Calling an unsupported operation through shell as a way around the same permission/capability boundary."
+        ]
+      }
+    ],
+    "success_aggregation": "Report all subcases for Codex and Claude Code independently. HOST-01 for a host is passed only for the explicitly exercised required capability set; missing composition/modification/adaptation is not silently inferred. Failure or absence of one host does not block reporting other completed engineering work."
+  },
+  "posix_protocol": {
+    "entry": [
+      "Read-only verification of an already authorized Linux host, actual interpreter and relevant active tasks precedes an isolated fixture run.",
+      "Use a new immutable source/package snapshot and new fixture workspace. Record module paths and hashes; do not overwrite shared environments or old jobs.",
+      "Use real separate processes and native OS locking/process identity. Do not replace the lock with nullcontext, replace worker launch with an in-process callback, or emulate process existence in the acceptance run.",
+      "A synthetic executor with deterministic non-scientific outputs and a durable invocation counter is permitted and must be identified as such.",
+      "Only fixture-owned PIDs and verified start identities/process groups may receive signals. Unrelated tasks remain untouched."
+    ],
+    "cases": [
+      {
+        "id": "ACT-05/posix-race",
+        "intervention": "Start two independent submitter processes against the same campaign with funds sufficient for only one quoted action, or with a single remaining replicate slot. Use an explicit barrier so the competing attempts overlap. Also check a pre-existing pending execution.",
+        "required": [
+          "Real OS locks and authoritative SQLite reservation transactions remain active.",
+          "Only a legal affordable execution combination is dispatched; the loser receives busy/conflict/budget or equivalent explicit rejection.",
+          "No duplicated invocation for the same request, no negative available balance caused by double reservation, and no silent pending cleanup.",
+          "Invocation counter, job/action identities, reservation rows and ledger snapshots agree.",
+          "Separate request IDs cannot bypass a held pending attempt or an exhausted replicate cap."
+        ],
+        "failure": "Two incompatible executions run, reservation/fee facts are lost, or concurrency is made to pass by bypassing locks.",
+        "bound": "Report the actual number of races and schedules. Finite concurrency checks do not prove every possible interleaving."
+      },
+      {
+        "id": "ACT-06/posix-lost-response",
+        "intervention": "Let a real fixture worker execute and durably expose its completion evidence, then interrupt or lose the controller response before admission or acknowledgement. Start a separate status/reconcile process against the same job.",
+        "required": [
+          "The durable observer/receipt and original action/job/process identities are retained.",
+          "Status/reconcile reads the original evidence and never starts a replacement scientific execution.",
+          "Invocation count remains one; failure costs and actual measured fixture cost remain charged exactly once.",
+          "Before sufficient completion evidence is available the state is unresolved/running and its reservation is retained.",
+          "When original evidence proves completion, admission and settlement occur through the existing validation path, preserving any rejection."
+        ],
+        "unknown_variant": "If completion evidence truly cannot be recovered, remaining unresolved with the reservation and a concrete recovery reason is the correct outcome; it is not a successful completion claim.",
+        "failure": "A lost response becomes an automatic new execution, unknown becomes zero/success, or reconciliation invents completion."
+      },
+      {
+        "id": "RES-07/posix-cancellation",
+        "intervention": "Issue cancellation while a fixture child is verifiably active, including a child that delays or does not immediately honor the initial signal. Observe states before and after verified process exit.",
+        "required": [
+          "PID plus start identity/process-group binding identify the fixture process, not merely a reusable PID.",
+          "Cancellation request and confirmed termination are distinct facts.",
+          "While an owned child is alive or its state is unknown, do not report cancelled or release the unresolved reservation.",
+          "After confirmed exit, preserve known costs and explain the resulting terminal or unresolved state using actual receipts.",
+          "Signals and cleanup affect only fixture-owned verified processes; cancellation/reconcile replay never respawns work."
+        ],
+        "failure": "Premature cancelled/refund, signal to an unverified or unrelated process, or hiding unknown child state.",
+        "bound": "Record timeout and escalation behavior actually exercised; do not infer other operating systems or external scheduler semantics."
+      }
+    ]
+  },
+  "regression_attribution": {
+    "scope": "Original A 32 failures and B 5 sklearn-related failures are identified individually; original outputs remain preserved.",
+    "required": [
+      "Map original test IDs and error signatures to environment/platform, introduced regression, or pre-existing defect with source evidence.",
+      "Reproduce only relevant discriminating cases in the actual applicable environment; a skip/deselect is not a fix.",
+      "If source changes, preserve original failure, unique owner, minimal change, source hash and targeted rerun.",
+      "If dependency or platform remains unavailable, report blocked/not_run for the missing environment and failed for the actual unsuccessful attempt.",
+      "Do not install or upgrade a shared dependency merely to turn the report green.",
+      "Do not weaken correctness assertions, overwrite historical results, or count overlapping test groups as independent added coverage."
+    ]
+  },
+  "scientific_boundary": {
+    "R4b": "paused",
+    "new_scientific_evaluation": "not authorized by this engineering protocol",
+    "LEARN-01": "not_run",
+    "LEARN-02": "not_run",
+    "phi_S_G_benefit": "not established by host or POSIX engineering checks",
+    "known_old_test_labels": "remain seen; never reclassified as independent unseen evaluation"
+  }
+}

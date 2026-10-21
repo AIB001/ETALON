@@ -1,0 +1,96 @@
+{
+  "schema": "prism-design-md-handoff/1",
+  "status": "FAILED",
+  "design_results": {
+    "path": "F:\\life_healthy\\PRISM\\.agent-local\\round2\\shared-fixture\\source\\run\\results.json",
+    "sha256": "d7e31c96419b441282157c863f4353ea361efb1432a66ed378c297a1deffa5bd"
+  },
+  "models": {
+    "flowr_root": {
+      "candidates": [
+        {
+          "candidate_id": "flowr_root_0001",
+          "model": "flowr_root",
+          "path": "F:\\life_healthy\\PRISM\\.agent-local\\round2\\shared-fixture\\source\\run\\candidates\\flowr_root_0001.sdf",
+          "source_path": "F:\\life_healthy\\PRISM\\.agent-local\\round2\\shared-fixture\\source\\run\\backend\\raw1.sdf",
+          "valid_3d": true,
+          "sanitize_status": "passed",
+          "native_score_name": null,
+          "native_score": null,
+          "audit_status": "PASS",
+          "quality_flags": [],
+          "canonical_smiles": "NCCc1ccccc1",
+          "hydrogenated_path": "F:\\life_healthy\\PRISM\\.agent-local\\round2\\shared-fixture\\source\\run\\candidates\\flowr_root_0001_with_H.sdf",
+          "quality": {
+            "status": "PASS",
+            "flags": [],
+            "parse_mode": "strict",
+            "sanitize_status": "passed",
+            "canonical_smiles": "NCCc1ccccc1",
+            "integrity": {
+              "atom_count": 9,
+              "bond_count": 9,
+              "declared_atoms": 9,
+              "declared_bonds": 9,
+              "counts_match": true,
+              "fragments": 1,
+              "dummy_atoms": 0,
+              "radical_electrons": 0,
+              "explicit_h": 0,
+              "finite_coordinates": true,
+              "duplicate_coordinate_pairs": 0,
+              "is_3d": true
+            },
+            "hydrogen": {
+              "status": "added",
+              "hydrogens_added": 11,
+              "heavy_atom_max_displacement_a": 0.0,
+              "note": "RDKit valence-based; pH-dependent protomers and tautomers not enumerated"
+            },
+            "geometry": {
+              "bad_bond_lengths": 0,
+              "min_bond_ratio": 0.9169,
+              "max_bond_ratio": 1.0343,
+              "internal_clashes": 0,
+              "angle_outliers": 0,
+              "worst_angle_deviation_deg": 2.19,
+              "aromatic_planarity_rms_a": 0.0018
+            },
+            "plausibility": {
+              "molecular_weight": 121.183,
+              "clogp": 1.188,
+              "tpsa": 26.02,
+              "h_bond_donors": 1,
+              "h_bond_acceptors": 1,
+              "rotatable_bonds": 2,
+              "rings": 1,
+              "aromatic_rings": 1,
+              "fraction_csp3": 0.25,
+              "heavy_atoms": 9,
+              "qed": 0.6245,
+              "synthetic_accessibility": 1.292,
+              "formal_charge": 0,
+              "lipinski_violations": 0,
+              "veber_violations": 0,
+              "structural_alerts": [],
+              "reactive_groups": [],
+              "stereocenters": 0,
+              "unspecified_stereocenters": 0
+            },
+            "pose": {
+              "min_protein_distance_a": 3.201,
+              "protein_hard_clashes": 0,
+              "protein_close_contacts": 0,
+              "pocket_center_offset_a": 0.0
+            },
+            "repair": null
+          },
+          "design_validation": {
+            "path": "F:\\life_healthy\\PRISM\\.agent-local\\round2\\shared-fixture\\source\\run\\validation\\slot_0001.json",
+            "sha256": "22fbfd3c3498231e3ed1837693963fcaea31ac05e794d849c82f00dc256043fa"
+          }
+        }
+      ]
+    }
+  }
+}

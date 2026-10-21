@@ -1,0 +1,3579 @@
+{
+  "schema": "v-functions-native-review/1",
+  "fixed_source_files_checked": 1164,
+  "source_archive_sha256": "9fbcdc8cae6868a47b39236cfff79a9d5504df29824fa68e8372ea80652bdffd",
+  "native_trials": {
+    "native-productivity": {
+      "exit": {
+        "returncode": 0,
+        "wall_seconds": 157.07756066322327,
+        "ended_unix": 1792522516.0029142
+      },
+      "stdout_sha256": "6cf2b58fb2122375f52bba415a7a95c64d706c80290d246e50bf25b54f12a04c",
+      "prompt_sha256": "244ac21541421b7dedabb38361da64130d93004866b93c24cad496e261fb1834",
+      "calls": [
+        {
+          "line": 7,
+          "tool": "etalon_capabilities",
+          "arguments": {},
+          "error": null,
+          "result": {
+            "catalog_sha256": "d2198731f4da1c5a85608e1b979a5e6627099ac61c243e149ce81ac549d0a258",
+            "load_evidence": "server-read-bytes; host discovery and invocation are not observed",
+            "ok": true,
+            "operations": {
+              "active.evaluate": {
+                "optional": [],
+                "required": [
+                  "candidate_id",
+                  "database",
+                  "endpoint_id"
+                ]
+              },
+              "active.run": {
+                "optional": [
+                  "min_new_admitted"
+                ],
+                "required": [
+                  "database",
+                  "max_rounds"
+                ]
+              },
+              "campaign.assays": {
+                "optional": [],
+                "required": [
+                  "database",
+                  "review",
+                  "snapshot"
+                ]
+              },
+              "campaign.create": {
+                "optional": [],
+                "required": [
+                  "endpoints",
+                  "executors",
+                  "spec"
+                ]
+              },
+              "campaign.handoffs": {
+                "optional": [
+                  "candidate_ids"
+                ],
+                "required": [
+                  "artifact_id",
+                  "database",
+                  "rationale",
+                  "workspace"
+                ]
+              },
+              "campaign.import": {
+                "optional": [
+                  "candidate_ids"
+                ],
+                "required": [
+                  "database",
+                  "snapshot"
+                ]
+              },
+              "data.acquire": {
+                "optional": [
+                  "allow_partial",
+                  "min_records"
+                ],
+                "required": [
+                  "budget",
+                  "request"
+                ]
+              },
+              "data.prepare": {
+                "optional": [
+                  "allow_partial",
+                  "id_field",
+                  "identity_policy",
+                  "min_records",
+                  "smiles_field"
+                ],
+                "required": [
+                  "snapshot"
+                ]
+              },
+              "design.import": {
+                "optional": [
+                  "mode"
+                ],
+                "required": [
+                  "bundle_path",
+                  "database"
+                ]
+              },
+              "screen.export": {
+                "optional": [],
+                "required": [
+                  "run_id",
+                  "workspace"
+                ]
+              },
+              "screen.run": {
+                "optional": [
+                  "allow_copyleft",
+                  "devices",
+                  "workers"
+                ],
+                "required": [
+                  "config_path",
+                  "library_path"
+                ]
+              }
+            },
+            "runtime": {
+              "durable_workers": "Linux /proc and POSIX locks required",
+              "module": "F:\\life_healthy\\integration\\thin-harness-functions-20261021\\c\\fixed-source\\src\\etalon\\mcp\\host.py",
+              "python": "F:\\life_healthy\\ETALON\\.venv\\Scripts\\python.exe"
+            },
+            "schema": "etalon-capability-catalog/1",
+            "skills": [
+              {
+                "description": "Inspect scientific evidence and prepare bounded expensive execution through ETALON registered executors, including handoff validation, budget protection and result admission.",
+                "entrypoint": "SKILL.md",
+                "files": [
+                  {
+                    "bytes": 2576,
+                    "path": "SKILL.md",
+                    "sha256": "b8ff4f1c02b89ac5deb9907889ffd6149bcc2b9730d5f12d29b4461a33212db5"
+                  },
+                  {
+                    "bytes": 2609,
+                    "path": "references/factorial-diagnostic.md",
+                    "sha256": "28ac72a4c2c15b80adc5cbab100af7884110b8541cb320b3c49c627835dea36b"
+                  },
+                  {
+                    "bytes": 35076,
+                    "path": "references/legacy-workflow.md",
+                    "sha256": "193a437c63cc6cdf5f6c741fa4f6fbe3eae413cb8558ecb4728a472e575792e1"
+                  }
+                ],
+                "kind": "domain_skill",
+                "manifest_sha256": "f2f28041e42e16ad8cf3401352022582d2cef9ea0983e02659babe2f41e6f8fd",
+                "name": "etalon-campaign",
+                "schema": "etalon-capability-version/1",
+                "slug": "campaign"
+              },
+              {
+                "description": "Prepare and supervise bounded MolCascade screening batches, including calibrated gates, batch reservations, duplicate submission and recovery.",
+                "entrypoint": "SKILL.md",
+                "files": [
+                  {
+                    "bytes": 3273,
+                    "path": "SKILL.md",
+                    "sha256": "64ff636a6dbe3a59fbb096876de28abb207d8e7016909b6c25fe3f503ccd0073"
+                  },
+                  {
+                    "bytes": 20099,
+                    "path": "references/legacy-workflow.md",
+                    "sha256": "04c89c4be945267e4dc4d95abe53cd07de83b46aa2a8734e5557874c7e1111b7"
+                  }
+                ],
+                "kind": "domain_skill",
+                "manifest_sha256": "0c05670d799901667db6d12e27ebf9169764b6ae1626ea92a50d191d03cea699",
+                "name": "etalon-screening-sweep",
+                "schema": "etalon-capability-version/1",
+                "slug": "sweep"
+              },
+              {
+                "description": "Evaluate whether a proposed screening gate rejects known controls and whether its scoring engines rank a relevant calibration panel.",
+                "entrypoint": "SKILL.md",
+                "files": [
+                  {
+                    "bytes": 2952,
+                    "path": "SKILL.md",
+                    "sha256": "348df11bc10ff249ef21da85174b594f52f7513e4d7b8e9c7de79f21063e13c4"
+                  },
+                  {
+                    "bytes": 8246,
+                    "path": "references/legacy-workflow.md",
+                    "sha256": "18741f2734b2183843bf7abe30d49bdd8319f3187b6a3419b9c11f51f7bcae62"
+                  }
+                ],
+                "kind": "domain_skill",
+                "manifest_sha256": "ed695eb354612135dc9ce99d90b2d45dbcf917d8f46f4642fba889b8c473ce38",
+                "name": "etalon-gate-calibration",
+                "schema": "etalon-capability-version/1",
+                "slug": "gate-calibration"
+              },
+              {
+                "description": "Compare or retire molecular generators using measured valid unique yield, real-pocket feasibility, cost and uncertainty.",
+                "entrypoint": "SKILL.md",
+                "files": [
+                  {
+                    "bytes": 2949,
+                    "path": "SKILL.md",
+                    "sha256": "4e195642fbd41820fd8057926faf36143ad1dd78bbeb56761701acc0f59cf961"
+                  },
+                  {
+                    "bytes": 8918,
+                    "path": "references/legacy-workflow.md",
+                    "sha256": "5905d2aeb319a8709b512cb89e5ca3e9c29112a4ddfb0b021bf46ce2e96802f3"
+                  }
+                ],
+                "kind": "domain_skill",
+                "manifest_sha256": "67a892bc1c669a65330824b5fb580e04ccf058718778b92e5618b65222b15372",
+                "name": "etalon-generation-planning",
+                "schema": "etalon-capability-version/1",
+                "slug": "generation-planning"
+              },
+              {
+                "description": "Inspect long-running ETALON jobs and distinguish progress, stalled work, partial results and uncertain outcomes before recovery.",
+                "entrypoint": "SKILL.md",
+                "files": [
+                  {
+                    "bytes": 3118,
+                    "path": "SKILL.md",
+                    "sha256": "59df17728d06d72ade36b5c23a003a81794d6901c6331a48e2651bfedb3e243b"
+                  },
+                  {
+                    "bytes": 10860,
+                    "path": "references/legacy-workflow.md",
+                    "sha256": "ee883468956fe38a3d8a85b8cccf406e190ce8ecd2e4ccdd8ea69e2a5bb69900"
+                  }
+                ],
+                "kind": "domain_skill",
+                "manifest_sha256": "e9a859608f9db06e514c5240cdf5fa2fa27b7d00091c91d37334c1ea76a938b4",
+                "name": "etalon-campaign-monitoring",
+                "schema": "etalon-capability-version/1",
+                "slug": "monitoring"
+              },
+              {
+                "description": "Set up or diagnose ETALON host access and selected scientific backends, checking interpreter paths, vendored sources and platform limits.",
+                "entrypoint": "SKILL.md",
+                "files": [
+                  {
+                    "bytes": 2006,
+                    "path": "SKILL.md",
+                    "sha256": "4bcb34ac4d4a3ac7fe2b8cc81af71cde1bd09c80bc711163206d996d2d388dac"
+                  },
+                  {
+                    "bytes": 14078,
+                    "path": "references/legacy-workflow.md",
+                    "sha256": "5b880d8073abc730d8130521530b4850be7628018f345db9c1c2e5b7275e27e4"
+                  }
+                ],
+                "kind": "domain_skill",
+                "manifest_sha256": "3869d34e45d75916aae903816a4b004bbe45382a503af8f62bb5ebc32aeb75a6",
+                "name": "etalon-install",
+                "schema": "etalon-capability-version/1",
+                "slug": "install"
+              }
+            ],
+            "tools": {
+              "etalon_action_prepare": "free",
+              "etalon_action_result": "free",
+              "etalon_action_submit": "spends",
+              "etalon_active_create": "cheap",
+              "etalon_active_execution_plan": "cheap",
+              "etalon_active_plan": "cheap",
+              "etalon_active_replay": "cheap",
+              "etalon_active_status": "free",
+              "etalon_active_submit": "spends",
+              "etalon_authorize_gates": "free",
+              "etalon_authorize_spend": "free",
+              "etalon_calibrate_gates": "free",
+              "etalon_campaign_plan": "free",
+              "etalon_capabilities": "free",
+              "etalon_check_handoff": "free",
+              "etalon_check_stability": "free",
+              "etalon_council_adjudicate": "free",
+              "etalon_council_reliability": "free",
+              "etalon_data_attach_handoffs": "cheap",
+              "etalon_data_import_assays": "cheap",
+              "etalon_data_import_candidates": "cheap",
+              "etalon_data_plan": "cheap",
+              "etalon_data_prepare": "cheap",
+              "etalon_data_review_template": "free",
+              "etalon_data_run": "cheap",
+              "etalon_data_sources": "free",
+              "etalon_data_status": "free",
+              "etalon_design_fep_network": "cheap",
+              "etalon_devices": "free",
+              "etalon_doctor": "cheap",
+              "etalon_events_read": "free",
+              "etalon_executor_list": "free",
+              "etalon_executor_prepare": "cheap",
+              "etalon_executor_register": "cheap",
+              "etalon_generation_productivity": "free",
+              "etalon_infrastructure": "free",
+              "etalon_method_read": "free",
+              "etalon_method_record": "cheap",
+              "etalon_plan_campaign": "free",
+              "etalon_recommend_waiver": "never-by-a-model",
+              "etalon_rule_admissible": "free",
+              "etalon_screen_configure": "cheap",
+              "etalon_screen_export": "cheap",
+              "etalon_screen_plan": "cheap",
+              "etalon_screen_status": "free",
+              "etalon_screen_submit": "spends",
+              "etalon_skill_read": "free",
+              "etalon_stages": "free",
+              "etalon_sweep_admit": "cheap",
+              "etalon_sweep_claim": "free",
+              "etalon_sweep_emit": "cheap",
+              "etalon_sweep_progress": "free",
+              "etalon_sweep_record": "free",
+              "etalon_sweep_recover": "free",
+              "etalon_sweep_status": "free",
+              "etalon_tune_screen": "free",
+              "etalon_workflow_advance": "spends",
+              "etalon_workflow_artifact": "cheap",
+              "etalon_workflow_cancel": "cheap",
+              "etalon_workflow_capabilities": "free",
+              "etalon_workflow_observe": "free",
+              "etalon_workflow_plan": "cheap",
+              "etalon_workflow_reconcile": "spends",
+              "etalon_workflow_status": "free",
+              "etalon_workflow_submit": "spends"
+            },
+            "usage_method": {
+              "bytes": 2988,
+              "kind": "usage_method",
+              "name": "etalon-host-guidance",
+              "sha256": "eb8fffca6a3aa74fc604ae2244b534ccaeaab9f0071160d62225a14a134faa72",
+              "uri": "etalon://host"
+            }
+          }
+        },
+        {
+          "line": 11,
+          "tool": "etalon_generation_productivity",
+          "arguments": {
+            "cost_ceiling": 2,
+            "loops_json": "[{\"tag\":\"loop-fixture\",\"model\":\"synthetic\",\"pocket\":\"fixed-condition-A\",\"chunks\":[{\"requested\":100,\"delivered\":100,\"unique\":0,\"seconds\":60},{\"requested\":100,\"delivered\":100,\"unique\":0,\"seconds\":60},{\"requested\":100,\"delivered\":100,\"unique\":0,\"seconds\":60}]}]"
+          },
+          "error": {
+            "message": "tool call error: tool call failed for `etalon/etalon_generation_productivity`\n\nCaused by:\n    timed out awaiting tools/call after 120s"
+          },
+          "result": null
+        }
+      ],
+      "usage": [
+        {
+          "input_tokens": 495115,
+          "cached_input_tokens": 466816,
+          "cache_write_input_tokens": 0,
+          "output_tokens": 1047,
+          "reasoning_output_tokens": 153
+        }
+      ],
+      "final_messages": [
+        "I\u2019ll inspect `input.json` and ETALON\u2019s available numerical checks, then use the relevant check to decide whether another chunk is justified.",
+        "The productivity check is still running. The inputs show full delivery but zero new molecules across all three chunks; I\u2019m waiting for ETALON\u2019s numerical feedback before deciding.",
+        "ETALON has not returned yet. I\u2019ve left the single read-only request pending and have not launched any generation or downstream work.",
+        "**Do not run another chunk now.** The existing 20 usable molecules suffice, and the fixture reports zero additions across three chunks.\n\n- **ETALON feedback:** `etalon_generation_productivity` timed out after 120 seconds; no computed numerical result was returned. The input\u2019s 300 delivered / 0 new molecules is not a successful ETALON check against the 2\u00d7 ceiling.\n- **Skipped:** skills, exported bundles, planning, campaign creation, generation, screening, scoring, actions, replay and recovery.\n- **Unknowns:** next-chunk yield and monetary cost. The 180 synthetic seconds are not recorded expenditure. This supports no claim about real molecules or models."
+      ]
+    },
+    "native-monitor": {
+      "exit": {
+        "returncode": 0,
+        "wall_seconds": 37.11509466171265,
+        "ended_unix": 1792522396.051842
+      },
+      "stdout_sha256": "a496c19108afa1c12bbcfc1ee030e9336c25123fa00edbbc18919c6b816fd626",
+      "prompt_sha256": "e1a21c96e9448ad9f6cb8d4497be8b836613449ae2931d5b7fbcad93db51ed2a",
+      "calls": [
+        {
+          "line": 7,
+          "tool": "etalon_capabilities",
+          "arguments": {},
+          "error": null,
+          "result": {
+            "catalog_sha256": "d2198731f4da1c5a85608e1b979a5e6627099ac61c243e149ce81ac549d0a258",
+            "load_evidence": "server-read-bytes; host discovery and invocation are not observed",
+            "ok": true,
+            "operations": {
+              "active.evaluate": {
+                "optional": [],
+                "required": [
+                  "candidate_id",
+                  "database",
+                  "endpoint_id"
+                ]
+              },
+              "active.run": {
+                "optional": [
+                  "min_new_admitted"
+                ],
+                "required": [
+                  "database",
+                  "max_rounds"
+                ]
+              },
+              "campaign.assays": {
+                "optional": [],
+                "required": [
+                  "database",
+                  "review",
+                  "snapshot"
+                ]
+              },
+              "campaign.create": {
+                "optional": [],
+                "required": [
+                  "endpoints",
+                  "executors",
+                  "spec"
+                ]
+              },
+              "campaign.handoffs": {
+                "optional": [
+                  "candidate_ids"
+                ],
+                "required": [
+                  "artifact_id",
+                  "database",
+                  "rationale",
+                  "workspace"
+                ]
+              },
+              "campaign.import": {
+                "optional": [
+                  "candidate_ids"
+                ],
+                "required": [
+                  "database",
+                  "snapshot"
+                ]
+              },
+              "data.acquire": {
+                "optional": [
+                  "allow_partial",
+                  "min_records"
+                ],
+                "required": [
+                  "budget",
+                  "request"
+                ]
+              },
+              "data.prepare": {
+                "optional": [
+                  "allow_partial",
+                  "id_field",
+                  "identity_policy",
+                  "min_records",
+                  "smiles_field"
+                ],
+                "required": [
+                  "snapshot"
+                ]
+              },
+              "design.import": {
+                "optional": [
+                  "mode"
+                ],
+                "required": [
+                  "bundle_path",
+                  "database"
+                ]
+              },
+              "screen.export": {
+                "optional": [],
+                "required": [
+                  "run_id",
+                  "workspace"
+                ]
+              },
+              "screen.run": {
+                "optional": [
+                  "allow_copyleft",
+                  "devices",
+                  "workers"
+                ],
+                "required": [
+                  "config_path",
+                  "library_path"
+                ]
+              }
+            },
+            "runtime": {
+              "durable_workers": "Linux /proc and POSIX locks required",
+              "module": "F:\\life_healthy\\integration\\thin-harness-functions-20261021\\c\\fixed-source\\src\\etalon\\mcp\\host.py",
+              "python": "F:\\life_healthy\\ETALON\\.venv\\Scripts\\python.exe"
+            },
+            "schema": "etalon-capability-catalog/1",
+            "skills": [
+              {
+                "description": "Inspect scientific evidence and prepare bounded expensive execution through ETALON registered executors, including handoff validation, budget protection and result admission.",
+                "entrypoint": "SKILL.md",
+                "files": [
+                  {
+                    "bytes": 2576,
+                    "path": "SKILL.md",
+                    "sha256": "b8ff4f1c02b89ac5deb9907889ffd6149bcc2b9730d5f12d29b4461a33212db5"
+                  },
+                  {
+                    "bytes": 2609,
+                    "path": "references/factorial-diagnostic.md",
+                    "sha256": "28ac72a4c2c15b80adc5cbab100af7884110b8541cb320b3c49c627835dea36b"
+                  },
+                  {
+                    "bytes": 35076,
+                    "path": "references/legacy-workflow.md",
+                    "sha256": "193a437c63cc6cdf5f6c741fa4f6fbe3eae413cb8558ecb4728a472e575792e1"
+                  }
+                ],
+                "kind": "domain_skill",
+                "manifest_sha256": "f2f28041e42e16ad8cf3401352022582d2cef9ea0983e02659babe2f41e6f8fd",
+                "name": "etalon-campaign",
+                "schema": "etalon-capability-version/1",
+                "slug": "campaign"
+              },
+              {
+                "description": "Prepare and supervise bounded MolCascade screening batches, including calibrated gates, batch reservations, duplicate submission and recovery.",
+                "entrypoint": "SKILL.md",
+                "files": [
+                  {
+                    "bytes": 3273,
+                    "path": "SKILL.md",
+                    "sha256": "64ff636a6dbe3a59fbb096876de28abb207d8e7016909b6c25fe3f503ccd0073"
+                  },
+                  {
+                    "bytes": 20099,
+                    "path": "references/legacy-workflow.md",
+                    "sha256": "04c89c4be945267e4dc4d95abe53cd07de83b46aa2a8734e5557874c7e1111b7"
+                  }
+                ],
+                "kind": "domain_skill",
+                "manifest_sha256": "0c05670d799901667db6d12e27ebf9169764b6ae1626ea92a50d191d03cea699",
+                "name": "etalon-screening-sweep",
+                "schema": "etalon-capability-version/1",
+                "slug": "sweep"
+              },
+              {
+                "description": "Evaluate whether a proposed screening gate rejects known controls and whether its scoring engines rank a relevant calibration panel.",
+                "entrypoint": "SKILL.md",
+                "files": [
+                  {
+                    "bytes": 2952,
+                    "path": "SKILL.md",
+                    "sha256": "348df11bc10ff249ef21da85174b594f52f7513e4d7b8e9c7de79f21063e13c4"
+                  },
+                  {
+                    "bytes": 8246,
+                    "path": "references/legacy-workflow.md",
+                    "sha256": "18741f2734b2183843bf7abe30d49bdd8319f3187b6a3419b9c11f51f7bcae62"
+                  }
+                ],
+                "kind": "domain_skill",
+                "manifest_sha256": "ed695eb354612135dc9ce99d90b2d45dbcf917d8f46f4642fba889b8c473ce38",
+                "name": "etalon-gate-calibration",
+                "schema": "etalon-capability-version/1",
+                "slug": "gate-calibration"
+              },
+              {
+                "description": "Compare or retire molecular generators using measured valid unique yield, real-pocket feasibility, cost and uncertainty.",
+                "entrypoint": "SKILL.md",
+                "files": [
+                  {
+                    "bytes": 2949,
+                    "path": "SKILL.md",
+                    "sha256": "4e195642fbd41820fd8057926faf36143ad1dd78bbeb56761701acc0f59cf961"
+                  },
+                  {
+                    "bytes": 8918,
+                    "path": "references/legacy-workflow.md",
+                    "sha256": "5905d2aeb319a8709b512cb89e5ca3e9c29112a4ddfb0b021bf46ce2e96802f3"
+                  }
+                ],
+                "kind": "domain_skill",
+                "manifest_sha256": "67a892bc1c669a65330824b5fb580e04ccf058718778b92e5618b65222b15372",
+                "name": "etalon-generation-planning",
+                "schema": "etalon-capability-version/1",
+                "slug": "generation-planning"
+              },
+              {
+                "description": "Inspect long-running ETALON jobs and distinguish progress, stalled work, partial results and uncertain outcomes before recovery.",
+                "entrypoint": "SKILL.md",
+                "files": [
+                  {
+                    "bytes": 3118,
+                    "path": "SKILL.md",
+                    "sha256": "59df17728d06d72ade36b5c23a003a81794d6901c6331a48e2651bfedb3e243b"
+                  },
+                  {
+                    "bytes": 10860,
+                    "path": "references/legacy-workflow.md",
+                    "sha256": "ee883468956fe38a3d8a85b8cccf406e190ce8ecd2e4ccdd8ea69e2a5bb69900"
+                  }
+                ],
+                "kind": "domain_skill",
+                "manifest_sha256": "e9a859608f9db06e514c5240cdf5fa2fa27b7d00091c91d37334c1ea76a938b4",
+                "name": "etalon-campaign-monitoring",
+                "schema": "etalon-capability-version/1",
+                "slug": "monitoring"
+              },
+              {
+                "description": "Set up or diagnose ETALON host access and selected scientific backends, checking interpreter paths, vendored sources and platform limits.",
+                "entrypoint": "SKILL.md",
+                "files": [
+                  {
+                    "bytes": 2006,
+                    "path": "SKILL.md",
+                    "sha256": "4bcb34ac4d4a3ac7fe2b8cc81af71cde1bd09c80bc711163206d996d2d388dac"
+                  },
+                  {
+                    "bytes": 14078,
+                    "path": "references/legacy-workflow.md",
+                    "sha256": "5b880d8073abc730d8130521530b4850be7628018f345db9c1c2e5b7275e27e4"
+                  }
+                ],
+                "kind": "domain_skill",
+                "manifest_sha256": "3869d34e45d75916aae903816a4b004bbe45382a503af8f62bb5ebc32aeb75a6",
+                "name": "etalon-install",
+                "schema": "etalon-capability-version/1",
+                "slug": "install"
+              }
+            ],
+            "tools": {
+              "etalon_action_prepare": "free",
+              "etalon_action_result": "free",
+              "etalon_action_submit": "spends",
+              "etalon_active_create": "cheap",
+              "etalon_active_execution_plan": "cheap",
+              "etalon_active_plan": "cheap",
+              "etalon_active_replay": "cheap",
+              "etalon_active_status": "free",
+              "etalon_active_submit": "spends",
+              "etalon_authorize_gates": "free",
+              "etalon_authorize_spend": "free",
+              "etalon_calibrate_gates": "free",
+              "etalon_campaign_plan": "free",
+              "etalon_capabilities": "free",
+              "etalon_check_handoff": "free",
+              "etalon_check_stability": "free",
+              "etalon_council_adjudicate": "free",
+              "etalon_council_reliability": "free",
+              "etalon_data_attach_handoffs": "cheap",
+              "etalon_data_import_assays": "cheap",
+              "etalon_data_import_candidates": "cheap",
+              "etalon_data_plan": "cheap",
+              "etalon_data_prepare": "cheap",
+              "etalon_data_review_template": "free",
+              "etalon_data_run": "cheap",
+              "etalon_data_sources": "free",
+              "etalon_data_status": "free",
+              "etalon_design_fep_network": "cheap",
+              "etalon_devices": "free",
+              "etalon_doctor": "cheap",
+              "etalon_events_read": "free",
+              "etalon_executor_list": "free",
+              "etalon_executor_prepare": "cheap",
+              "etalon_executor_register": "cheap",
+              "etalon_generation_productivity": "free",
+              "etalon_infrastructure": "free",
+              "etalon_method_read": "free",
+              "etalon_method_record": "cheap",
+              "etalon_plan_campaign": "free",
+              "etalon_recommend_waiver": "never-by-a-model",
+              "etalon_rule_admissible": "free",
+              "etalon_screen_configure": "cheap",
+              "etalon_screen_export": "cheap",
+              "etalon_screen_plan": "cheap",
+              "etalon_screen_status": "free",
+              "etalon_screen_submit": "spends",
+              "etalon_skill_read": "free",
+              "etalon_stages": "free",
+              "etalon_sweep_admit": "cheap",
+              "etalon_sweep_claim": "free",
+              "etalon_sweep_emit": "cheap",
+              "etalon_sweep_progress": "free",
+              "etalon_sweep_record": "free",
+              "etalon_sweep_recover": "free",
+              "etalon_sweep_status": "free",
+              "etalon_tune_screen": "free",
+              "etalon_workflow_advance": "spends",
+              "etalon_workflow_artifact": "cheap",
+              "etalon_workflow_cancel": "cheap",
+              "etalon_workflow_capabilities": "free",
+              "etalon_workflow_observe": "free",
+              "etalon_workflow_plan": "cheap",
+              "etalon_workflow_reconcile": "spends",
+              "etalon_workflow_status": "free",
+              "etalon_workflow_submit": "spends"
+            },
+            "usage_method": {
+              "bytes": 2988,
+              "kind": "usage_method",
+              "name": "etalon-host-guidance",
+              "sha256": "eb8fffca6a3aa74fc604ae2244b534ccaeaab9f0071160d62225a14a134faa72",
+              "uri": "etalon://host"
+            }
+          }
+        },
+        {
+          "line": 9,
+          "tool": "etalon_active_status",
+          "arguments": {
+            "database": "F:/life_healthy/integration/thin-harness-functions-20261021/c/native-monitor/fixture.sqlite"
+          },
+          "error": null,
+          "result": {
+            "ok": true,
+            "state": {
+              "admitted": 0,
+              "balance": {
+                "budget": 6,
+                "remaining": 3.75,
+                "reserved": 2.0,
+                "spent": 0.25
+              },
+              "candidates": 1,
+              "endpoints": [
+                {
+                  "cost": 2,
+                  "direction": "minimize",
+                  "id": "score",
+                  "max_replicates": 1,
+                  "noise": 0.1,
+                  "prior_mean": 0.0,
+                  "prior_scale": 1.0,
+                  "protocol": "fixture/1",
+                  "quantity": "score",
+                  "queryable": true,
+                  "requires_handoff": false,
+                  "target": "fixture",
+                  "units": "fixture-unit"
+                }
+              ],
+              "observations": 0,
+              "pending": [
+                {
+                  "candidate_id": "one",
+                  "cost": 0.25,
+                  "decision": {
+                    "fixture": true
+                  },
+                  "endpoint_id": "score",
+                  "id": "60efdc91de87490b8c9d10b48120fd73",
+                  "replicate": 0,
+                  "reserved_cost": 2,
+                  "round_id": 1,
+                  "status": "running"
+                }
+              ],
+              "rounds": [
+                {
+                  "fixture": "persisted unknown state; no process executed",
+                  "round_id": 1,
+                  "status": "running"
+                }
+              ],
+              "spec": {
+                "batch_size": 4,
+                "beta": 1.0,
+                "bootstrap": 4,
+                "budget": 6,
+                "calibration_fraction": 0.15,
+                "confirmation_reserve": 1,
+                "cost_unit": "fixture-cost",
+                "explore_fraction": 0.25,
+                "max_candidates": 5000,
+                "max_kg_candidates": 512,
+                "max_observations": 1500,
+                "objective": "score",
+                "policy": "cost_aware",
+                "representation": "fixture/1",
+                "seed": 0,
+                "validity_mode": "local"
+              }
+            }
+          }
+        },
+        {
+          "line": 11,
+          "tool": "etalon_events_read",
+          "arguments": {
+            "log_ref": {
+              "kind": "campaign",
+              "database": "F:/life_healthy/integration/thin-harness-functions-20261021/c/native-monitor/fixture.sqlite"
+            },
+            "after_sequence": 0,
+            "limit": 100
+          },
+          "error": null,
+          "result": {
+            "events": [
+              {
+                "at": "2026-10-20T18:52:33.515980+00:00",
+                "body": {
+                  "endpoints": [
+                    {
+                      "cost": 2,
+                      "direction": "minimize",
+                      "id": "score",
+                      "max_replicates": 1,
+                      "noise": 0.1,
+                      "prior_mean": 0.0,
+                      "prior_scale": 1.0,
+                      "protocol": "fixture/1",
+                      "quantity": "score",
+                      "queryable": true,
+                      "requires_handoff": false,
+                      "target": "fixture",
+                      "units": "fixture-unit"
+                    }
+                  ],
+                  "schema_version": 1,
+                  "spec": {
+                    "batch_size": 4,
+                    "beta": 1.0,
+                    "bootstrap": 4,
+                    "budget": 6,
+                    "calibration_fraction": 0.15,
+                    "confirmation_reserve": 1,
+                    "cost_unit": "fixture-cost",
+                    "explore_fraction": 0.25,
+                    "max_candidates": 5000,
+                    "max_kg_candidates": 512,
+                    "max_observations": 1500,
+                    "objective": "score",
+                    "policy": "cost_aware",
+                    "representation": "fixture/1",
+                    "seed": 0,
+                    "validity_mode": "local"
+                  }
+                },
+                "event_ref": {
+                  "event_type": "configured",
+                  "log_id": "d872c701cfcc8607b3ea22eab9774766772b4180b75cfa48fba3218db768df0e",
+                  "sequence": 1
+                },
+                "kind": "configured",
+                "sequence": 1
+              },
+              {
+                "at": "2026-10-20T18:52:33.531958+00:00",
+                "body": {
+                  "cheap_value": null,
+                  "features": [
+                    1
+                  ],
+                  "handoff": {},
+                  "id": "one",
+                  "scaffold": "",
+                  "smiles": "C",
+                  "source": "library"
+                },
+                "event_ref": {
+                  "event_type": "candidate_added",
+                  "log_id": "d872c701cfcc8607b3ea22eab9774766772b4180b75cfa48fba3218db768df0e",
+                  "sequence": 2
+                },
+                "kind": "candidate_added",
+                "sequence": 2
+              },
+              {
+                "at": "2026-10-20T18:52:33.547093+00:00",
+                "body": {
+                  "fixture": "persisted unknown state; no process executed",
+                  "round_id": 1
+                },
+                "event_ref": {
+                  "event_type": "round_started",
+                  "log_id": "d872c701cfcc8607b3ea22eab9774766772b4180b75cfa48fba3218db768df0e",
+                  "sequence": 3
+                },
+                "kind": "round_started",
+                "sequence": 3
+              },
+              {
+                "at": "2026-10-20T18:52:33.590197+00:00",
+                "body": {
+                  "candidate_id": "one",
+                  "decision": {
+                    "fixture": true
+                  },
+                  "endpoint_id": "score",
+                  "id": "60efdc91de87490b8c9d10b48120fd73",
+                  "replicate": 0,
+                  "reserved_cost": 2,
+                  "round_id": 1
+                },
+                "event_ref": {
+                  "event_type": "action_reserved",
+                  "log_id": "d872c701cfcc8607b3ea22eab9774766772b4180b75cfa48fba3218db768df0e",
+                  "sequence": 4
+                },
+                "kind": "action_reserved",
+                "sequence": 4
+              },
+              {
+                "at": "2026-10-20T18:52:33.607887+00:00",
+                "body": {
+                  "action_id": "60efdc91de87490b8c9d10b48120fd73"
+                },
+                "event_ref": {
+                  "event_type": "action_started",
+                  "log_id": "d872c701cfcc8607b3ea22eab9774766772b4180b75cfa48fba3218db768df0e",
+                  "sequence": 5
+                },
+                "kind": "action_started",
+                "sequence": 5
+              },
+              {
+                "at": "2026-10-20T18:52:33.621975+00:00",
+                "body": {
+                  "action_id": "60efdc91de87490b8c9d10b48120fd73",
+                  "cost_unit": "wall_second",
+                  "record": {
+                    "execution_id": "partial-fixture",
+                    "wall_seconds": 0.25
+                  }
+                },
+                "event_ref": {
+                  "event_type": "external_execution_cost",
+                  "log_id": "d872c701cfcc8607b3ea22eab9774766772b4180b75cfa48fba3218db768df0e",
+                  "sequence": 6
+                },
+                "kind": "external_execution_cost",
+                "sequence": 6
+              }
+            ],
+            "has_more": false,
+            "log_id": "d872c701cfcc8607b3ea22eab9774766772b4180b75cfa48fba3218db768df0e",
+            "log_ref": {
+              "database": "F:\\life_healthy\\integration\\thin-harness-functions-20261021\\c\\native-monitor\\fixture.sqlite",
+              "kind": "campaign"
+            },
+            "next_cursor": {
+              "after_sequence": 6,
+              "log_id": "d872c701cfcc8607b3ea22eab9774766772b4180b75cfa48fba3218db768df0e"
+            },
+            "ok": true
+          }
+        },
+        {
+          "line": 13,
+          "tool": "etalon_executor_list",
+          "arguments": {
+            "database": "F:/life_healthy/integration/thin-harness-functions-20261021/c/native-monitor/fixture.sqlite"
+          },
+          "error": null,
+          "result": {
+            "executors": {},
+            "ok": true
+          }
+        }
+      ],
+      "usage": [
+        {
+          "input_tokens": 189219,
+          "cached_input_tokens": 164480,
+          "cache_write_input_tokens": 0,
+          "output_tokens": 807,
+          "reasoning_output_tokens": 0
+        }
+      ],
+      "final_messages": [
+        "I\u2019ll read the task inputs, query the relevant persisted state through ETALON MCP, and report what the evidence supports without changing any records.",
+        "The persisted outcome is **unknown; completion is not established**.\n\nI queried the real ETALON MCP using `etalon_capabilities`, `etalon_active_status`, `etalon_events_read`, and `etalon_executor_list`.\n\n| Question | Observed evidence |\n|---|---|\n| Completion | Action `60efdc91de87490b8c9d10b48120fd73` and round 1 remain journaled as `running`. This is persisted state, not proof of a live worker. |\n| Usable results | **0 observations, 0 admitted results.** The complete six-event journal ends with a partial expense receipt; it contains no terminal outcome or result admission. |\n| Resources | Status reports budget **6**, spent **0.25**, reserved **2**, and remaining **3.75**. The outstanding reservation remains committed. |\n| Execution readiness | No executors are registered. Capability discovery also states durable workers require Linux `/proc` and POSIX locks; it does not establish execution readiness here. |\n\nThe expense event labels its receipt `wall_second`, while the campaign budget uses `fixture-cost`. These are recorded labels, not evidence of a validated unit conversion or actual compute consumption. As explicitly stated in the fixture, **no process executed**.\n\n**Recommended next action:** preserve this fixture unchanged and report the unresolved state to its owner. Any future resolution should require explicit authority and authoritative terminal evidence with final accounting. Neither success nor failure can be inferred from this record, and the partial receipt does not justify releasing the reservation or retrying.\n\nNo campaign records, costs, reservations, observations, snapshots, or input/export files were modified."
+      ]
+    },
+    "native-lineage": {
+      "exit": {
+        "returncode": 0,
+        "wall_seconds": 87.07671093940735,
+        "ended_unix": 1792522446.019067
+      },
+      "stdout_sha256": "37e3344dbc42fd834eee3b923f3856a0d8685e2837321f713d64fa56e3880718",
+      "prompt_sha256": "99680b8ab13813dc0c7fa5c6d2d1120b7de250be2f7665b22336889d55850bbe",
+      "calls": [
+        {
+          "line": 9,
+          "tool": "etalon_capabilities",
+          "arguments": {},
+          "error": null,
+          "result": {
+            "catalog_sha256": "d2198731f4da1c5a85608e1b979a5e6627099ac61c243e149ce81ac549d0a258",
+            "load_evidence": "server-read-bytes; host discovery and invocation are not observed",
+            "ok": true,
+            "operations": {
+              "active.evaluate": {
+                "optional": [],
+                "required": [
+                  "candidate_id",
+                  "database",
+                  "endpoint_id"
+                ]
+              },
+              "active.run": {
+                "optional": [
+                  "min_new_admitted"
+                ],
+                "required": [
+                  "database",
+                  "max_rounds"
+                ]
+              },
+              "campaign.assays": {
+                "optional": [],
+                "required": [
+                  "database",
+                  "review",
+                  "snapshot"
+                ]
+              },
+              "campaign.create": {
+                "optional": [],
+                "required": [
+                  "endpoints",
+                  "executors",
+                  "spec"
+                ]
+              },
+              "campaign.handoffs": {
+                "optional": [
+                  "candidate_ids"
+                ],
+                "required": [
+                  "artifact_id",
+                  "database",
+                  "rationale",
+                  "workspace"
+                ]
+              },
+              "campaign.import": {
+                "optional": [
+                  "candidate_ids"
+                ],
+                "required": [
+                  "database",
+                  "snapshot"
+                ]
+              },
+              "data.acquire": {
+                "optional": [
+                  "allow_partial",
+                  "min_records"
+                ],
+                "required": [
+                  "budget",
+                  "request"
+                ]
+              },
+              "data.prepare": {
+                "optional": [
+                  "allow_partial",
+                  "id_field",
+                  "identity_policy",
+                  "min_records",
+                  "smiles_field"
+                ],
+                "required": [
+                  "snapshot"
+                ]
+              },
+              "design.import": {
+                "optional": [
+                  "mode"
+                ],
+                "required": [
+                  "bundle_path",
+                  "database"
+                ]
+              },
+              "screen.export": {
+                "optional": [],
+                "required": [
+                  "run_id",
+                  "workspace"
+                ]
+              },
+              "screen.run": {
+                "optional": [
+                  "allow_copyleft",
+                  "devices",
+                  "workers"
+                ],
+                "required": [
+                  "config_path",
+                  "library_path"
+                ]
+              }
+            },
+            "runtime": {
+              "durable_workers": "Linux /proc and POSIX locks required",
+              "module": "F:\\life_healthy\\integration\\thin-harness-functions-20261021\\c\\fixed-source\\src\\etalon\\mcp\\host.py",
+              "python": "F:\\life_healthy\\ETALON\\.venv\\Scripts\\python.exe"
+            },
+            "schema": "etalon-capability-catalog/1",
+            "skills": [
+              {
+                "description": "Inspect scientific evidence and prepare bounded expensive execution through ETALON registered executors, including handoff validation, budget protection and result admission.",
+                "entrypoint": "SKILL.md",
+                "files": [
+                  {
+                    "bytes": 2576,
+                    "path": "SKILL.md",
+                    "sha256": "b8ff4f1c02b89ac5deb9907889ffd6149bcc2b9730d5f12d29b4461a33212db5"
+                  },
+                  {
+                    "bytes": 2609,
+                    "path": "references/factorial-diagnostic.md",
+                    "sha256": "28ac72a4c2c15b80adc5cbab100af7884110b8541cb320b3c49c627835dea36b"
+                  },
+                  {
+                    "bytes": 35076,
+                    "path": "references/legacy-workflow.md",
+                    "sha256": "193a437c63cc6cdf5f6c741fa4f6fbe3eae413cb8558ecb4728a472e575792e1"
+                  }
+                ],
+                "kind": "domain_skill",
+                "manifest_sha256": "f2f28041e42e16ad8cf3401352022582d2cef9ea0983e02659babe2f41e6f8fd",
+                "name": "etalon-campaign",
+                "schema": "etalon-capability-version/1",
+                "slug": "campaign"
+              },
+              {
+                "description": "Prepare and supervise bounded MolCascade screening batches, including calibrated gates, batch reservations, duplicate submission and recovery.",
+                "entrypoint": "SKILL.md",
+                "files": [
+                  {
+                    "bytes": 3273,
+                    "path": "SKILL.md",
+                    "sha256": "64ff636a6dbe3a59fbb096876de28abb207d8e7016909b6c25fe3f503ccd0073"
+                  },
+                  {
+                    "bytes": 20099,
+                    "path": "references/legacy-workflow.md",
+                    "sha256": "04c89c4be945267e4dc4d95abe53cd07de83b46aa2a8734e5557874c7e1111b7"
+                  }
+                ],
+                "kind": "domain_skill",
+                "manifest_sha256": "0c05670d799901667db6d12e27ebf9169764b6ae1626ea92a50d191d03cea699",
+                "name": "etalon-screening-sweep",
+                "schema": "etalon-capability-version/1",
+                "slug": "sweep"
+              },
+              {
+                "description": "Evaluate whether a proposed screening gate rejects known controls and whether its scoring engines rank a relevant calibration panel.",
+                "entrypoint": "SKILL.md",
+                "files": [
+                  {
+                    "bytes": 2952,
+                    "path": "SKILL.md",
+                    "sha256": "348df11bc10ff249ef21da85174b594f52f7513e4d7b8e9c7de79f21063e13c4"
+                  },
+                  {
+                    "bytes": 8246,
+                    "path": "references/legacy-workflow.md",
+                    "sha256": "18741f2734b2183843bf7abe30d49bdd8319f3187b6a3419b9c11f51f7bcae62"
+                  }
+                ],
+                "kind": "domain_skill",
+                "manifest_sha256": "ed695eb354612135dc9ce99d90b2d45dbcf917d8f46f4642fba889b8c473ce38",
+                "name": "etalon-gate-calibration",
+                "schema": "etalon-capability-version/1",
+                "slug": "gate-calibration"
+              },
+              {
+                "description": "Compare or retire molecular generators using measured valid unique yield, real-pocket feasibility, cost and uncertainty.",
+                "entrypoint": "SKILL.md",
+                "files": [
+                  {
+                    "bytes": 2949,
+                    "path": "SKILL.md",
+                    "sha256": "4e195642fbd41820fd8057926faf36143ad1dd78bbeb56761701acc0f59cf961"
+                  },
+                  {
+                    "bytes": 8918,
+                    "path": "references/legacy-workflow.md",
+                    "sha256": "5905d2aeb319a8709b512cb89e5ca3e9c29112a4ddfb0b021bf46ce2e96802f3"
+                  }
+                ],
+                "kind": "domain_skill",
+                "manifest_sha256": "67a892bc1c669a65330824b5fb580e04ccf058718778b92e5618b65222b15372",
+                "name": "etalon-generation-planning",
+                "schema": "etalon-capability-version/1",
+                "slug": "generation-planning"
+              },
+              {
+                "description": "Inspect long-running ETALON jobs and distinguish progress, stalled work, partial results and uncertain outcomes before recovery.",
+                "entrypoint": "SKILL.md",
+                "files": [
+                  {
+                    "bytes": 3118,
+                    "path": "SKILL.md",
+                    "sha256": "59df17728d06d72ade36b5c23a003a81794d6901c6331a48e2651bfedb3e243b"
+                  },
+                  {
+                    "bytes": 10860,
+                    "path": "references/legacy-workflow.md",
+                    "sha256": "ee883468956fe38a3d8a85b8cccf406e190ce8ecd2e4ccdd8ea69e2a5bb69900"
+                  }
+                ],
+                "kind": "domain_skill",
+                "manifest_sha256": "e9a859608f9db06e514c5240cdf5fa2fa27b7d00091c91d37334c1ea76a938b4",
+                "name": "etalon-campaign-monitoring",
+                "schema": "etalon-capability-version/1",
+                "slug": "monitoring"
+              },
+              {
+                "description": "Set up or diagnose ETALON host access and selected scientific backends, checking interpreter paths, vendored sources and platform limits.",
+                "entrypoint": "SKILL.md",
+                "files": [
+                  {
+                    "bytes": 2006,
+                    "path": "SKILL.md",
+                    "sha256": "4bcb34ac4d4a3ac7fe2b8cc81af71cde1bd09c80bc711163206d996d2d388dac"
+                  },
+                  {
+                    "bytes": 14078,
+                    "path": "references/legacy-workflow.md",
+                    "sha256": "5b880d8073abc730d8130521530b4850be7628018f345db9c1c2e5b7275e27e4"
+                  }
+                ],
+                "kind": "domain_skill",
+                "manifest_sha256": "3869d34e45d75916aae903816a4b004bbe45382a503af8f62bb5ebc32aeb75a6",
+                "name": "etalon-install",
+                "schema": "etalon-capability-version/1",
+                "slug": "install"
+              }
+            ],
+            "tools": {
+              "etalon_action_prepare": "free",
+              "etalon_action_result": "free",
+              "etalon_action_submit": "spends",
+              "etalon_active_create": "cheap",
+              "etalon_active_execution_plan": "cheap",
+              "etalon_active_plan": "cheap",
+              "etalon_active_replay": "cheap",
+              "etalon_active_status": "free",
+              "etalon_active_submit": "spends",
+              "etalon_authorize_gates": "free",
+              "etalon_authorize_spend": "free",
+              "etalon_calibrate_gates": "free",
+              "etalon_campaign_plan": "free",
+              "etalon_capabilities": "free",
+              "etalon_check_handoff": "free",
+              "etalon_check_stability": "free",
+              "etalon_council_adjudicate": "free",
+              "etalon_council_reliability": "free",
+              "etalon_data_attach_handoffs": "cheap",
+              "etalon_data_import_assays": "cheap",
+              "etalon_data_import_candidates": "cheap",
+              "etalon_data_plan": "cheap",
+              "etalon_data_prepare": "cheap",
+              "etalon_data_review_template": "free",
+              "etalon_data_run": "cheap",
+              "etalon_data_sources": "free",
+              "etalon_data_status": "free",
+              "etalon_design_fep_network": "cheap",
+              "etalon_devices": "free",
+              "etalon_doctor": "cheap",
+              "etalon_events_read": "free",
+              "etalon_executor_list": "free",
+              "etalon_executor_prepare": "cheap",
+              "etalon_executor_register": "cheap",
+              "etalon_generation_productivity": "free",
+              "etalon_infrastructure": "free",
+              "etalon_method_read": "free",
+              "etalon_method_record": "cheap",
+              "etalon_plan_campaign": "free",
+              "etalon_recommend_waiver": "never-by-a-model",
+              "etalon_rule_admissible": "free",
+              "etalon_screen_configure": "cheap",
+              "etalon_screen_export": "cheap",
+              "etalon_screen_plan": "cheap",
+              "etalon_screen_status": "free",
+              "etalon_screen_submit": "spends",
+              "etalon_skill_read": "free",
+              "etalon_stages": "free",
+              "etalon_sweep_admit": "cheap",
+              "etalon_sweep_claim": "free",
+              "etalon_sweep_emit": "cheap",
+              "etalon_sweep_progress": "free",
+              "etalon_sweep_record": "free",
+              "etalon_sweep_recover": "free",
+              "etalon_sweep_status": "free",
+              "etalon_tune_screen": "free",
+              "etalon_workflow_advance": "spends",
+              "etalon_workflow_artifact": "cheap",
+              "etalon_workflow_cancel": "cheap",
+              "etalon_workflow_capabilities": "free",
+              "etalon_workflow_observe": "free",
+              "etalon_workflow_plan": "cheap",
+              "etalon_workflow_reconcile": "spends",
+              "etalon_workflow_status": "free",
+              "etalon_workflow_submit": "spends"
+            },
+            "usage_method": {
+              "bytes": 2988,
+              "kind": "usage_method",
+              "name": "etalon-host-guidance",
+              "sha256": "eb8fffca6a3aa74fc604ae2244b534ccaeaab9f0071160d62225a14a134faa72",
+              "uri": "etalon://host"
+            }
+          }
+        },
+        {
+          "line": 11,
+          "tool": "etalon_active_status",
+          "arguments": {
+            "database": "F:/life_healthy/integration/thin-harness-functions-20261021/c/native-lineage/fixture.sqlite"
+          },
+          "error": null,
+          "result": {
+            "ok": true,
+            "state": {
+              "admitted": 0,
+              "balance": {
+                "budget": 3,
+                "remaining": 2.5,
+                "reserved": 0,
+                "spent": 0.5
+              },
+              "candidates": 3,
+              "endpoints": [
+                {
+                  "cost": 1,
+                  "direction": "minimize",
+                  "id": "toy",
+                  "max_replicates": 1,
+                  "noise": 0.1,
+                  "prior_mean": 0.0,
+                  "prior_scale": 1.0,
+                  "protocol": "native-engineering/1",
+                  "quantity": "synthetic_score",
+                  "queryable": true,
+                  "requires_handoff": false,
+                  "target": "engineering",
+                  "units": "fixture-unit"
+                }
+              ],
+              "observations": 1,
+              "pending": [],
+              "rounds": [
+                {
+                  "actions": [
+                    "69e01b34914046018f5fcf4c751932c5"
+                  ],
+                  "admitted_total": 0,
+                  "balance": {
+                    "budget": 3,
+                    "remaining": 2.5,
+                    "reserved": 0,
+                    "spent": 0.5
+                  },
+                  "model": {
+                    "counts": {
+                      "toy": 0
+                    },
+                    "objective_correlations": {
+                      "toy": 1.0
+                    },
+                    "paired_molecules": {},
+                    "training_hash": "56cda25586ed155b2c0709cd3c7ec3b15092067b45fd9ffe39eca317985e315d",
+                    "training_size": 0,
+                    "uncertainty": "empirical Bayes posterior; not conformal or frequentist coverage",
+                    "version": "paired-task-gp/4"
+                  },
+                  "planning_event_cutoff": 5,
+                  "planning_seconds": 89.42548239999451,
+                  "round_id": 1,
+                  "status": "completed",
+                  "stop_reason": "ready",
+                  "training_actions": []
+                }
+              ],
+              "spec": {
+                "batch_size": 1,
+                "beta": 1.0,
+                "bootstrap": 2,
+                "budget": 3,
+                "calibration_fraction": 0.15,
+                "confirmation_reserve": 1,
+                "cost_unit": "fixture-cost",
+                "explore_fraction": 0.25,
+                "max_candidates": 5000,
+                "max_kg_candidates": 512,
+                "max_observations": 1500,
+                "objective": "toy",
+                "policy": "cost_only",
+                "representation": "synthetic/1",
+                "seed": 3,
+                "validity_mode": "local"
+              }
+            }
+          }
+        },
+        {
+          "line": 13,
+          "tool": "etalon_events_read",
+          "arguments": {
+            "log_ref": {
+              "kind": "campaign",
+              "database": "F:/life_healthy/integration/thin-harness-functions-20261021/c/native-lineage/fixture.sqlite"
+            },
+            "limit": 100
+          },
+          "error": null,
+          "result": {
+            "events": [
+              {
+                "at": "2026-10-20T18:13:59.764006+00:00",
+                "body": {
+                  "endpoints": [
+                    {
+                      "cost": 1,
+                      "direction": "minimize",
+                      "id": "toy",
+                      "max_replicates": 1,
+                      "noise": 0.1,
+                      "prior_mean": 0.0,
+                      "prior_scale": 1.0,
+                      "protocol": "native-engineering/1",
+                      "quantity": "synthetic_score",
+                      "queryable": true,
+                      "requires_handoff": false,
+                      "target": "engineering",
+                      "units": "fixture-unit"
+                    }
+                  ],
+                  "schema_version": 1,
+                  "spec": {
+                    "batch_size": 1,
+                    "beta": 1.0,
+                    "bootstrap": 2,
+                    "budget": 3,
+                    "calibration_fraction": 0.15,
+                    "confirmation_reserve": 1,
+                    "cost_unit": "fixture-cost",
+                    "explore_fraction": 0.25,
+                    "max_candidates": 5000,
+                    "max_kg_candidates": 512,
+                    "max_observations": 1500,
+                    "objective": "toy",
+                    "policy": "cost_only",
+                    "representation": "synthetic/1",
+                    "seed": 3,
+                    "validity_mode": "local"
+                  }
+                },
+                "event_ref": {
+                  "event_type": "configured",
+                  "log_id": "0095c1832d4cf0834f09ac0a3713da592f5b34403fde02ffb422fe0fbf3ddc6b",
+                  "sequence": 1
+                },
+                "kind": "configured",
+                "sequence": 1
+              },
+              {
+                "at": "2026-10-20T18:13:59.781932+00:00",
+                "body": {
+                  "name": "replay_manifest",
+                  "sha256": "65a778ffca97f2c0c065023e78ce175ee396b3b34da1a5f675d3a7d3b2a48a75"
+                },
+                "event_ref": {
+                  "event_type": "resource_bound",
+                  "log_id": "0095c1832d4cf0834f09ac0a3713da592f5b34403fde02ffb422fe0fbf3ddc6b",
+                  "sequence": 2
+                },
+                "kind": "resource_bound",
+                "sequence": 2
+              },
+              {
+                "at": "2026-10-20T18:13:59.802759+00:00",
+                "body": {
+                  "cheap_value": null,
+                  "features": [
+                    0.0
+                  ],
+                  "handoff": {},
+                  "id": "fixture-0",
+                  "scaffold": "",
+                  "smiles": "C",
+                  "source": "synthetic engineering; no chemistry claim"
+                },
+                "event_ref": {
+                  "event_type": "candidate_added",
+                  "log_id": "0095c1832d4cf0834f09ac0a3713da592f5b34403fde02ffb422fe0fbf3ddc6b",
+                  "sequence": 3
+                },
+                "kind": "candidate_added",
+                "sequence": 3
+              },
+              {
+                "at": "2026-10-20T18:13:59.803123+00:00",
+                "body": {
+                  "cheap_value": null,
+                  "features": [
+                    1.0
+                  ],
+                  "handoff": {},
+                  "id": "fixture-1",
+                  "scaffold": "",
+                  "smiles": "CC",
+                  "source": "synthetic engineering; no chemistry claim"
+                },
+                "event_ref": {
+                  "event_type": "candidate_added",
+                  "log_id": "0095c1832d4cf0834f09ac0a3713da592f5b34403fde02ffb422fe0fbf3ddc6b",
+                  "sequence": 4
+                },
+                "kind": "candidate_added",
+                "sequence": 4
+              },
+              {
+                "at": "2026-10-20T18:13:59.803191+00:00",
+                "body": {
+                  "cheap_value": null,
+                  "features": [
+                    2.0
+                  ],
+                  "handoff": {},
+                  "id": "fixture-2",
+                  "scaffold": "",
+                  "smiles": "CCC",
+                  "source": "synthetic engineering; no chemistry claim"
+                },
+                "event_ref": {
+                  "event_type": "candidate_added",
+                  "log_id": "0095c1832d4cf0834f09ac0a3713da592f5b34403fde02ffb422fe0fbf3ddc6b",
+                  "sequence": 5
+                },
+                "kind": "candidate_added",
+                "sequence": 5
+              },
+              {
+                "at": "2026-10-20T18:15:29.254214+00:00",
+                "body": {
+                  "model": {
+                    "counts": {
+                      "toy": 0
+                    },
+                    "objective_correlations": {
+                      "toy": 1.0
+                    },
+                    "paired_molecules": {},
+                    "training_hash": "56cda25586ed155b2c0709cd3c7ec3b15092067b45fd9ffe39eca317985e315d",
+                    "training_size": 0,
+                    "uncertainty": "empirical Bayes posterior; not conformal or frequentist coverage",
+                    "version": "paired-task-gp/4"
+                  },
+                  "planning_event_cutoff": 5,
+                  "planning_seconds": 89.42548239999451,
+                  "round_id": 1,
+                  "training_actions": []
+                },
+                "event_ref": {
+                  "event_type": "round_started",
+                  "log_id": "0095c1832d4cf0834f09ac0a3713da592f5b34403fde02ffb422fe0fbf3ddc6b",
+                  "sequence": 6
+                },
+                "kind": "round_started",
+                "sequence": 6
+              },
+              {
+                "at": "2026-10-20T18:15:29.274773+00:00",
+                "body": {
+                  "candidate_id": "fixture-1",
+                  "decision": {
+                    "batch_scaffold_penalty": 0.0,
+                    "model_hash": "56cda25586ed155b2c0709cd3c7ec3b15092067b45fd9ffe39eca317985e315d",
+                    "objective_mean": 0.0,
+                    "objective_sd": 1.0,
+                    "objective_variance_reduction": 0.9900990099009901,
+                    "planning_event_cutoff": 5,
+                    "policy": "cost_only",
+                    "quoted_cost": 1,
+                    "reason": "objective-bootstrap",
+                    "score": 1000000000001.0,
+                    "tie_break": 0.5442292252959519,
+                    "validity_probability": 1.0
+                  },
+                  "endpoint_id": "toy",
+                  "id": "69e01b34914046018f5fcf4c751932c5",
+                  "replicate": 0,
+                  "reserved_cost": 1,
+                  "round_id": 1
+                },
+                "event_ref": {
+                  "event_type": "action_reserved",
+                  "log_id": "0095c1832d4cf0834f09ac0a3713da592f5b34403fde02ffb422fe0fbf3ddc6b",
+                  "sequence": 7
+                },
+                "kind": "action_reserved",
+                "sequence": 7
+              },
+              {
+                "at": "2026-10-20T18:15:29.295794+00:00",
+                "body": {
+                  "action_id": "69e01b34914046018f5fcf4c751932c5"
+                },
+                "event_ref": {
+                  "event_type": "action_started",
+                  "log_id": "0095c1832d4cf0834f09ac0a3713da592f5b34403fde02ffb422fe0fbf3ddc6b",
+                  "sequence": 8
+                },
+                "kind": "action_started",
+                "sequence": 8
+              },
+              {
+                "at": "2026-10-20T18:15:29.315148+00:00",
+                "body": {
+                  "action_id": "69e01b34914046018f5fcf4c751932c5",
+                  "admitted": false,
+                  "result": {
+                    "candidate_id": "fixture-1",
+                    "checks": [
+                      {
+                        "code": "F_BUILD_INCOMPLETE",
+                        "detail": "deliberate engineering QC fault",
+                        "evaluable": true,
+                        "fired": true
+                      }
+                    ],
+                    "cost": 0.5,
+                    "endpoint_id": "toy",
+                    "provenance": {
+                      "authorization": null,
+                      "endpoint_protocol": "native-engineering/1",
+                      "fixture": true,
+                      "mode": "offline_replay",
+                      "physical_measurement": false
+                    },
+                    "status": "ok",
+                    "uncertainty": null,
+                    "units": "fixture-unit",
+                    "value": -11.0
+                  },
+                  "ruling": {
+                    "admission": "withheld",
+                    "blocking": [
+                      "F_BUILD_INCOMPLETE"
+                    ],
+                    "bounded": [],
+                    "notes": [
+                      "Withheld: F_BUILD_INCOMPLETE. These mean the number would be about something other than the molecule it is filed under, so using it as a label would move the screen's thresholds on evidence from a different species. Withholding costs one molecule's information; admitting costs a shift applied to every molecule after it."
+                    ],
+                    "parent_id": "fixture-1",
+                    "reproducible": true,
+                    "teaches": false,
+                    "unchecked": [],
+                    "unverifiable": [],
+                    "waived": []
+                  }
+                },
+                "event_ref": {
+                  "event_type": "action_resolved",
+                  "log_id": "0095c1832d4cf0834f09ac0a3713da592f5b34403fde02ffb422fe0fbf3ddc6b",
+                  "sequence": 9
+                },
+                "kind": "action_resolved",
+                "sequence": 9
+              },
+              {
+                "at": "2026-10-20T18:15:29.337732+00:00",
+                "body": {
+                  "actions": [
+                    "69e01b34914046018f5fcf4c751932c5"
+                  ],
+                  "admitted_total": 0,
+                  "balance": {
+                    "budget": 3,
+                    "remaining": 2.5,
+                    "reserved": 0,
+                    "spent": 0.5
+                  },
+                  "round_id": 1,
+                  "stop_reason": "ready"
+                },
+                "event_ref": {
+                  "event_type": "round_completed",
+                  "log_id": "0095c1832d4cf0834f09ac0a3713da592f5b34403fde02ffb422fe0fbf3ddc6b",
+                  "sequence": 10
+                },
+                "kind": "round_completed",
+                "sequence": 10
+              },
+              {
+                "at": "2026-10-20T18:15:50.219183+00:00",
+                "body": {
+                  "id": "methodversion-94d2245441e9ce5c86ac3318aa36ad052f48c1262ef7cb10f55518196acfcdff",
+                  "record": {
+                    "change_summary": "",
+                    "content_ref": {
+                      "manifest_path": "F:/life_healthy/integration/thin-harness-native-20261021/c_host/codex-methods/snapshots/receipt-review/etalon-bundle-manifest.json",
+                      "manifest_sha256": "7de1125e8e4e3c206f2e759ee61927a7748108d59988fc08f4a9bdee58fa006b"
+                    },
+                    "dependencies": {},
+                    "entrypoint": null,
+                    "evidence_refs": [],
+                    "name": "receipt-review",
+                    "parents": [],
+                    "roles": [
+                      "domain_skill"
+                    ],
+                    "schema": "etalon-method-version/1",
+                    "verification_basis": "content_verified"
+                  }
+                },
+                "event_ref": {
+                  "event_type": "research_recorded",
+                  "log_id": "0095c1832d4cf0834f09ac0a3713da592f5b34403fde02ffb422fe0fbf3ddc6b",
+                  "sequence": 11
+                },
+                "kind": "research_recorded",
+                "sequence": 11
+              },
+              {
+                "at": "2026-10-20T18:15:50.288496+00:00",
+                "body": {
+                  "id": "methodversion-fb61f1969f82885175f4aa5f58896bcf60896caf7580e64bbd35055cb75fc66f",
+                  "record": {
+                    "change_summary": "",
+                    "content_ref": {
+                      "manifest_path": "F:/life_healthy/integration/thin-harness-native-20261021/c_host/codex-methods/snapshots/cost-review/etalon-bundle-manifest.json",
+                      "manifest_sha256": "fbb1ca1963ee3ddc76f13232e1f9a2104a5300e1a2a3843cdf393d24c13d1c23"
+                    },
+                    "dependencies": {},
+                    "entrypoint": null,
+                    "evidence_refs": [],
+                    "name": "cost-review",
+                    "parents": [],
+                    "roles": [
+                      "domain_skill"
+                    ],
+                    "schema": "etalon-method-version/1",
+                    "verification_basis": "content_verified"
+                  }
+                },
+                "event_ref": {
+                  "event_type": "research_recorded",
+                  "log_id": "0095c1832d4cf0834f09ac0a3713da592f5b34403fde02ffb422fe0fbf3ddc6b",
+                  "sequence": 12
+                },
+                "kind": "research_recorded",
+                "sequence": 12
+              },
+              {
+                "at": "2026-10-20T18:15:58.386550+00:00",
+                "body": {
+                  "id": "methoduse-7fb2c18a2d8f79a33883a8fdcb98b1b4532cfec72c71fb398858e4ae3999eafd",
+                  "record": {
+                    "basis": "host_reported",
+                    "host_conditions": {
+                      "host": "codex",
+                      "model": null
+                    },
+                    "parents": [],
+                    "reason": "Replay returned ok=true but admitted=0; preserve 0.5 fixture-cost charge and stop at one round. Monetary and host cost unknown. No independent benefit evaluation.",
+                    "schema": "etalon-method-use/1",
+                    "selected_methods": [
+                      {
+                        "method_version_ref": "methodversion-94d2245441e9ce5c86ac3318aa36ad052f48c1262ef7cb10f55518196acfcdff",
+                        "scope": "Admission review only; optional candidate comparison not adopted because admitted=0."
+                      },
+                      {
+                        "method_version_ref": "methodversion-fb61f1969f82885175f4aa5f58896bcf60896caf7580e64bbd35055cb75fc66f",
+                        "scope": "Post-replay cost audit and bounded stopping consideration."
+                      }
+                    ],
+                    "subject_refs": [
+                      {
+                        "id": "synthetic-acceptance-replay-round-1",
+                        "kind": "request",
+                        "scope": "F:/life_healthy/integration/thin-harness-native-20261021/c_host/codex-methods/fixture.sqlite"
+                      }
+                    ],
+                    "trigger_event_ref": null,
+                    "usage_method_ref": null,
+                    "visible_evidence_refs": []
+                  }
+                },
+                "event_ref": {
+                  "event_type": "research_recorded",
+                  "log_id": "0095c1832d4cf0834f09ac0a3713da592f5b34403fde02ffb422fe0fbf3ddc6b",
+                  "sequence": 13
+                },
+                "kind": "research_recorded",
+                "sequence": 13
+              },
+              {
+                "at": "2026-10-20T18:21:25.769188+00:00",
+                "body": {
+                  "id": "methodversion-8d61881a39f7f5356e556e67d30faf937947a2ba86e698f18d16b9c3b58c3a76",
+                  "record": {
+                    "change_summary": "Revise original methodversion-94d2245441e9ce5c86ac3318aa36ad052f48c1262ef7cb10f55518196acfcdff (manifest 7de1125e8e4e3c206f2e759ee61927a7748108d59988fc08f4a9bdee58fa006b): separate replay return, admission, retained cost and runtime identity; add campaign event lookup. Based on existing action_resolved sequence 9 and round_completed sequence 10. Development diagnostic, no independent benefit claim.",
+                    "content_ref": {
+                      "manifest_path": "F:/life_healthy/integration/thin-harness-native-20261021/c_host/codex-revision/snapshots/revised-receipt-review/etalon-bundle-manifest.json",
+                      "manifest_sha256": "0d8090c65f60cad7970b9c51f6e6a0adfe13950f5aa2cbafd47410164a032880"
+                    },
+                    "dependencies": {},
+                    "entrypoint": null,
+                    "evidence_refs": [],
+                    "name": "receipt-review",
+                    "parents": [],
+                    "roles": [
+                      "domain_skill"
+                    ],
+                    "schema": "etalon-method-version/1",
+                    "verification_basis": "content_verified"
+                  }
+                },
+                "event_ref": {
+                  "event_type": "research_recorded",
+                  "log_id": "0095c1832d4cf0834f09ac0a3713da592f5b34403fde02ffb422fe0fbf3ddc6b",
+                  "sequence": 14
+                },
+                "kind": "research_recorded",
+                "sequence": 14
+              },
+              {
+                "at": "2026-10-20T18:21:37.855579+00:00",
+                "body": {
+                  "id": "methoduse-5f6e9ee30561bd31a8266633912550c72e3a64390f35bbcbdc74d5abde30c80a",
+                  "record": {
+                    "basis": "host_reported",
+                    "host_conditions": {
+                      "host": "codex",
+                      "model": null
+                    },
+                    "parents": [],
+                    "reason": "Actual adoption after observed fixture evidence: status=ok/value=-11 but admitted=false, QC withheld F_BUILD_INCOMPLETE; 0.5 fixture-cost retained, remaining 2.5, reserved 0. Action 69e01b34914046018f5fcf4c751932c5 is an offline campaign action; durable runtime handle unknown in evidence read. Stopped at read-only audit, no execution/replay/recovery. Already-seen synthetic evidence; no independent evaluation or improvement claim. Host/model price and monetary cost unknown. Errors retained: local Get-Content live manifest path missing; first method-version write returned ValueError nonempty text required (nonretryable), then simplified record succeeded. Local candidate absent from installed skill catalog but explicit bundle MCP read succeeded. Original snapshot and original version binding retained.",
+                    "schema": "etalon-method-use/1",
+                    "selected_methods": [
+                      {
+                        "method_version_ref": "methodversion-8d61881a39f7f5356e556e67d30faf937947a2ba86e698f18d16b9c3b58c3a76",
+                        "scope": "Read revised SKILL.md via ETALON MCP; applied admission/cost/identifier audit using existing campaign events 9 and 10 and active_status. Optional accepted-candidate comparison not adopted."
+                      }
+                    ],
+                    "subject_refs": [
+                      {
+                        "id": "receipt-review-revision-development-diagnostic-20261021",
+                        "kind": "request",
+                        "scope": "F:/life_healthy/integration/thin-harness-native-20261021/c_host/codex-revision/fixture.sqlite"
+                      }
+                    ],
+                    "trigger_event_ref": null,
+                    "usage_method_ref": null,
+                    "visible_evidence_refs": []
+                  }
+                },
+                "event_ref": {
+                  "event_type": "research_recorded",
+                  "log_id": "0095c1832d4cf0834f09ac0a3713da592f5b34403fde02ffb422fe0fbf3ddc6b",
+                  "sequence": 15
+                },
+                "kind": "research_recorded",
+                "sequence": 15
+              }
+            ],
+            "has_more": false,
+            "log_id": "0095c1832d4cf0834f09ac0a3713da592f5b34403fde02ffb422fe0fbf3ddc6b",
+            "log_ref": {
+              "database": "F:\\life_healthy\\integration\\thin-harness-functions-20261021\\c\\native-lineage\\fixture.sqlite",
+              "kind": "campaign"
+            },
+            "next_cursor": {
+              "after_sequence": 15,
+              "log_id": "0095c1832d4cf0834f09ac0a3713da592f5b34403fde02ffb422fe0fbf3ddc6b"
+            },
+            "ok": true
+          }
+        },
+        {
+          "line": 15,
+          "tool": "etalon_method_read",
+          "arguments": {
+            "database": "F:/life_healthy/integration/thin-harness-functions-20261021/c/native-lineage/fixture.sqlite",
+            "record_id": "methodversion-8d61881a39f7f5356e556e67d30faf937947a2ba86e698f18d16b9c3b58c3a76"
+          },
+          "error": null,
+          "result": {
+            "ok": true,
+            "record": {
+              "change_summary": "Revise original methodversion-94d2245441e9ce5c86ac3318aa36ad052f48c1262ef7cb10f55518196acfcdff (manifest 7de1125e8e4e3c206f2e759ee61927a7748108d59988fc08f4a9bdee58fa006b): separate replay return, admission, retained cost and runtime identity; add campaign event lookup. Based on existing action_resolved sequence 9 and round_completed sequence 10. Development diagnostic, no independent benefit claim.",
+              "content_ref": {
+                "manifest_path": "F:/life_healthy/integration/thin-harness-native-20261021/c_host/codex-revision/snapshots/revised-receipt-review/etalon-bundle-manifest.json",
+                "manifest_sha256": "0d8090c65f60cad7970b9c51f6e6a0adfe13950f5aa2cbafd47410164a032880"
+              },
+              "dependencies": {},
+              "entrypoint": null,
+              "evidence_refs": [],
+              "name": "receipt-review",
+              "parents": [],
+              "roles": [
+                "domain_skill"
+              ],
+              "schema": "etalon-method-version/1",
+              "verification_basis": "content_verified"
+            },
+            "record_id": "methodversion-8d61881a39f7f5356e556e67d30faf937947a2ba86e698f18d16b9c3b58c3a76"
+          }
+        },
+        {
+          "line": 17,
+          "tool": "etalon_skill_read",
+          "arguments": {
+            "slug": "receipt-review",
+            "bundle_ref": {
+              "root": "F:/life_healthy/integration/thin-harness-functions-20261021/c/native-lineage/snapshots/parent/bundle",
+              "manifest_sha256": "0d8090c65f60cad7970b9c51f6e6a0adfe13950f5aa2cbafd47410164a032880"
+            }
+          },
+          "error": null,
+          "result": {
+            "content": "---\r\nname: receipt-review\r\ndescription: Separate accepted observations from executed-but-rejected results.\r\n---\r\n\r\n## Admission review\r\nInspect actual acceptance/QC evidence. A finite returned value alone is not enough to admit a score.\r\n\r\nFor an offline replay audit, report these facts separately: tool/result return status,\r\nadmission and blocking QC, retained actual cost, and the source of each identifier.\r\n`ok=true` or result `status=ok` does not establish an accepted observation. Check\r\ncommitted `action_resolved` admission/ruling evidence and the campaign state.\r\n\r\nAn offline replay action ID identifies a campaign action; it is not evidence of a\r\ndurable runtime handle. Read committed events with `etalon_events_read` using\r\n`log_ref={\"kind\":\"campaign\",\"database\":\"<existing database>\"}`. Only `campaign`\r\nand `runtime` are valid log kinds. Use runtime/result lookup only with the actual\r\nhandle and workspace supplied by a durable submission receipt; do not infer them\r\nfrom an offline action ID. If that receipt is unavailable, leave the runtime\r\nhandle unknown and audit the campaign evidence without replaying or recovering.\r\n\r\nFor example, a finite replay result with `status=ok`, `admitted=false` and a\r\n`withheld` QC ruling remains withheld; retain its charged cost. This example is\r\nan interpretation aid, not evidence of efficacy or independent method benefit.\r\n\r\n## Optional recommendation\r\nIf the first result is accepted, comparing candidates may be useful. Do not apply that suggestion when acceptance fails.\r\n",
+            "manifest_sha256": "0d8090c65f60cad7970b9c51f6e6a0adfe13950f5aa2cbafd47410164a032880",
+            "member": "SKILL.md",
+            "ok": true,
+            "sha256": "399c355205f4659a792efc9e2a4f4d7980eeb66194fb78dd35fad579a31d8ba0",
+            "slug": "receipt-review"
+          }
+        },
+        {
+          "line": 24,
+          "tool": "etalon_skill_read",
+          "arguments": {
+            "slug": "receipt-review",
+            "bundle_ref": {
+              "root": "F:/life_healthy/integration/thin-harness-functions-20261021/c/native-lineage/snapshots/derived-receipt-review/bundle",
+              "manifest_sha256": "e3544b6b284ee4b1d37a1af3cb3ca9980429d61463c146535e7d26f93d586d13"
+            }
+          },
+          "error": null,
+          "result": {
+            "content": "---\r\nname: receipt-review\r\ndescription: Separate accepted observations from executed-but-rejected results.\r\n---\r\n\r\n## Admission review\r\nInspect actual acceptance/QC evidence. A finite returned value alone is not enough to admit a score.\r\n\r\nFor an offline replay audit, report these facts separately: tool/result return status,\r\nadmission and blocking QC, retained actual cost, and the source of each identifier.\r\n`ok=true` or result `status=ok` does not establish an accepted observation. Check\r\ncommitted `action_resolved` admission/ruling evidence and the campaign state.\r\n\r\nAn offline replay action ID identifies a campaign action; it is not evidence of a\r\ndurable runtime handle. Read committed events with `etalon_events_read` using\r\n`log_ref={\"kind\":\"campaign\",\"database\":\"<existing database>\"}`. Only `campaign`\r\nand `runtime` are valid log kinds. Use runtime/result lookup only with the actual\r\nhandle and workspace supplied by a durable submission receipt; do not infer them\r\nfrom an offline action ID. If that receipt is unavailable, leave the runtime\r\nhandle unknown and audit the campaign evidence without replaying or recovering.\r\n\r\nFor example, a finite replay result with `status=ok`, `admitted=false` and a\r\n`withheld` QC ruling remains withheld; retain its charged cost. This example is\r\nan interpretation aid, not evidence of efficacy or independent method benefit.\r\n\r\n## Optional recommendation\r\nIf the first result is accepted, comparing candidates may be useful. Do not apply that suggestion when acceptance fails.\r\n\n## Record root or derived provenance\nBefore saving a version, decide whether its content revises an existing method.\nFor a revision, read the exact existing MethodVersion through etalon_method_read,\ninspect its complete verified content snapshot, and preserve both unchanged.\nSave changed content to a new snapshot and append a MethodVersion whose structured\nparents array contains the exact existing record ID; prose in change_summary is\nnot a parent edge. Do not repair historical parents arrays or content_ref paths.\nAn unrelated newly authored root method may use parents=[]; parents are not\nuniversally required. Saving either version establishes provenance, not benefit.\nFor a read-only partial-use audit, read back the derived record and check its\nparent edge, then report return status, admission, retained cost and identifier\nsource from committed campaign events and state. Record only the parts actually\nused in MethodUse; leave model identity and monetary cost unknown if unobserved.\nAlready-seen engineering evidence cannot establish independent improvement.\n",
+            "manifest_sha256": "e3544b6b284ee4b1d37a1af3cb3ca9980429d61463c146535e7d26f93d586d13",
+            "member": "SKILL.md",
+            "ok": true,
+            "sha256": "29aede689bd05d8a58c2001b68131300aa07458b87b07a7dee45410ecac870a4",
+            "slug": "receipt-review"
+          }
+        },
+        {
+          "line": 26,
+          "tool": "etalon_method_record",
+          "arguments": {
+            "database": "F:/life_healthy/integration/thin-harness-functions-20261021/c/native-lineage/fixture.sqlite",
+            "record": {
+              "schema": "etalon-method-version/1",
+              "name": "receipt-review",
+              "roles": [
+                "domain_skill"
+              ],
+              "content_ref": {
+                "manifest_path": "F:/life_healthy/integration/thin-harness-functions-20261021/c/native-lineage/snapshots/derived-receipt-review/etalon-bundle-manifest.json",
+                "manifest_sha256": "e3544b6b284ee4b1d37a1af3cb3ca9980429d61463c146535e7d26f93d586d13"
+              },
+              "parents": [
+                "methodversion-8d61881a39f7f5356e556e67d30faf937947a2ba86e698f18d16b9c3b58c3a76"
+              ],
+              "verification_basis": "content_verified",
+              "change_summary": "Add explicit root-versus-derived structured provenance and partial-use audit guidance. Preserve historical parent unchanged. Development change, no independent improvement claim."
+            }
+          },
+          "error": null,
+          "result": {
+            "ok": true,
+            "record": {
+              "change_summary": "Add explicit root-versus-derived structured provenance and partial-use audit guidance. Preserve historical parent unchanged. Development change, no independent improvement claim.",
+              "content_ref": {
+                "manifest_path": "F:/life_healthy/integration/thin-harness-functions-20261021/c/native-lineage/snapshots/derived-receipt-review/etalon-bundle-manifest.json",
+                "manifest_sha256": "e3544b6b284ee4b1d37a1af3cb3ca9980429d61463c146535e7d26f93d586d13"
+              },
+              "dependencies": {},
+              "entrypoint": null,
+              "evidence_refs": [],
+              "name": "receipt-review",
+              "parents": [
+                "methodversion-8d61881a39f7f5356e556e67d30faf937947a2ba86e698f18d16b9c3b58c3a76"
+              ],
+              "roles": [
+                "domain_skill"
+              ],
+              "schema": "etalon-method-version/1",
+              "verification_basis": "content_verified"
+            },
+            "record_id": "methodversion-5f61d7cfe848ef7a3bdfa485702379ae5d9a10a0a0e369a7611575b53298a3fd"
+          }
+        },
+        {
+          "line": 28,
+          "tool": "etalon_skill_read",
+          "arguments": {
+            "slug": "audit-note-naming",
+            "bundle_ref": {
+              "root": "F:/life_healthy/integration/thin-harness-functions-20261021/c/native-lineage/snapshots/audit-note-naming/bundle",
+              "manifest_sha256": "6d8fcd3c4de5a52f498337c81b57cb9c5f17cb94d444f01f588fda60c51126d2"
+            }
+          },
+          "error": null,
+          "result": {
+            "content": "---\r\nname: audit-note-naming\r\ndescription: Give local audit notes descriptive filenames.\r\n---\r\nFor a new local audit note, choose a descriptive filename including its date.\r\nThis small standalone authoring convention makes no scientific benefit claim.\r\n",
+            "manifest_sha256": "6d8fcd3c4de5a52f498337c81b57cb9c5f17cb94d444f01f588fda60c51126d2",
+            "member": "SKILL.md",
+            "ok": true,
+            "sha256": "caf966a909225c3883f6c3aee02be5367f883b1ae18f4f0754ffc70ad4f190e0",
+            "slug": "audit-note-naming"
+          }
+        },
+        {
+          "line": 30,
+          "tool": "etalon_method_record",
+          "arguments": {
+            "database": "F:/life_healthy/integration/thin-harness-functions-20261021/c/native-lineage/fixture.sqlite",
+            "record": {
+              "schema": "etalon-method-version/1",
+              "name": "audit-note-naming",
+              "roles": [
+                "domain_skill"
+              ],
+              "content_ref": {
+                "manifest_path": "F:/life_healthy/integration/thin-harness-functions-20261021/c/native-lineage/snapshots/audit-note-naming/etalon-bundle-manifest.json",
+                "manifest_sha256": "6d8fcd3c4de5a52f498337c81b57cb9c5f17cb94d444f01f588fda60c51126d2"
+              },
+              "parents": [],
+              "verification_basis": "content_verified",
+              "change_summary": "New unrelated root convention for naming local audit notes; no benefit claim."
+            }
+          },
+          "error": null,
+          "result": {
+            "ok": true,
+            "record": {
+              "change_summary": "New unrelated root convention for naming local audit notes; no benefit claim.",
+              "content_ref": {
+                "manifest_path": "F:/life_healthy/integration/thin-harness-functions-20261021/c/native-lineage/snapshots/audit-note-naming/etalon-bundle-manifest.json",
+                "manifest_sha256": "6d8fcd3c4de5a52f498337c81b57cb9c5f17cb94d444f01f588fda60c51126d2"
+              },
+              "dependencies": {},
+              "entrypoint": null,
+              "evidence_refs": [],
+              "name": "audit-note-naming",
+              "parents": [],
+              "roles": [
+                "domain_skill"
+              ],
+              "schema": "etalon-method-version/1",
+              "verification_basis": "content_verified"
+            },
+            "record_id": "methodversion-3a3dfc53517d90aff4643fa2b764bcc6c89eb8115733470f6547751d791ce43d"
+          }
+        },
+        {
+          "line": 32,
+          "tool": "etalon_method_read",
+          "arguments": {
+            "database": "F:/life_healthy/integration/thin-harness-functions-20261021/c/native-lineage/fixture.sqlite",
+            "record_id": "methodversion-5f61d7cfe848ef7a3bdfa485702379ae5d9a10a0a0e369a7611575b53298a3fd"
+          },
+          "error": null,
+          "result": {
+            "ok": true,
+            "record": {
+              "change_summary": "Add explicit root-versus-derived structured provenance and partial-use audit guidance. Preserve historical parent unchanged. Development change, no independent improvement claim.",
+              "content_ref": {
+                "manifest_path": "F:/life_healthy/integration/thin-harness-functions-20261021/c/native-lineage/snapshots/derived-receipt-review/etalon-bundle-manifest.json",
+                "manifest_sha256": "e3544b6b284ee4b1d37a1af3cb3ca9980429d61463c146535e7d26f93d586d13"
+              },
+              "dependencies": {},
+              "entrypoint": null,
+              "evidence_refs": [],
+              "name": "receipt-review",
+              "parents": [
+                "methodversion-8d61881a39f7f5356e556e67d30faf937947a2ba86e698f18d16b9c3b58c3a76"
+              ],
+              "roles": [
+                "domain_skill"
+              ],
+              "schema": "etalon-method-version/1",
+              "verification_basis": "content_verified"
+            },
+            "record_id": "methodversion-5f61d7cfe848ef7a3bdfa485702379ae5d9a10a0a0e369a7611575b53298a3fd"
+          }
+        },
+        {
+          "line": 34,
+          "tool": "etalon_active_status",
+          "arguments": {
+            "database": "F:/life_healthy/integration/thin-harness-functions-20261021/c/native-lineage/fixture.sqlite"
+          },
+          "error": null,
+          "result": {
+            "ok": true,
+            "state": {
+              "admitted": 0,
+              "balance": {
+                "budget": 3,
+                "remaining": 2.5,
+                "reserved": 0,
+                "spent": 0.5
+              },
+              "candidates": 3,
+              "endpoints": [
+                {
+                  "cost": 1,
+                  "direction": "minimize",
+                  "id": "toy",
+                  "max_replicates": 1,
+                  "noise": 0.1,
+                  "prior_mean": 0.0,
+                  "prior_scale": 1.0,
+                  "protocol": "native-engineering/1",
+                  "quantity": "synthetic_score",
+                  "queryable": true,
+                  "requires_handoff": false,
+                  "target": "engineering",
+                  "units": "fixture-unit"
+                }
+              ],
+              "observations": 1,
+              "pending": [],
+              "rounds": [
+                {
+                  "actions": [
+                    "69e01b34914046018f5fcf4c751932c5"
+                  ],
+                  "admitted_total": 0,
+                  "balance": {
+                    "budget": 3,
+                    "remaining": 2.5,
+                    "reserved": 0,
+                    "spent": 0.5
+                  },
+                  "model": {
+                    "counts": {
+                      "toy": 0
+                    },
+                    "objective_correlations": {
+                      "toy": 1.0
+                    },
+                    "paired_molecules": {},
+                    "training_hash": "56cda25586ed155b2c0709cd3c7ec3b15092067b45fd9ffe39eca317985e315d",
+                    "training_size": 0,
+                    "uncertainty": "empirical Bayes posterior; not conformal or frequentist coverage",
+                    "version": "paired-task-gp/4"
+                  },
+                  "planning_event_cutoff": 5,
+                  "planning_seconds": 89.42548239999451,
+                  "round_id": 1,
+                  "status": "completed",
+                  "stop_reason": "ready",
+                  "training_actions": []
+                }
+              ],
+              "spec": {
+                "batch_size": 1,
+                "beta": 1.0,
+                "bootstrap": 2,
+                "budget": 3,
+                "calibration_fraction": 0.15,
+                "confirmation_reserve": 1,
+                "cost_unit": "fixture-cost",
+                "explore_fraction": 0.25,
+                "max_candidates": 5000,
+                "max_kg_candidates": 512,
+                "max_observations": 1500,
+                "objective": "toy",
+                "policy": "cost_only",
+                "representation": "synthetic/1",
+                "seed": 3,
+                "validity_mode": "local"
+              }
+            }
+          }
+        },
+        {
+          "line": 36,
+          "tool": "etalon_events_read",
+          "arguments": {
+            "log_ref": {
+              "kind": "campaign",
+              "database": "F:/life_healthy/integration/thin-harness-functions-20261021/c/native-lineage/fixture.sqlite"
+            },
+            "limit": 100
+          },
+          "error": null,
+          "result": {
+            "events": [
+              {
+                "at": "2026-10-20T18:13:59.764006+00:00",
+                "body": {
+                  "endpoints": [
+                    {
+                      "cost": 1,
+                      "direction": "minimize",
+                      "id": "toy",
+                      "max_replicates": 1,
+                      "noise": 0.1,
+                      "prior_mean": 0.0,
+                      "prior_scale": 1.0,
+                      "protocol": "native-engineering/1",
+                      "quantity": "synthetic_score",
+                      "queryable": true,
+                      "requires_handoff": false,
+                      "target": "engineering",
+                      "units": "fixture-unit"
+                    }
+                  ],
+                  "schema_version": 1,
+                  "spec": {
+                    "batch_size": 1,
+                    "beta": 1.0,
+                    "bootstrap": 2,
+                    "budget": 3,
+                    "calibration_fraction": 0.15,
+                    "confirmation_reserve": 1,
+                    "cost_unit": "fixture-cost",
+                    "explore_fraction": 0.25,
+                    "max_candidates": 5000,
+                    "max_kg_candidates": 512,
+                    "max_observations": 1500,
+                    "objective": "toy",
+                    "policy": "cost_only",
+                    "representation": "synthetic/1",
+                    "seed": 3,
+                    "validity_mode": "local"
+                  }
+                },
+                "event_ref": {
+                  "event_type": "configured",
+                  "log_id": "0095c1832d4cf0834f09ac0a3713da592f5b34403fde02ffb422fe0fbf3ddc6b",
+                  "sequence": 1
+                },
+                "kind": "configured",
+                "sequence": 1
+              },
+              {
+                "at": "2026-10-20T18:13:59.781932+00:00",
+                "body": {
+                  "name": "replay_manifest",
+                  "sha256": "65a778ffca97f2c0c065023e78ce175ee396b3b34da1a5f675d3a7d3b2a48a75"
+                },
+                "event_ref": {
+                  "event_type": "resource_bound",
+                  "log_id": "0095c1832d4cf0834f09ac0a3713da592f5b34403fde02ffb422fe0fbf3ddc6b",
+                  "sequence": 2
+                },
+                "kind": "resource_bound",
+                "sequence": 2
+              },
+              {
+                "at": "2026-10-20T18:13:59.802759+00:00",
+                "body": {
+                  "cheap_value": null,
+                  "features": [
+                    0.0
+                  ],
+                  "handoff": {},
+                  "id": "fixture-0",
+                  "scaffold": "",
+                  "smiles": "C",
+                  "source": "synthetic engineering; no chemistry claim"
+                },
+                "event_ref": {
+                  "event_type": "candidate_added",
+                  "log_id": "0095c1832d4cf0834f09ac0a3713da592f5b34403fde02ffb422fe0fbf3ddc6b",
+                  "sequence": 3
+                },
+                "kind": "candidate_added",
+                "sequence": 3
+              },
+              {
+                "at": "2026-10-20T18:13:59.803123+00:00",
+                "body": {
+                  "cheap_value": null,
+                  "features": [
+                    1.0
+                  ],
+                  "handoff": {},
+                  "id": "fixture-1",
+                  "scaffold": "",
+                  "smiles": "CC",
+                  "source": "synthetic engineering; no chemistry claim"
+                },
+                "event_ref": {
+                  "event_type": "candidate_added",
+                  "log_id": "0095c1832d4cf0834f09ac0a3713da592f5b34403fde02ffb422fe0fbf3ddc6b",
+                  "sequence": 4
+                },
+                "kind": "candidate_added",
+                "sequence": 4
+              },
+              {
+                "at": "2026-10-20T18:13:59.803191+00:00",
+                "body": {
+                  "cheap_value": null,
+                  "features": [
+                    2.0
+                  ],
+                  "handoff": {},
+                  "id": "fixture-2",
+                  "scaffold": "",
+                  "smiles": "CCC",
+                  "source": "synthetic engineering; no chemistry claim"
+                },
+                "event_ref": {
+                  "event_type": "candidate_added",
+                  "log_id": "0095c1832d4cf0834f09ac0a3713da592f5b34403fde02ffb422fe0fbf3ddc6b",
+                  "sequence": 5
+                },
+                "kind": "candidate_added",
+                "sequence": 5
+              },
+              {
+                "at": "2026-10-20T18:15:29.254214+00:00",
+                "body": {
+                  "model": {
+                    "counts": {
+                      "toy": 0
+                    },
+                    "objective_correlations": {
+                      "toy": 1.0
+                    },
+                    "paired_molecules": {},
+                    "training_hash": "56cda25586ed155b2c0709cd3c7ec3b15092067b45fd9ffe39eca317985e315d",
+                    "training_size": 0,
+                    "uncertainty": "empirical Bayes posterior; not conformal or frequentist coverage",
+                    "version": "paired-task-gp/4"
+                  },
+                  "planning_event_cutoff": 5,
+                  "planning_seconds": 89.42548239999451,
+                  "round_id": 1,
+                  "training_actions": []
+                },
+                "event_ref": {
+                  "event_type": "round_started",
+                  "log_id": "0095c1832d4cf0834f09ac0a3713da592f5b34403fde02ffb422fe0fbf3ddc6b",
+                  "sequence": 6
+                },
+                "kind": "round_started",
+                "sequence": 6
+              },
+              {
+                "at": "2026-10-20T18:15:29.274773+00:00",
+                "body": {
+                  "candidate_id": "fixture-1",
+                  "decision": {
+                    "batch_scaffold_penalty": 0.0,
+                    "model_hash": "56cda25586ed155b2c0709cd3c7ec3b15092067b45fd9ffe39eca317985e315d",
+                    "objective_mean": 0.0,
+                    "objective_sd": 1.0,
+                    "objective_variance_reduction": 0.9900990099009901,
+                    "planning_event_cutoff": 5,
+                    "policy": "cost_only",
+                    "quoted_cost": 1,
+                    "reason": "objective-bootstrap",
+                    "score": 1000000000001.0,
+                    "tie_break": 0.5442292252959519,
+                    "validity_probability": 1.0
+                  },
+                  "endpoint_id": "toy",
+                  "id": "69e01b34914046018f5fcf4c751932c5",
+                  "replicate": 0,
+                  "reserved_cost": 1,
+                  "round_id": 1
+                },
+                "event_ref": {
+                  "event_type": "action_reserved",
+                  "log_id": "0095c1832d4cf0834f09ac0a3713da592f5b34403fde02ffb422fe0fbf3ddc6b",
+                  "sequence": 7
+                },
+                "kind": "action_reserved",
+                "sequence": 7
+              },
+              {
+                "at": "2026-10-20T18:15:29.295794+00:00",
+                "body": {
+                  "action_id": "69e01b34914046018f5fcf4c751932c5"
+                },
+                "event_ref": {
+                  "event_type": "action_started",
+                  "log_id": "0095c1832d4cf0834f09ac0a3713da592f5b34403fde02ffb422fe0fbf3ddc6b",
+                  "sequence": 8
+                },
+                "kind": "action_started",
+                "sequence": 8
+              },
+              {
+                "at": "2026-10-20T18:15:29.315148+00:00",
+                "body": {
+                  "action_id": "69e01b34914046018f5fcf4c751932c5",
+                  "admitted": false,
+                  "result": {
+                    "candidate_id": "fixture-1",
+                    "checks": [
+                      {
+                        "code": "F_BUILD_INCOMPLETE",
+                        "detail": "deliberate engineering QC fault",
+                        "evaluable": true,
+                        "fired": true
+                      }
+                    ],
+                    "cost": 0.5,
+                    "endpoint_id": "toy",
+                    "provenance": {
+                      "authorization": null,
+                      "endpoint_protocol": "native-engineering/1",
+                      "fixture": true,
+                      "mode": "offline_replay",
+                      "physical_measurement": false
+                    },
+                    "status": "ok",
+                    "uncertainty": null,
+                    "units": "fixture-unit",
+                    "value": -11.0
+                  },
+                  "ruling": {
+                    "admission": "withheld",
+                    "blocking": [
+                      "F_BUILD_INCOMPLETE"
+                    ],
+                    "bounded": [],
+                    "notes": [
+                      "Withheld: F_BUILD_INCOMPLETE. These mean the number would be about something other than the molecule it is filed under, so using it as a label would move the screen's thresholds on evidence from a different species. Withholding costs one molecule's information; admitting costs a shift applied to every molecule after it."
+                    ],
+                    "parent_id": "fixture-1",
+                    "reproducible": true,
+                    "teaches": false,
+                    "unchecked": [],
+                    "unverifiable": [],
+                    "waived": []
+                  }
+                },
+                "event_ref": {
+                  "event_type": "action_resolved",
+                  "log_id": "0095c1832d4cf0834f09ac0a3713da592f5b34403fde02ffb422fe0fbf3ddc6b",
+                  "sequence": 9
+                },
+                "kind": "action_resolved",
+                "sequence": 9
+              },
+              {
+                "at": "2026-10-20T18:15:29.337732+00:00",
+                "body": {
+                  "actions": [
+                    "69e01b34914046018f5fcf4c751932c5"
+                  ],
+                  "admitted_total": 0,
+                  "balance": {
+                    "budget": 3,
+                    "remaining": 2.5,
+                    "reserved": 0,
+                    "spent": 0.5
+                  },
+                  "round_id": 1,
+                  "stop_reason": "ready"
+                },
+                "event_ref": {
+                  "event_type": "round_completed",
+                  "log_id": "0095c1832d4cf0834f09ac0a3713da592f5b34403fde02ffb422fe0fbf3ddc6b",
+                  "sequence": 10
+                },
+                "kind": "round_completed",
+                "sequence": 10
+              },
+              {
+                "at": "2026-10-20T18:15:50.219183+00:00",
+                "body": {
+                  "id": "methodversion-94d2245441e9ce5c86ac3318aa36ad052f48c1262ef7cb10f55518196acfcdff",
+                  "record": {
+                    "change_summary": "",
+                    "content_ref": {
+                      "manifest_path": "F:/life_healthy/integration/thin-harness-native-20261021/c_host/codex-methods/snapshots/receipt-review/etalon-bundle-manifest.json",
+                      "manifest_sha256": "7de1125e8e4e3c206f2e759ee61927a7748108d59988fc08f4a9bdee58fa006b"
+                    },
+                    "dependencies": {},
+                    "entrypoint": null,
+                    "evidence_refs": [],
+                    "name": "receipt-review",
+                    "parents": [],
+                    "roles": [
+                      "domain_skill"
+                    ],
+                    "schema": "etalon-method-version/1",
+                    "verification_basis": "content_verified"
+                  }
+                },
+                "event_ref": {
+                  "event_type": "research_recorded",
+                  "log_id": "0095c1832d4cf0834f09ac0a3713da592f5b34403fde02ffb422fe0fbf3ddc6b",
+                  "sequence": 11
+                },
+                "kind": "research_recorded",
+                "sequence": 11
+              },
+              {
+                "at": "2026-10-20T18:15:50.288496+00:00",
+                "body": {
+                  "id": "methodversion-fb61f1969f82885175f4aa5f58896bcf60896caf7580e64bbd35055cb75fc66f",
+                  "record": {
+                    "change_summary": "",
+                    "content_ref": {
+                      "manifest_path": "F:/life_healthy/integration/thin-harness-native-20261021/c_host/codex-methods/snapshots/cost-review/etalon-bundle-manifest.json",
+                      "manifest_sha256": "fbb1ca1963ee3ddc76f13232e1f9a2104a5300e1a2a3843cdf393d24c13d1c23"
+                    },
+                    "dependencies": {},
+                    "entrypoint": null,
+                    "evidence_refs": [],
+                    "name": "cost-review",
+                    "parents": [],
+                    "roles": [
+                      "domain_skill"
+                    ],
+                    "schema": "etalon-method-version/1",
+                    "verification_basis": "content_verified"
+                  }
+                },
+                "event_ref": {
+                  "event_type": "research_recorded",
+                  "log_id": "0095c1832d4cf0834f09ac0a3713da592f5b34403fde02ffb422fe0fbf3ddc6b",
+                  "sequence": 12
+                },
+                "kind": "research_recorded",
+                "sequence": 12
+              },
+              {
+                "at": "2026-10-20T18:15:58.386550+00:00",
+                "body": {
+                  "id": "methoduse-7fb2c18a2d8f79a33883a8fdcb98b1b4532cfec72c71fb398858e4ae3999eafd",
+                  "record": {
+                    "basis": "host_reported",
+                    "host_conditions": {
+                      "host": "codex",
+                      "model": null
+                    },
+                    "parents": [],
+                    "reason": "Replay returned ok=true but admitted=0; preserve 0.5 fixture-cost charge and stop at one round. Monetary and host cost unknown. No independent benefit evaluation.",
+                    "schema": "etalon-method-use/1",
+                    "selected_methods": [
+                      {
+                        "method_version_ref": "methodversion-94d2245441e9ce5c86ac3318aa36ad052f48c1262ef7cb10f55518196acfcdff",
+                        "scope": "Admission review only; optional candidate comparison not adopted because admitted=0."
+                      },
+                      {
+                        "method_version_ref": "methodversion-fb61f1969f82885175f4aa5f58896bcf60896caf7580e64bbd35055cb75fc66f",
+                        "scope": "Post-replay cost audit and bounded stopping consideration."
+                      }
+                    ],
+                    "subject_refs": [
+                      {
+                        "id": "synthetic-acceptance-replay-round-1",
+                        "kind": "request",
+                        "scope": "F:/life_healthy/integration/thin-harness-native-20261021/c_host/codex-methods/fixture.sqlite"
+                      }
+                    ],
+                    "trigger_event_ref": null,
+                    "usage_method_ref": null,
+                    "visible_evidence_refs": []
+                  }
+                },
+                "event_ref": {
+                  "event_type": "research_recorded",
+                  "log_id": "0095c1832d4cf0834f09ac0a3713da592f5b34403fde02ffb422fe0fbf3ddc6b",
+                  "sequence": 13
+                },
+                "kind": "research_recorded",
+                "sequence": 13
+              },
+              {
+                "at": "2026-10-20T18:21:25.769188+00:00",
+                "body": {
+                  "id": "methodversion-8d61881a39f7f5356e556e67d30faf937947a2ba86e698f18d16b9c3b58c3a76",
+                  "record": {
+                    "change_summary": "Revise original methodversion-94d2245441e9ce5c86ac3318aa36ad052f48c1262ef7cb10f55518196acfcdff (manifest 7de1125e8e4e3c206f2e759ee61927a7748108d59988fc08f4a9bdee58fa006b): separate replay return, admission, retained cost and runtime identity; add campaign event lookup. Based on existing action_resolved sequence 9 and round_completed sequence 10. Development diagnostic, no independent benefit claim.",
+                    "content_ref": {
+                      "manifest_path": "F:/life_healthy/integration/thin-harness-native-20261021/c_host/codex-revision/snapshots/revised-receipt-review/etalon-bundle-manifest.json",
+                      "manifest_sha256": "0d8090c65f60cad7970b9c51f6e6a0adfe13950f5aa2cbafd47410164a032880"
+                    },
+                    "dependencies": {},
+                    "entrypoint": null,
+                    "evidence_refs": [],
+                    "name": "receipt-review",
+                    "parents": [],
+                    "roles": [
+                      "domain_skill"
+                    ],
+                    "schema": "etalon-method-version/1",
+                    "verification_basis": "content_verified"
+                  }
+                },
+                "event_ref": {
+                  "event_type": "research_recorded",
+                  "log_id": "0095c1832d4cf0834f09ac0a3713da592f5b34403fde02ffb422fe0fbf3ddc6b",
+                  "sequence": 14
+                },
+                "kind": "research_recorded",
+                "sequence": 14
+              },
+              {
+                "at": "2026-10-20T18:21:37.855579+00:00",
+                "body": {
+                  "id": "methoduse-5f6e9ee30561bd31a8266633912550c72e3a64390f35bbcbdc74d5abde30c80a",
+                  "record": {
+                    "basis": "host_reported",
+                    "host_conditions": {
+                      "host": "codex",
+                      "model": null
+                    },
+                    "parents": [],
+                    "reason": "Actual adoption after observed fixture evidence: status=ok/value=-11 but admitted=false, QC withheld F_BUILD_INCOMPLETE; 0.5 fixture-cost retained, remaining 2.5, reserved 0. Action 69e01b34914046018f5fcf4c751932c5 is an offline campaign action; durable runtime handle unknown in evidence read. Stopped at read-only audit, no execution/replay/recovery. Already-seen synthetic evidence; no independent evaluation or improvement claim. Host/model price and monetary cost unknown. Errors retained: local Get-Content live manifest path missing; first method-version write returned ValueError nonempty text required (nonretryable), then simplified record succeeded. Local candidate absent from installed skill catalog but explicit bundle MCP read succeeded. Original snapshot and original version binding retained.",
+                    "schema": "etalon-method-use/1",
+                    "selected_methods": [
+                      {
+                        "method_version_ref": "methodversion-8d61881a39f7f5356e556e67d30faf937947a2ba86e698f18d16b9c3b58c3a76",
+                        "scope": "Read revised SKILL.md via ETALON MCP; applied admission/cost/identifier audit using existing campaign events 9 and 10 and active_status. Optional accepted-candidate comparison not adopted."
+                      }
+                    ],
+                    "subject_refs": [
+                      {
+                        "id": "receipt-review-revision-development-diagnostic-20261021",
+                        "kind": "request",
+                        "scope": "F:/life_healthy/integration/thin-harness-native-20261021/c_host/codex-revision/fixture.sqlite"
+                      }
+                    ],
+                    "trigger_event_ref": null,
+                    "usage_method_ref": null,
+                    "visible_evidence_refs": []
+                  }
+                },
+                "event_ref": {
+                  "event_type": "research_recorded",
+                  "log_id": "0095c1832d4cf0834f09ac0a3713da592f5b34403fde02ffb422fe0fbf3ddc6b",
+                  "sequence": 15
+                },
+                "kind": "research_recorded",
+                "sequence": 15
+              },
+              {
+                "at": "2026-10-20T18:53:30.818489+00:00",
+                "body": {
+                  "id": "methodversion-5f61d7cfe848ef7a3bdfa485702379ae5d9a10a0a0e369a7611575b53298a3fd",
+                  "record": {
+                    "change_summary": "Add explicit root-versus-derived structured provenance and partial-use audit guidance. Preserve historical parent unchanged. Development change, no independent improvement claim.",
+                    "content_ref": {
+                      "manifest_path": "F:/life_healthy/integration/thin-harness-functions-20261021/c/native-lineage/snapshots/derived-receipt-review/etalon-bundle-manifest.json",
+                      "manifest_sha256": "e3544b6b284ee4b1d37a1af3cb3ca9980429d61463c146535e7d26f93d586d13"
+                    },
+                    "dependencies": {},
+                    "entrypoint": null,
+                    "evidence_refs": [],
+                    "name": "receipt-review",
+                    "parents": [
+                      "methodversion-8d61881a39f7f5356e556e67d30faf937947a2ba86e698f18d16b9c3b58c3a76"
+                    ],
+                    "roles": [
+                      "domain_skill"
+                    ],
+                    "schema": "etalon-method-version/1",
+                    "verification_basis": "content_verified"
+                  }
+                },
+                "event_ref": {
+                  "event_type": "research_recorded",
+                  "log_id": "0095c1832d4cf0834f09ac0a3713da592f5b34403fde02ffb422fe0fbf3ddc6b",
+                  "sequence": 16
+                },
+                "kind": "research_recorded",
+                "sequence": 16
+              },
+              {
+                "at": "2026-10-20T18:53:30.870186+00:00",
+                "body": {
+                  "id": "methodversion-3a3dfc53517d90aff4643fa2b764bcc6c89eb8115733470f6547751d791ce43d",
+                  "record": {
+                    "change_summary": "New unrelated root convention for naming local audit notes; no benefit claim.",
+                    "content_ref": {
+                      "manifest_path": "F:/life_healthy/integration/thin-harness-functions-20261021/c/native-lineage/snapshots/audit-note-naming/etalon-bundle-manifest.json",
+                      "manifest_sha256": "6d8fcd3c4de5a52f498337c81b57cb9c5f17cb94d444f01f588fda60c51126d2"
+                    },
+                    "dependencies": {},
+                    "entrypoint": null,
+                    "evidence_refs": [],
+                    "name": "audit-note-naming",
+                    "parents": [],
+                    "roles": [
+                      "domain_skill"
+                    ],
+                    "schema": "etalon-method-version/1",
+                    "verification_basis": "content_verified"
+                  }
+                },
+                "event_ref": {
+                  "event_type": "research_recorded",
+                  "log_id": "0095c1832d4cf0834f09ac0a3713da592f5b34403fde02ffb422fe0fbf3ddc6b",
+                  "sequence": 17
+                },
+                "kind": "research_recorded",
+                "sequence": 17
+              }
+            ],
+            "has_more": false,
+            "log_id": "0095c1832d4cf0834f09ac0a3713da592f5b34403fde02ffb422fe0fbf3ddc6b",
+            "log_ref": {
+              "database": "F:\\life_healthy\\integration\\thin-harness-functions-20261021\\c\\native-lineage\\fixture.sqlite",
+              "kind": "campaign"
+            },
+            "next_cursor": {
+              "after_sequence": 17,
+              "log_id": "0095c1832d4cf0834f09ac0a3713da592f5b34403fde02ffb422fe0fbf3ddc6b"
+            },
+            "ok": true
+          }
+        },
+        {
+          "line": 38,
+          "tool": "etalon_method_read",
+          "arguments": {
+            "database": "F:/life_healthy/integration/thin-harness-functions-20261021/c/native-lineage/fixture.sqlite",
+            "record_id": "methodversion-3a3dfc53517d90aff4643fa2b764bcc6c89eb8115733470f6547751d791ce43d"
+          },
+          "error": null,
+          "result": {
+            "ok": true,
+            "record": {
+              "change_summary": "New unrelated root convention for naming local audit notes; no benefit claim.",
+              "content_ref": {
+                "manifest_path": "F:/life_healthy/integration/thin-harness-functions-20261021/c/native-lineage/snapshots/audit-note-naming/etalon-bundle-manifest.json",
+                "manifest_sha256": "6d8fcd3c4de5a52f498337c81b57cb9c5f17cb94d444f01f588fda60c51126d2"
+              },
+              "dependencies": {},
+              "entrypoint": null,
+              "evidence_refs": [],
+              "name": "audit-note-naming",
+              "parents": [],
+              "roles": [
+                "domain_skill"
+              ],
+              "schema": "etalon-method-version/1",
+              "verification_basis": "content_verified"
+            },
+            "record_id": "methodversion-3a3dfc53517d90aff4643fa2b764bcc6c89eb8115733470f6547751d791ce43d"
+          }
+        },
+        {
+          "line": 40,
+          "tool": "etalon_method_record",
+          "arguments": {
+            "database": "F:/life_healthy/integration/thin-harness-functions-20261021/c/native-lineage/fixture.sqlite",
+            "record": {
+              "schema": "etalon-method-use/1",
+              "subject_refs": [
+                {
+                  "kind": "request",
+                  "id": "native-lineage-readonly-audit-20261021",
+                  "scope": "F:/life_healthy/integration/thin-harness-functions-20261021/c/native-lineage/fixture.sqlite"
+                }
+              ],
+              "selected_methods": [
+                {
+                  "method_version_ref": "methodversion-5f61d7cfe848ef7a3bdfa485702379ae5d9a10a0a0e369a7611575b53298a3fd",
+                  "scope": "Actual partial use: read revised SKILL.md through native MCP; read derived MethodVersion back and verified exact structured parent edge; read committed campaign events and active_status for admission, cost and identifier audit. Optional candidate comparison not used."
+                }
+              ],
+              "basis": "host_reported",
+              "host_conditions": {
+                "host": "codex",
+                "model": null
+              },
+              "reason": "Read-only audit of already-seen engineering evidence: sequence 9 action 69e01b34914046018f5fcf4c751932c5 returned status=ok/value=-11 but admitted=false, withheld for F_BUILD_INCOMPLETE. Sequence 10 and current state retain spent=0.5 fixture-cost, remaining=2.5, reserved=0, admitted=0. Offline campaign action ID is not a durable runtime receipt; runtime handle unknown. Historical parent preserved with parents=[] and original content_ref; derived record has exact parent ID. Separate new unrelated root accepted with parents=[]. No execution/replay/recovery. No independent evaluation or benefit claim. Resolved host model, host and monetary cost unknown; no new scientific resource spend. No failures observed in this bounded demonstration; historical failures remain in copied records."
+            }
+          },
+          "error": null,
+          "result": {
+            "ok": true,
+            "record": {
+              "basis": "host_reported",
+              "host_conditions": {
+                "host": "codex",
+                "model": null
+              },
+              "parents": [],
+              "reason": "Read-only audit of already-seen engineering evidence: sequence 9 action 69e01b34914046018f5fcf4c751932c5 returned status=ok/value=-11 but admitted=false, withheld for F_BUILD_INCOMPLETE. Sequence 10 and current state retain spent=0.5 fixture-cost, remaining=2.5, reserved=0, admitted=0. Offline campaign action ID is not a durable runtime receipt; runtime handle unknown. Historical parent preserved with parents=[] and original content_ref; derived record has exact parent ID. Separate new unrelated root accepted with parents=[]. No execution/replay/recovery. No independent evaluation or benefit claim. Resolved host model, host and monetary cost unknown; no new scientific resource spend. No failures observed in this bounded demonstration; historical failures remain in copied records.",
+              "schema": "etalon-method-use/1",
+              "selected_methods": [
+                {
+                  "method_version_ref": "methodversion-5f61d7cfe848ef7a3bdfa485702379ae5d9a10a0a0e369a7611575b53298a3fd",
+                  "scope": "Actual partial use: read revised SKILL.md through native MCP; read derived MethodVersion back and verified exact structured parent edge; read committed campaign events and active_status for admission, cost and identifier audit. Optional candidate comparison not used."
+                }
+              ],
+              "subject_refs": [
+                {
+                  "id": "native-lineage-readonly-audit-20261021",
+                  "kind": "request",
+                  "scope": "F:/life_healthy/integration/thin-harness-functions-20261021/c/native-lineage/fixture.sqlite"
+                }
+              ],
+              "trigger_event_ref": null,
+              "usage_method_ref": null,
+              "visible_evidence_refs": []
+            },
+            "record_id": "methoduse-9bba1d249efe0d16feef44abe85a7399a11e5685572dee0f76d26604f0b16c12"
+          }
+        },
+        {
+          "line": 43,
+          "tool": "etalon_active_status",
+          "arguments": {
+            "database": "F:/life_healthy/integration/thin-harness-functions-20261021/c/native-lineage/fixture.sqlite"
+          },
+          "error": null,
+          "result": {
+            "ok": true,
+            "state": {
+              "admitted": 0,
+              "balance": {
+                "budget": 3,
+                "remaining": 2.5,
+                "reserved": 0,
+                "spent": 0.5
+              },
+              "candidates": 3,
+              "endpoints": [
+                {
+                  "cost": 1,
+                  "direction": "minimize",
+                  "id": "toy",
+                  "max_replicates": 1,
+                  "noise": 0.1,
+                  "prior_mean": 0.0,
+                  "prior_scale": 1.0,
+                  "protocol": "native-engineering/1",
+                  "quantity": "synthetic_score",
+                  "queryable": true,
+                  "requires_handoff": false,
+                  "target": "engineering",
+                  "units": "fixture-unit"
+                }
+              ],
+              "observations": 1,
+              "pending": [],
+              "rounds": [
+                {
+                  "actions": [
+                    "69e01b34914046018f5fcf4c751932c5"
+                  ],
+                  "admitted_total": 0,
+                  "balance": {
+                    "budget": 3,
+                    "remaining": 2.5,
+                    "reserved": 0,
+                    "spent": 0.5
+                  },
+                  "model": {
+                    "counts": {
+                      "toy": 0
+                    },
+                    "objective_correlations": {
+                      "toy": 1.0
+                    },
+                    "paired_molecules": {},
+                    "training_hash": "56cda25586ed155b2c0709cd3c7ec3b15092067b45fd9ffe39eca317985e315d",
+                    "training_size": 0,
+                    "uncertainty": "empirical Bayes posterior; not conformal or frequentist coverage",
+                    "version": "paired-task-gp/4"
+                  },
+                  "planning_event_cutoff": 5,
+                  "planning_seconds": 89.42548239999451,
+                  "round_id": 1,
+                  "status": "completed",
+                  "stop_reason": "ready",
+                  "training_actions": []
+                }
+              ],
+              "spec": {
+                "batch_size": 1,
+                "beta": 1.0,
+                "bootstrap": 2,
+                "budget": 3,
+                "calibration_fraction": 0.15,
+                "confirmation_reserve": 1,
+                "cost_unit": "fixture-cost",
+                "explore_fraction": 0.25,
+                "max_candidates": 5000,
+                "max_kg_candidates": 512,
+                "max_observations": 1500,
+                "objective": "toy",
+                "policy": "cost_only",
+                "representation": "synthetic/1",
+                "seed": 3,
+                "validity_mode": "local"
+              }
+            }
+          }
+        },
+        {
+          "line": 45,
+          "tool": "etalon_events_read",
+          "arguments": {
+            "log_ref": {
+              "kind": "campaign",
+              "database": "F:/life_healthy/integration/thin-harness-functions-20261021/c/native-lineage/fixture.sqlite"
+            },
+            "limit": 100
+          },
+          "error": null,
+          "result": {
+            "events": [
+              {
+                "at": "2026-10-20T18:13:59.764006+00:00",
+                "body": {
+                  "endpoints": [
+                    {
+                      "cost": 1,
+                      "direction": "minimize",
+                      "id": "toy",
+                      "max_replicates": 1,
+                      "noise": 0.1,
+                      "prior_mean": 0.0,
+                      "prior_scale": 1.0,
+                      "protocol": "native-engineering/1",
+                      "quantity": "synthetic_score",
+                      "queryable": true,
+                      "requires_handoff": false,
+                      "target": "engineering",
+                      "units": "fixture-unit"
+                    }
+                  ],
+                  "schema_version": 1,
+                  "spec": {
+                    "batch_size": 1,
+                    "beta": 1.0,
+                    "bootstrap": 2,
+                    "budget": 3,
+                    "calibration_fraction": 0.15,
+                    "confirmation_reserve": 1,
+                    "cost_unit": "fixture-cost",
+                    "explore_fraction": 0.25,
+                    "max_candidates": 5000,
+                    "max_kg_candidates": 512,
+                    "max_observations": 1500,
+                    "objective": "toy",
+                    "policy": "cost_only",
+                    "representation": "synthetic/1",
+                    "seed": 3,
+                    "validity_mode": "local"
+                  }
+                },
+                "event_ref": {
+                  "event_type": "configured",
+                  "log_id": "0095c1832d4cf0834f09ac0a3713da592f5b34403fde02ffb422fe0fbf3ddc6b",
+                  "sequence": 1
+                },
+                "kind": "configured",
+                "sequence": 1
+              },
+              {
+                "at": "2026-10-20T18:13:59.781932+00:00",
+                "body": {
+                  "name": "replay_manifest",
+                  "sha256": "65a778ffca97f2c0c065023e78ce175ee396b3b34da1a5f675d3a7d3b2a48a75"
+                },
+                "event_ref": {
+                  "event_type": "resource_bound",
+                  "log_id": "0095c1832d4cf0834f09ac0a3713da592f5b34403fde02ffb422fe0fbf3ddc6b",
+                  "sequence": 2
+                },
+                "kind": "resource_bound",
+                "sequence": 2
+              },
+              {
+                "at": "2026-10-20T18:13:59.802759+00:00",
+                "body": {
+                  "cheap_value": null,
+                  "features": [
+                    0.0
+                  ],
+                  "handoff": {},
+                  "id": "fixture-0",
+                  "scaffold": "",
+                  "smiles": "C",
+                  "source": "synthetic engineering; no chemistry claim"
+                },
+                "event_ref": {
+                  "event_type": "candidate_added",
+                  "log_id": "0095c1832d4cf0834f09ac0a3713da592f5b34403fde02ffb422fe0fbf3ddc6b",
+                  "sequence": 3
+                },
+                "kind": "candidate_added",
+                "sequence": 3
+              },
+              {
+                "at": "2026-10-20T18:13:59.803123+00:00",
+                "body": {
+                  "cheap_value": null,
+                  "features": [
+                    1.0
+                  ],
+                  "handoff": {},
+                  "id": "fixture-1",
+                  "scaffold": "",
+                  "smiles": "CC",
+                  "source": "synthetic engineering; no chemistry claim"
+                },
+                "event_ref": {
+                  "event_type": "candidate_added",
+                  "log_id": "0095c1832d4cf0834f09ac0a3713da592f5b34403fde02ffb422fe0fbf3ddc6b",
+                  "sequence": 4
+                },
+                "kind": "candidate_added",
+                "sequence": 4
+              },
+              {
+                "at": "2026-10-20T18:13:59.803191+00:00",
+                "body": {
+                  "cheap_value": null,
+                  "features": [
+                    2.0
+                  ],
+                  "handoff": {},
+                  "id": "fixture-2",
+                  "scaffold": "",
+                  "smiles": "CCC",
+                  "source": "synthetic engineering; no chemistry claim"
+                },
+                "event_ref": {
+                  "event_type": "candidate_added",
+                  "log_id": "0095c1832d4cf0834f09ac0a3713da592f5b34403fde02ffb422fe0fbf3ddc6b",
+                  "sequence": 5
+                },
+                "kind": "candidate_added",
+                "sequence": 5
+              },
+              {
+                "at": "2026-10-20T18:15:29.254214+00:00",
+                "body": {
+                  "model": {
+                    "counts": {
+                      "toy": 0
+                    },
+                    "objective_correlations": {
+                      "toy": 1.0
+                    },
+                    "paired_molecules": {},
+                    "training_hash": "56cda25586ed155b2c0709cd3c7ec3b15092067b45fd9ffe39eca317985e315d",
+                    "training_size": 0,
+                    "uncertainty": "empirical Bayes posterior; not conformal or frequentist coverage",
+                    "version": "paired-task-gp/4"
+                  },
+                  "planning_event_cutoff": 5,
+                  "planning_seconds": 89.42548239999451,
+                  "round_id": 1,
+                  "training_actions": []
+                },
+                "event_ref": {
+                  "event_type": "round_started",
+                  "log_id": "0095c1832d4cf0834f09ac0a3713da592f5b34403fde02ffb422fe0fbf3ddc6b",
+                  "sequence": 6
+                },
+                "kind": "round_started",
+                "sequence": 6
+              },
+              {
+                "at": "2026-10-20T18:15:29.274773+00:00",
+                "body": {
+                  "candidate_id": "fixture-1",
+                  "decision": {
+                    "batch_scaffold_penalty": 0.0,
+                    "model_hash": "56cda25586ed155b2c0709cd3c7ec3b15092067b45fd9ffe39eca317985e315d",
+                    "objective_mean": 0.0,
+                    "objective_sd": 1.0,
+                    "objective_variance_reduction": 0.9900990099009901,
+                    "planning_event_cutoff": 5,
+                    "policy": "cost_only",
+                    "quoted_cost": 1,
+                    "reason": "objective-bootstrap",
+                    "score": 1000000000001.0,
+                    "tie_break": 0.5442292252959519,
+                    "validity_probability": 1.0
+                  },
+                  "endpoint_id": "toy",
+                  "id": "69e01b34914046018f5fcf4c751932c5",
+                  "replicate": 0,
+                  "reserved_cost": 1,
+                  "round_id": 1
+                },
+                "event_ref": {
+                  "event_type": "action_reserved",
+                  "log_id": "0095c1832d4cf0834f09ac0a3713da592f5b34403fde02ffb422fe0fbf3ddc6b",
+                  "sequence": 7
+                },
+                "kind": "action_reserved",
+                "sequence": 7
+              },
+              {
+                "at": "2026-10-20T18:15:29.295794+00:00",
+                "body": {
+                  "action_id": "69e01b34914046018f5fcf4c751932c5"
+                },
+                "event_ref": {
+                  "event_type": "action_started",
+                  "log_id": "0095c1832d4cf0834f09ac0a3713da592f5b34403fde02ffb422fe0fbf3ddc6b",
+                  "sequence": 8
+                },
+                "kind": "action_started",
+                "sequence": 8
+              },
+              {
+                "at": "2026-10-20T18:15:29.315148+00:00",
+                "body": {
+                  "action_id": "69e01b34914046018f5fcf4c751932c5",
+                  "admitted": false,
+                  "result": {
+                    "candidate_id": "fixture-1",
+                    "checks": [
+                      {
+                        "code": "F_BUILD_INCOMPLETE",
+                        "detail": "deliberate engineering QC fault",
+                        "evaluable": true,
+                        "fired": true
+                      }
+                    ],
+                    "cost": 0.5,
+                    "endpoint_id": "toy",
+                    "provenance": {
+                      "authorization": null,
+                      "endpoint_protocol": "native-engineering/1",
+                      "fixture": true,
+                      "mode": "offline_replay",
+                      "physical_measurement": false
+                    },
+                    "status": "ok",
+                    "uncertainty": null,
+                    "units": "fixture-unit",
+                    "value": -11.0
+                  },
+                  "ruling": {
+                    "admission": "withheld",
+                    "blocking": [
+                      "F_BUILD_INCOMPLETE"
+                    ],
+                    "bounded": [],
+                    "notes": [
+                      "Withheld: F_BUILD_INCOMPLETE. These mean the number would be about something other than the molecule it is filed under, so using it as a label would move the screen's thresholds on evidence from a different species. Withholding costs one molecule's information; admitting costs a shift applied to every molecule after it."
+                    ],
+                    "parent_id": "fixture-1",
+                    "reproducible": true,
+                    "teaches": false,
+                    "unchecked": [],
+                    "unverifiable": [],
+                    "waived": []
+                  }
+                },
+                "event_ref": {
+                  "event_type": "action_resolved",
+                  "log_id": "0095c1832d4cf0834f09ac0a3713da592f5b34403fde02ffb422fe0fbf3ddc6b",
+                  "sequence": 9
+                },
+                "kind": "action_resolved",
+                "sequence": 9
+              },
+              {
+                "at": "2026-10-20T18:15:29.337732+00:00",
+                "body": {
+                  "actions": [
+                    "69e01b34914046018f5fcf4c751932c5"
+                  ],
+                  "admitted_total": 0,
+                  "balance": {
+                    "budget": 3,
+                    "remaining": 2.5,
+                    "reserved": 0,
+                    "spent": 0.5
+                  },
+                  "round_id": 1,
+                  "stop_reason": "ready"
+                },
+                "event_ref": {
+                  "event_type": "round_completed",
+                  "log_id": "0095c1832d4cf0834f09ac0a3713da592f5b34403fde02ffb422fe0fbf3ddc6b",
+                  "sequence": 10
+                },
+                "kind": "round_completed",
+                "sequence": 10
+              },
+              {
+                "at": "2026-10-20T18:15:50.219183+00:00",
+                "body": {
+                  "id": "methodversion-94d2245441e9ce5c86ac3318aa36ad052f48c1262ef7cb10f55518196acfcdff",
+                  "record": {
+                    "change_summary": "",
+                    "content_ref": {
+                      "manifest_path": "F:/life_healthy/integration/thin-harness-native-20261021/c_host/codex-methods/snapshots/receipt-review/etalon-bundle-manifest.json",
+                      "manifest_sha256": "7de1125e8e4e3c206f2e759ee61927a7748108d59988fc08f4a9bdee58fa006b"
+                    },
+                    "dependencies": {},
+                    "entrypoint": null,
+                    "evidence_refs": [],
+                    "name": "receipt-review",
+                    "parents": [],
+                    "roles": [
+                      "domain_skill"
+                    ],
+                    "schema": "etalon-method-version/1",
+                    "verification_basis": "content_verified"
+                  }
+                },
+                "event_ref": {
+                  "event_type": "research_recorded",
+                  "log_id": "0095c1832d4cf0834f09ac0a3713da592f5b34403fde02ffb422fe0fbf3ddc6b",
+                  "sequence": 11
+                },
+                "kind": "research_recorded",
+                "sequence": 11
+              },
+              {
+                "at": "2026-10-20T18:15:50.288496+00:00",
+                "body": {
+                  "id": "methodversion-fb61f1969f82885175f4aa5f58896bcf60896caf7580e64bbd35055cb75fc66f",
+                  "record": {
+                    "change_summary": "",
+                    "content_ref": {
+                      "manifest_path": "F:/life_healthy/integration/thin-harness-native-20261021/c_host/codex-methods/snapshots/cost-review/etalon-bundle-manifest.json",
+                      "manifest_sha256": "fbb1ca1963ee3ddc76f13232e1f9a2104a5300e1a2a3843cdf393d24c13d1c23"
+                    },
+                    "dependencies": {},
+                    "entrypoint": null,
+                    "evidence_refs": [],
+                    "name": "cost-review",
+                    "parents": [],
+                    "roles": [
+                      "domain_skill"
+                    ],
+                    "schema": "etalon-method-version/1",
+                    "verification_basis": "content_verified"
+                  }
+                },
+                "event_ref": {
+                  "event_type": "research_recorded",
+                  "log_id": "0095c1832d4cf0834f09ac0a3713da592f5b34403fde02ffb422fe0fbf3ddc6b",
+                  "sequence": 12
+                },
+                "kind": "research_recorded",
+                "sequence": 12
+              },
+              {
+                "at": "2026-10-20T18:15:58.386550+00:00",
+                "body": {
+                  "id": "methoduse-7fb2c18a2d8f79a33883a8fdcb98b1b4532cfec72c71fb398858e4ae3999eafd",
+                  "record": {
+                    "basis": "host_reported",
+                    "host_conditions": {
+                      "host": "codex",
+                      "model": null
+                    },
+                    "parents": [],
+                    "reason": "Replay returned ok=true but admitted=0; preserve 0.5 fixture-cost charge and stop at one round. Monetary and host cost unknown. No independent benefit evaluation.",
+                    "schema": "etalon-method-use/1",
+                    "selected_methods": [
+                      {
+                        "method_version_ref": "methodversion-94d2245441e9ce5c86ac3318aa36ad052f48c1262ef7cb10f55518196acfcdff",
+                        "scope": "Admission review only; optional candidate comparison not adopted because admitted=0."
+                      },
+                      {
+                        "method_version_ref": "methodversion-fb61f1969f82885175f4aa5f58896bcf60896caf7580e64bbd35055cb75fc66f",
+                        "scope": "Post-replay cost audit and bounded stopping consideration."
+                      }
+                    ],
+                    "subject_refs": [
+                      {
+                        "id": "synthetic-acceptance-replay-round-1",
+                        "kind": "request",
+                        "scope": "F:/life_healthy/integration/thin-harness-native-20261021/c_host/codex-methods/fixture.sqlite"
+                      }
+                    ],
+                    "trigger_event_ref": null,
+                    "usage_method_ref": null,
+                    "visible_evidence_refs": []
+                  }
+                },
+                "event_ref": {
+                  "event_type": "research_recorded",
+                  "log_id": "0095c1832d4cf0834f09ac0a3713da592f5b34403fde02ffb422fe0fbf3ddc6b",
+                  "sequence": 13
+                },
+                "kind": "research_recorded",
+                "sequence": 13
+              },
+              {
+                "at": "2026-10-20T18:21:25.769188+00:00",
+                "body": {
+                  "id": "methodversion-8d61881a39f7f5356e556e67d30faf937947a2ba86e698f18d16b9c3b58c3a76",
+                  "record": {
+                    "change_summary": "Revise original methodversion-94d2245441e9ce5c86ac3318aa36ad052f48c1262ef7cb10f55518196acfcdff (manifest 7de1125e8e4e3c206f2e759ee61927a7748108d59988fc08f4a9bdee58fa006b): separate replay return, admission, retained cost and runtime identity; add campaign event lookup. Based on existing action_resolved sequence 9 and round_completed sequence 10. Development diagnostic, no independent benefit claim.",
+                    "content_ref": {
+                      "manifest_path": "F:/life_healthy/integration/thin-harness-native-20261021/c_host/codex-revision/snapshots/revised-receipt-review/etalon-bundle-manifest.json",
+                      "manifest_sha256": "0d8090c65f60cad7970b9c51f6e6a0adfe13950f5aa2cbafd47410164a032880"
+                    },
+                    "dependencies": {},
+                    "entrypoint": null,
+                    "evidence_refs": [],
+                    "name": "receipt-review",
+                    "parents": [],
+                    "roles": [
+                      "domain_skill"
+                    ],
+                    "schema": "etalon-method-version/1",
+                    "verification_basis": "content_verified"
+                  }
+                },
+                "event_ref": {
+                  "event_type": "research_recorded",
+                  "log_id": "0095c1832d4cf0834f09ac0a3713da592f5b34403fde02ffb422fe0fbf3ddc6b",
+                  "sequence": 14
+                },
+                "kind": "research_recorded",
+                "sequence": 14
+              },
+              {
+                "at": "2026-10-20T18:21:37.855579+00:00",
+                "body": {
+                  "id": "methoduse-5f6e9ee30561bd31a8266633912550c72e3a64390f35bbcbdc74d5abde30c80a",
+                  "record": {
+                    "basis": "host_reported",
+                    "host_conditions": {
+                      "host": "codex",
+                      "model": null
+                    },
+                    "parents": [],
+                    "reason": "Actual adoption after observed fixture evidence: status=ok/value=-11 but admitted=false, QC withheld F_BUILD_INCOMPLETE; 0.5 fixture-cost retained, remaining 2.5, reserved 0. Action 69e01b34914046018f5fcf4c751932c5 is an offline campaign action; durable runtime handle unknown in evidence read. Stopped at read-only audit, no execution/replay/recovery. Already-seen synthetic evidence; no independent evaluation or improvement claim. Host/model price and monetary cost unknown. Errors retained: local Get-Content live manifest path missing; first method-version write returned ValueError nonempty text required (nonretryable), then simplified record succeeded. Local candidate absent from installed skill catalog but explicit bundle MCP read succeeded. Original snapshot and original version binding retained.",
+                    "schema": "etalon-method-use/1",
+                    "selected_methods": [
+                      {
+                        "method_version_ref": "methodversion-8d61881a39f7f5356e556e67d30faf937947a2ba86e698f18d16b9c3b58c3a76",
+                        "scope": "Read revised SKILL.md via ETALON MCP; applied admission/cost/identifier audit using existing campaign events 9 and 10 and active_status. Optional accepted-candidate comparison not adopted."
+                      }
+                    ],
+                    "subject_refs": [
+                      {
+                        "id": "receipt-review-revision-development-diagnostic-20261021",
+                        "kind": "request",
+                        "scope": "F:/life_healthy/integration/thin-harness-native-20261021/c_host/codex-revision/fixture.sqlite"
+                      }
+                    ],
+                    "trigger_event_ref": null,
+                    "usage_method_ref": null,
+                    "visible_evidence_refs": []
+                  }
+                },
+                "event_ref": {
+                  "event_type": "research_recorded",
+                  "log_id": "0095c1832d4cf0834f09ac0a3713da592f5b34403fde02ffb422fe0fbf3ddc6b",
+                  "sequence": 15
+                },
+                "kind": "research_recorded",
+                "sequence": 15
+              },
+              {
+                "at": "2026-10-20T18:53:30.818489+00:00",
+                "body": {
+                  "id": "methodversion-5f61d7cfe848ef7a3bdfa485702379ae5d9a10a0a0e369a7611575b53298a3fd",
+                  "record": {
+                    "change_summary": "Add explicit root-versus-derived structured provenance and partial-use audit guidance. Preserve historical parent unchanged. Development change, no independent improvement claim.",
+                    "content_ref": {
+                      "manifest_path": "F:/life_healthy/integration/thin-harness-functions-20261021/c/native-lineage/snapshots/derived-receipt-review/etalon-bundle-manifest.json",
+                      "manifest_sha256": "e3544b6b284ee4b1d37a1af3cb3ca9980429d61463c146535e7d26f93d586d13"
+                    },
+                    "dependencies": {},
+                    "entrypoint": null,
+                    "evidence_refs": [],
+                    "name": "receipt-review",
+                    "parents": [
+                      "methodversion-8d61881a39f7f5356e556e67d30faf937947a2ba86e698f18d16b9c3b58c3a76"
+                    ],
+                    "roles": [
+                      "domain_skill"
+                    ],
+                    "schema": "etalon-method-version/1",
+                    "verification_basis": "content_verified"
+                  }
+                },
+                "event_ref": {
+                  "event_type": "research_recorded",
+                  "log_id": "0095c1832d4cf0834f09ac0a3713da592f5b34403fde02ffb422fe0fbf3ddc6b",
+                  "sequence": 16
+                },
+                "kind": "research_recorded",
+                "sequence": 16
+              },
+              {
+                "at": "2026-10-20T18:53:30.870186+00:00",
+                "body": {
+                  "id": "methodversion-3a3dfc53517d90aff4643fa2b764bcc6c89eb8115733470f6547751d791ce43d",
+                  "record": {
+                    "change_summary": "New unrelated root convention for naming local audit notes; no benefit claim.",
+                    "content_ref": {
+                      "manifest_path": "F:/life_healthy/integration/thin-harness-functions-20261021/c/native-lineage/snapshots/audit-note-naming/etalon-bundle-manifest.json",
+                      "manifest_sha256": "6d8fcd3c4de5a52f498337c81b57cb9c5f17cb94d444f01f588fda60c51126d2"
+                    },
+                    "dependencies": {},
+                    "entrypoint": null,
+                    "evidence_refs": [],
+                    "name": "audit-note-naming",
+                    "parents": [],
+                    "roles": [
+                      "domain_skill"
+                    ],
+                    "schema": "etalon-method-version/1",
+                    "verification_basis": "content_verified"
+                  }
+                },
+                "event_ref": {
+                  "event_type": "research_recorded",
+                  "log_id": "0095c1832d4cf0834f09ac0a3713da592f5b34403fde02ffb422fe0fbf3ddc6b",
+                  "sequence": 17
+                },
+                "kind": "research_recorded",
+                "sequence": 17
+              },
+              {
+                "at": "2026-10-20T18:53:42.148630+00:00",
+                "body": {
+                  "id": "methoduse-9bba1d249efe0d16feef44abe85a7399a11e5685572dee0f76d26604f0b16c12",
+                  "record": {
+                    "basis": "host_reported",
+                    "host_conditions": {
+                      "host": "codex",
+                      "model": null
+                    },
+                    "parents": [],
+                    "reason": "Read-only audit of already-seen engineering evidence: sequence 9 action 69e01b34914046018f5fcf4c751932c5 returned status=ok/value=-11 but admitted=false, withheld for F_BUILD_INCOMPLETE. Sequence 10 and current state retain spent=0.5 fixture-cost, remaining=2.5, reserved=0, admitted=0. Offline campaign action ID is not a durable runtime receipt; runtime handle unknown. Historical parent preserved with parents=[] and original content_ref; derived record has exact parent ID. Separate new unrelated root accepted with parents=[]. No execution/replay/recovery. No independent evaluation or benefit claim. Resolved host model, host and monetary cost unknown; no new scientific resource spend. No failures observed in this bounded demonstration; historical failures remain in copied records.",
+                    "schema": "etalon-method-use/1",
+                    "selected_methods": [
+                      {
+                        "method_version_ref": "methodversion-5f61d7cfe848ef7a3bdfa485702379ae5d9a10a0a0e369a7611575b53298a3fd",
+                        "scope": "Actual partial use: read revised SKILL.md through native MCP; read derived MethodVersion back and verified exact structured parent edge; read committed campaign events and active_status for admission, cost and identifier audit. Optional candidate comparison not used."
+                      }
+                    ],
+                    "subject_refs": [
+                      {
+                        "id": "native-lineage-readonly-audit-20261021",
+                        "kind": "request",
+                        "scope": "F:/life_healthy/integration/thin-harness-functions-20261021/c/native-lineage/fixture.sqlite"
+                      }
+                    ],
+                    "trigger_event_ref": null,
+                    "usage_method_ref": null,
+                    "visible_evidence_refs": []
+                  }
+                },
+                "event_ref": {
+                  "event_type": "research_recorded",
+                  "log_id": "0095c1832d4cf0834f09ac0a3713da592f5b34403fde02ffb422fe0fbf3ddc6b",
+                  "sequence": 18
+                },
+                "kind": "research_recorded",
+                "sequence": 18
+              }
+            ],
+            "has_more": false,
+            "log_id": "0095c1832d4cf0834f09ac0a3713da592f5b34403fde02ffb422fe0fbf3ddc6b",
+            "log_ref": {
+              "database": "F:\\life_healthy\\integration\\thin-harness-functions-20261021\\c\\native-lineage\\fixture.sqlite",
+              "kind": "campaign"
+            },
+            "next_cursor": {
+              "after_sequence": 18,
+              "log_id": "0095c1832d4cf0834f09ac0a3713da592f5b34403fde02ffb422fe0fbf3ddc6b"
+            },
+            "ok": true
+          }
+        },
+        {
+          "line": 47,
+          "tool": "etalon_method_read",
+          "arguments": {
+            "database": "F:/life_healthy/integration/thin-harness-functions-20261021/c/native-lineage/fixture.sqlite",
+            "record_id": "methodversion-8d61881a39f7f5356e556e67d30faf937947a2ba86e698f18d16b9c3b58c3a76"
+          },
+          "error": null,
+          "result": {
+            "ok": true,
+            "record": {
+              "change_summary": "Revise original methodversion-94d2245441e9ce5c86ac3318aa36ad052f48c1262ef7cb10f55518196acfcdff (manifest 7de1125e8e4e3c206f2e759ee61927a7748108d59988fc08f4a9bdee58fa006b): separate replay return, admission, retained cost and runtime identity; add campaign event lookup. Based on existing action_resolved sequence 9 and round_completed sequence 10. Development diagnostic, no independent benefit claim.",
+              "content_ref": {
+                "manifest_path": "F:/life_healthy/integration/thin-harness-native-20261021/c_host/codex-revision/snapshots/revised-receipt-review/etalon-bundle-manifest.json",
+                "manifest_sha256": "0d8090c65f60cad7970b9c51f6e6a0adfe13950f5aa2cbafd47410164a032880"
+              },
+              "dependencies": {},
+              "entrypoint": null,
+              "evidence_refs": [],
+              "name": "receipt-review",
+              "parents": [],
+              "roles": [
+                "domain_skill"
+              ],
+              "schema": "etalon-method-version/1",
+              "verification_basis": "content_verified"
+            },
+            "record_id": "methodversion-8d61881a39f7f5356e556e67d30faf937947a2ba86e698f18d16b9c3b58c3a76"
+          }
+        },
+        {
+          "line": 49,
+          "tool": "etalon_method_read",
+          "arguments": {
+            "database": "F:/life_healthy/integration/thin-harness-functions-20261021/c/native-lineage/fixture.sqlite",
+            "record_id": "methoduse-9bba1d249efe0d16feef44abe85a7399a11e5685572dee0f76d26604f0b16c12"
+          },
+          "error": null,
+          "result": {
+            "ok": true,
+            "record": {
+              "basis": "host_reported",
+              "host_conditions": {
+                "host": "codex",
+                "model": null
+              },
+              "parents": [],
+              "reason": "Read-only audit of already-seen engineering evidence: sequence 9 action 69e01b34914046018f5fcf4c751932c5 returned status=ok/value=-11 but admitted=false, withheld for F_BUILD_INCOMPLETE. Sequence 10 and current state retain spent=0.5 fixture-cost, remaining=2.5, reserved=0, admitted=0. Offline campaign action ID is not a durable runtime receipt; runtime handle unknown. Historical parent preserved with parents=[] and original content_ref; derived record has exact parent ID. Separate new unrelated root accepted with parents=[]. No execution/replay/recovery. No independent evaluation or benefit claim. Resolved host model, host and monetary cost unknown; no new scientific resource spend. No failures observed in this bounded demonstration; historical failures remain in copied records.",
+              "schema": "etalon-method-use/1",
+              "selected_methods": [
+                {
+                  "method_version_ref": "methodversion-5f61d7cfe848ef7a3bdfa485702379ae5d9a10a0a0e369a7611575b53298a3fd",
+                  "scope": "Actual partial use: read revised SKILL.md through native MCP; read derived MethodVersion back and verified exact structured parent edge; read committed campaign events and active_status for admission, cost and identifier audit. Optional candidate comparison not used."
+                }
+              ],
+              "subject_refs": [
+                {
+                  "id": "native-lineage-readonly-audit-20261021",
+                  "kind": "request",
+                  "scope": "F:/life_healthy/integration/thin-harness-functions-20261021/c/native-lineage/fixture.sqlite"
+                }
+              ],
+              "trigger_event_ref": null,
+              "usage_method_ref": null,
+              "visible_evidence_refs": []
+            },
+            "record_id": "methoduse-9bba1d249efe0d16feef44abe85a7399a11e5685572dee0f76d26604f0b16c12"
+          }
+        }
+      ],
+      "usage": [
+        {
+          "input_tokens": 389364,
+          "cached_input_tokens": 344960,
+          "cache_write_input_tokens": 0,
+          "output_tokens": 3195,
+          "reasoning_output_tokens": 36
+        }
+      ],
+      "final_messages": [
+        "I\u2019ll inspect the task inputs and ETALON capabilities, preserve the parent record and bytes, then append and verify the bounded method demonstration through native MCP calls.",
+        "The native MCP confirms the fixed source and the historical parent\u2019s `parents=[]`. I\u2019m using the local receipt-review skill and adding guidance for declaring revisions with structured parent IDs while keeping `parents=[]` valid for new roots. The existing evidence shows a withheld result with 0.5 fixture-cost retained; it supports a read-only audit, not an improvement claim.",
+        "Both versions were appended and read back successfully: the revision has the exact parent ID in its `parents` array, and the unrelated root has `parents=[]`. The read-only audit is recorded as partial use. I\u2019ll now verify that the prior event prefix, campaign state, parent record and parent snapshot remain unchanged.",
+        "Completed through the fixed-source native ETALON MCP.\n\n- Added root-versus-derived guidance and saved a distinct revision with the exact existing parent ID in structured `parents`.\n- Appended an unrelated root with `parents=[]` and recorded actual partial use of the revision.\n- Verified the historical parent record and snapshot, prior event prefix, observations and budget remain unchanged. Exactly three method-provenance records were appended.\n\nNo independent improvement is established. Model identity and monetary cost remain unknown.\n\nDetails: [audit-2026-10-21.json](F:/life_healthy/integration/thin-harness-functions-20261021/c/native-lineage/audit-2026-10-21.json)."
+      ]
+    }
+  },
+  "monitor_before_after_byte_identical": true,
+  "lineage_prior_state_and_event_prefix_identical": true,
+  "lineage_appended_records": 3,
+  "old_metadata_rows_byte_identical": 7,
+  "historical_parent_and_original_database_unchanged": true,
+  "parent_and_new_complete_snapshots_verified": true,
+  "structured_parent_and_parentless_root_both_accepted": true,
+  "productivity_verdict": "failed actual 120s timeout; host stopped honestly without numeric result; any later retry separately labeled",
+  "monitor_verdict": "passed native read-only synthetic unknown fixture; no real process proof",
+  "lineage_verdict": "passed native structured parent append and root[], observed partial use host_reported; no independent gain",
+  "scientific_gain": "not_run"
+}

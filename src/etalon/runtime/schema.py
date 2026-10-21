@@ -87,7 +87,7 @@ def resolve(value: Any, outputs: Mapping[str, dict]) -> Any:
 def workflow(value: dict) -> dict:
     from etalon.runtime.operations import describe, validate_arguments
 
-    fields(value, {"schema", "objective", "nodes", "limits"}, {"controller", "max_seconds"})
+    fields(value, {"schema", "objective", "nodes", "limits"}, {"controller", "max_seconds", "action_request", "action_binding"})
     if value["schema"] != SCHEMA:
         raise ValueError(f"workflow schema must be {SCHEMA}")
     text(value["objective"], "objective")
@@ -120,6 +120,18 @@ def workflow(value: dict) -> dict:
         if not ready:
             raise ValueError("workflow contains a cycle or a dependency on an unknown node")
         available |= ready
+    if "action_request" in value or "action_binding" in value:
+        from etalon.runtime.api import _action_request, _check_method_refs
+        if "action_request" not in value or not isinstance(value.get("action_binding"), dict):
+            raise ValueError("action metadata requires both request and frozen binding")
+        action = _action_request(value["action_request"])
+        _check_method_refs(action)
+        if (len(nodes) != 1 or nodes[0]["id"] != "action" or nodes[0]["depends_on"]
+                or nodes[0]["operation"] != action["operation"]
+                or canonical(nodes[0]["arguments"]) != canonical(action["arguments"])
+                or nodes[0]["resources"] != action["limits"] or limits != action["limits"]
+                or max_seconds != action["max_seconds"]):
+            raise ValueError("action metadata differs from its single executable node")
     controller = value.get("controller", {"mode": "ordered"})
     fields(controller, {"mode"}, {"max_calls"})
     if controller["mode"] not in {"ordered", "advisor", "external"}:
@@ -129,4 +141,6 @@ def workflow(value: dict) -> dict:
 
 
 def plan_id(spec: dict, inputs: dict) -> str:
-    return digest({"spec": spec, "inputs": inputs})
+    # Attribution is durable metadata, not an executable input or a new dispatch identity.
+    semantic = {key: value for key, value in spec.items() if key != "action_request"}
+    return digest({"spec": semantic, "inputs": inputs})

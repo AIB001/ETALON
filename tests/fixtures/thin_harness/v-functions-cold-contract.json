@@ -1,0 +1,24 @@
+{
+  "schema": "v-discovered-cold-path-criteria/1",
+  "cause_evidence": "Native productivity 120s timeout plus independent I 20s MCP timeout; stack in scipy->numpy create_module on event loop. This fixes evidence-driven cold path, not all-platform numeric dependency health.",
+  "contracts": [
+    "HOST-01",
+    "INT-03",
+    "ACT-08",
+    "MET-04"
+  ],
+  "criteria": [
+    "Same Wilson definition and defaultconfidence .95; compare supported finite confidence grid to original scipy norm.isf with tight numerical tolerance",
+    "Tail nextafter(1,0) must not round transformed quantile probability to1; keep zero-success low exactly0/full-success high exactly1",
+    "Keep nonpositive trials and out-of-range success rejection; invalid/nonfinite confidence cannot fabricate reliable bounds",
+    "All-zero uniqueness retains retirement and unknown cost multiplier, not numeric zero spending",
+    "Fresh MCP process must answer actual generation_productivity without preloading numpy/scipy globally; following request still responds",
+    "New fixed source, native retry workspace and package get new hashes; old timeout and costs stay intact"
+  ],
+  "limits": [
+    "No full generation-strategy rewrite",
+    "No shared dependency upgrade",
+    "Pure-function test or warm pytest alone is insufficient",
+    "Independent gain remains not_run"
+  ]
+}

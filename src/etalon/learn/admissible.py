@@ -183,14 +183,39 @@ def rule(
             continue
         if not entry.fired:
             continue
+        # Every consequence named, and an unnamed one refused rather than blocked.
+        #
+        # This dispatch is the same four-way decision ``faults.preflight`` provides as
+        # ``blocking`` / ``waived_blocking`` / ``unverifiable`` / ``unchecked``, written out again
+        # here instead of delegating. The two agree today because ``Consequence`` has exactly three
+        # members -- and they disagree the moment it has four, in opposite directions:
+        # ``preflight.blocking`` tests ``is Consequence.WRONG_SUBJECT`` explicitly, so a new member
+        # is harmless there, while this used to end in a bare ``else`` and would withhold every
+        # measurement carrying it.
+        #
+        # Withholding is the safe direction and that is why it was written that way, but a silent
+        # policy change applied to every later molecule is not a safe default for a *new taxonomy
+        # member* nobody has thought about. ``postflight.blocking`` solves the same problem by
+        # delegating to preflight's with a docstring saying "deliberately the same function body";
+        # this cannot delegate, because it has to sort into four lists rather than filter one, so
+        # it names the third member and refuses a fourth the way it already refuses an unknown
+        # code.
         if fault.consequence is Consequence.UNVERIFIABLE:
             unverifiable.append(entry.code)
         elif fault.consequence is Consequence.WRONG_SIZE:
             bounded.append(entry.code)
-        elif entry.code in active:
-            waived.append(entry.code)
+        elif fault.consequence is Consequence.WRONG_SUBJECT:
+            if entry.code in active:
+                waived.append(entry.code)
+            else:
+                blocking.append(entry.code)
         else:
-            blocking.append(entry.code)
+            raise ValueError(
+                f"{entry.code} carries consequence {fault.consequence!r}, which this admission "
+                "rule has no branch for. A new Consequence member changes what may teach the "
+                "screen, and faults.preflight dispatches on the same enum -- update both "
+                "deliberately rather than letting one of them default."
+            )
 
     if measurement.expensive_value is None:
         blocking.append("NO_EXPENSIVE_VALUE")

@@ -1,21 +1,10 @@
-"""The throughput regime: calibrate the gates, authorize them, then sweep a pool through them.
+"""Composable panel calibration, batch operations, and monitoring.
 
-Every other module on this server assumes an expensive stage exists. These tools are for the campaign
-that has none -- a million generated molecules and a cascade, where no single measurement is worth
-authorising and the irreversible act is a threshold applied too many times to notice.
-
-The order is the argument, and it is shorter than the expensive-stage one:
-
-1. ``etalon_calibrate_gates`` -- screen a known-active panel and read what the funnel did to it. Free.
-2. ``etalon_authorize_gates`` -- mint the token, or be refused with the panel's own numbers. Free.
-3. ``etalon_sweep_admit`` / ``etalon_sweep_emit`` -- fill the pool, carve batches. Cheap.
-4. ``etalon_sweep_claim`` / ``etalon_sweep_record`` -- one batch's reservation and outcome. Free.
-5. ``etalon_sweep_recover`` -- resolve anything a crash left claimed. Free.
-6. ``etalon_sweep_status`` -- one reading, including whether the batches are comparable.
-
-Step 2 is the one that did not exist. A campaign that skips it gets a refusal at step 3 rather than an
-empty shortlist at the end, which is the entire point: MolCascade's shipped docking thresholds reject
-all eight molecules of a real SND1 panel, including both co-crystal ligands.
+Each tool answers a local question; the host can inspect an existing run, assess a
+panel, use an existing authorized gate, or stop without running every operation.
+Mutations that require a revision-bound gate still enforce that scientific constraint.
+Keeping those checks does not make generation, a funnel plan, or another skill a
+prerequisite for read-only diagnosis.
 """
 
 from __future__ import annotations
@@ -109,7 +98,7 @@ def register(mcp: Any) -> None:
             )
             for row in rows
         ]
-        screen = Screen(absolute_path(workspace, label="workspace"))
+        screen = Screen.open_existing(absolute_path(workspace, label="workspace"))
         result = screen.state(run_id)
         if result is None:
             return fail(
@@ -140,12 +129,23 @@ def register(mcp: Any) -> None:
         The refusal is the product. A token is minted only for a configuration that kept every known
         active, and the error otherwise names which ones it deleted.
 
-        Pass the returned ``gate`` object to every ``etalon_sweep_*`` call as ``gate_json``.
+        Pass the returned ``gate`` object verbatim to ``etalon_sweep_emit`` as ``gate_json``. To
+        one tool, not to every ``etalon_sweep_*`` call as this said: emit is the only one with a
+        ``gate_json`` parameter, because emit is where molecules become committed to a
+        configuration and the others operate on batches already carved.
 
         Args:
             lifetime_hours: 168 (seven days) by default -- a campaign's timescale. A configuration
                 does not drift on its own; what invalidates a calibration is a new panel member or a
                 rebuilt engine, and two of those are caught by digest rather than by time.
+
+        Note:
+            Seven days is the nominal lifetime and the practical one is shorter. Tokens are signed
+            under a per-process key unless ``ETALON_AUTHORITY_KEY`` is set in the server's
+            environment, so an MCP server restart invalidates every outstanding gate regardless of
+            ``expires_at`` -- and re-minting means re-screening the panel. The sibling
+            ``etalon_authorize_spend`` documents this for its 24-hour tokens; the longer lifetime
+            needs it more, not less.
         """
 
         from etalon.authority.gate import authorize_gate
@@ -159,7 +159,7 @@ def register(mcp: Any) -> None:
             PanelMember(str(r["parent_id"]), r["known_active"], str(r.get("evidence", "")))
             for r in rows
         ]
-        screen = Screen(absolute_path(workspace, label="workspace"))
+        screen = Screen.open_existing(absolute_path(workspace, label="workspace"))
         result = screen.state(run_id)
         if result is None:
             return fail("RunNotFound", f"no run {run_id!r}", hint="Screen the panel first.")
@@ -261,8 +261,34 @@ def register(mcp: Any) -> None:
                 yielded 6, 2 and 0 hits.
         """
 
+        from etalon.authority.grant import NotAuthorized
+
         sweep = _sweep(workspace, pool, ledger, gate_json=gate_json)
-        carved = sweep.emit(revision_id=revision_id, flush=bool(flush))
+        try:
+            carved = sweep.emit(revision_id=revision_id, flush=bool(flush))
+        except NotAuthorized as error:
+            # Caught here, with the token's own numbers, rather than left to the boundary. The
+            # boundary now classifies it correctly, but it cannot say *which* of the three causes
+            # fired, and the caller is holding the token that answers that: a revision that does
+            # not match the one it was minted for is a different mistake from a token that has
+            # expired, and they have different remedies.
+            return fail(
+                "NotAuthorized",
+                str(error),
+                hint=(
+                    "This is the refusal that stands between a calibration and a campaign's worth "
+                    "of GPU time. Compare revision_id against the gate's: if they differ, the "
+                    "cascade changed after it was calibrated and the batches would not be "
+                    "comparable. If they match, the token has expired or its signature does not "
+                    "verify -- re-screen the panel and call etalon_authorize_gates again. A token "
+                    "does not survive an MCP server restart unless ETALON_AUTHORITY_KEY is set."
+                ),
+                retryable=False,
+                requested_revision_id=revision_id,
+                gate_revision_id=None if sweep.gate is None else sweep.gate.revision_id,
+                gate_expires_at=None if sweep.gate is None else sweep.gate.expires_at,
+                gate_recall=None if sweep.gate is None else sweep.gate.recall,
+            )
         return ok(
             emitted=[batch.as_dict() for batch in carved],
             ready=sweep.ready(),
@@ -319,6 +345,26 @@ def register(mcp: Any) -> None:
                 "library_dir and library_path name two different files for one batch",
                 hint="Pass library_dir alone unless you need a specific file name.",
             )
+        # Refused before the claim, because a presence check needs nothing from the pool and the
+        # reservation is irrevocable once taken. Only ambiguity was checked here, so passing
+        # neither argument reserved the batch, left ``written`` at None, raised nothing, and
+        # returned ``ok(batch=..., library=None)``: a batch committed to a screener with no library
+        # to screen it, reported as success, with no pointer to etalon_sweep_recover. That is the
+        # exact state the LibraryNotWritten block below exists to warn about, reached by the one
+        # path that does not go through it.
+        if not library_dir.strip() and not library_path.strip():
+            return fail(
+                "NoLibraryRequested",
+                f"a claim for {batch_id} with neither library_dir nor library_path would reserve "
+                "the batch and write nothing to screen it",
+                hint=(
+                    "Pass library_dir: the batch's library is written inside it, named after its "
+                    "own bytes so two identical libraries are one cache key. Nothing has been "
+                    "reserved, so this call is safe to repeat with the argument."
+                ),
+                retryable=False,
+                batch_id=batch_id,
+            )
         sweep = _sweep(workspace, pool, ledger)
         batch = sweep.claim(batch_id, by=by)
         # The claim is committed from here on, so a failure writing the library leaves the batch
@@ -372,8 +418,22 @@ def register(mcp: Any) -> None:
         batch held 7,545 of them. Recording it as a failure would invite a retry of work that already
         did what it was asked.
 
-        Refuses a revision that disagrees with the one the batch was carved under -- the provenance
-        hole that 56 hand-recorded batches had.
+        **This no longer refuses a revision that disagrees with the one the batch was carved
+        under, and this docstring used to say it did.** The guard was removed from ``Sweep.record``
+        because it was unusable where it stood: a compiled revision covers the library as well as
+        the funnel, so a run's own digest is a function of which molecules were in it, and five
+        batches of one ALK2 campaign compiled to five digests from one unchanged config file. The
+        check refused all five, from inside ``recover``, so the exception left the supervisor's
+        tick and killed the process driving the campaign.
+
+        The guard did not disappear; it moved to the only place it can be performed, and that place
+        is not reachable from here. ``MolCascadeProcessScreening`` compiles the current config
+        against a fixed reference library before every batch and refuses to run one whose funnel is
+        not the campaign's -- a Python driver an MCP caller never touches. So an agent screening
+        through ``etalon_screen_submit`` has no revision check at all, and believing one is running
+        is worse than knowing there is none, because it is the reason not to add your own: compile
+        the cascade with ``etalon_screen_plan`` before each batch and compare ``revision_id``
+        yourself.
         """
 
         from etalon.boundary.screen import Screen
@@ -382,7 +442,9 @@ def register(mcp: Any) -> None:
         result = Screen(absolute_path(workspace, label="workspace")).state(run_id)
         if result is None:
             return fail("RunNotFound", f"no run {run_id!r}", hint="Check the run id.")
-        if result.status not in ("SUCCEEDED", "FAILED"):
+        from etalon.boundary.screen import TERMINAL_RUN_STATUSES
+
+        if result.status not in TERMINAL_RUN_STATUSES:
             return fail(
                 "NotTerminal",
                 f"run {run_id} is {result.status}; nothing to record yet",
@@ -440,10 +502,16 @@ def register(mcp: Any) -> None:
 
         An empty ``etalon_revisions`` beside recorded batches means those rows predate the column, not
         that they agree.
+
+        Reads an existing pool without creating a workspace, ledger, pool, or schema migration.
+        workspace and ledger remain absolute-path compatibility arguments; this query reads only pool.
         """
 
-        sweep = _sweep(workspace, pool, ledger)
-        return ok(sweep=sweep.state())
+        from etalon.campaign.sweep import read_sweep_status
+
+        absolute_path(workspace, label="workspace")
+        absolute_path(ledger, label="ledger")
+        return ok(sweep=read_sweep_status(absolute_path(pool, label="pool")))
 
     @mcp.tool()
     @tool(Cost.FREE)
@@ -458,9 +526,9 @@ def register(mcp: Any) -> None:
 
         from etalon.boundary.screen import Screen
 
-        return ok(
-            progress=Screen(absolute_path(workspace, label="workspace")).progress(run_id)
-        )
+        return ok(progress=Screen.read_progress(
+            absolute_path(workspace, label="workspace"), run_id
+        ))
 
     @mcp.tool()
     @tool(Cost.FREE)

@@ -1,5 +1,37 @@
 # ETALON 持久 CADD 执行层
 
+独立 PRISM v1 的 bounded 工程反馈另有显式客户端：`etalon.boundary.prism_v1.CLITransport`
+和 `etalon.active.prism.PrismV1Executor`，由 `examples/prism_round1.py` 注入 ActiveCampaign。
+它通过独立解释器的 `python -m prism.bridge` 使用 `etalon-prism-task/1`，不导入 PRISM，
+不使用 `asset/prism` 的版本清单。`examples/prism_round1_config.example.json` 提供完整配置模板；
+所有示例路径、哈希及姿势声明必须换成实际核验的输入。配置保留在具体运行目录。
+
+```bash
+PYTHONPATH=/absolute/etalon-snapshot/src:/absolute/prism-snapshot \
+  /absolute/active-env/bin/python /absolute/etalon-snapshot/examples/prism_round1.py \
+  --config /absolute/round1-config.json --workspace /absolute/new/feedback-run
+```
+
+本地及 SSH 传输都显式指定执行解释器、源码工作目录和请求目录。SSH `host` 使用已配置主机别名，
+路径必须是目标 POSIX 主机绝对路径；`map_input` 仅核验显式预先传输的文件映射，不隐式复制输入。
+driver 环境需 numpy/scipy，PRISM 工具和依赖来自其独立冻结环境；安装或升级不属于运行过程。
+
+提交前持久化 action/request，验证 SpendAuthorization、受体 SHA256、化学状态、姿势、输入与协议。
+继承的受体坐标系姿势可使用 `SUPPLIED_POSE` 并记录来源证据，受体哈希门槛与对接姿势相同；
+该标签本身不证明姿势来源或结合。客户端检查终态、全部关联身份、检查项和输入/输出产物哈希。
+断网、等待超时和待恢复状态抛出 `ExecutionPending`，保留原 action 与预留，不能作为新重复重试。
+再次运行同一 driver 会复用原 request；`--resume` 显式请求原任务恢复，并重新核验授权。
+
+计价单位固定为 `wall_second`：逐个 execution_id 累加已完成控制器执行的实测 wall_seconds，
+包含失败和恢复。线程数另记，乘积不声称为实测 CPU 秒。重复收据不重复计费，变更已有执行收据被拒绝。
+未决 action 继续保留完整预留，因此待恢复预算估计有意保守。损坏结果的已测成本仍记账，数值不准入。
+
+示例只有一个苯分子，最多执行两个独立 seed；`mean_residue_contacts` 为工程端点，非亲和力。
+`before.json`、`after-N.json`、`report.json` 和 `campaign.sqlite` 保存观测、训练 action ID、
+模型快照、选择与预算。最终仅规划第三次重复，且保存固定 action 历史下去除观测的规划对照；
+不强求候选排名改变。原有 `runtime/executors.py` 的 `kind=prism` 仍是旧 MM-PBSA 执行器，
+不能把其注册记录当作本独立 v1 工程客户端的验证证据。
+
 本模块把 MolQuarry、MolCascade 和 PRISM 接入同一任务生命周期：规划、提交、查询、取消、对账、读取产物，以及基于产物决定下一步。现有数据封存、分子身份、协议注册、受体绑定、科学准入和主动学习账本继续负责各自的事实。MCP 资源 `etalon://runtime` 提供本文；CLI 与 MCP 使用同一 Python 服务。
 
 [三模块审阅与改进](SCREENING_REVIEW.md) 记录新增搜索 skills、默认 dock–redock RMSD < 2.0 Å 策略、最终人口准入修复，以及文献依据和待验证的创新方向。redock 一致性不能等同于实验姿态准确性或结合活性；已有自定义筛选配置需要显式选择该组件。
@@ -69,12 +101,40 @@ python -m etalon workflow artifact --workspace /absolute/new/runtime-demo --job-
 
 `data.acquire` 复用现有请求协议，覆盖查询、目标证据、目录导入/搜索、下载、结构 bundle、sourcing。`needs_target_resolution` 等状态不能被当作完整获取；允许 partial 必须明示，且不能免除目标身份或科学审阅。标准化默认至少需要一条候选，active 默认至少需要一条新准入观测。
 
-Executor 采用 `etalon-executor/1`，仅提供 `molcascade` 和 `prism` 两种实现。先 prepare 得到不可变配置、协议与 endpoint，再用返回的 endpoint 创建 campaign。已有 campaign 使用 register，要求 endpoint 完全匹配。相同记录重复注册幂等；修改协议需使用新 endpoint。配置摘要绑定科学输入内容及资产身份，派发前再次验证。
+Executor 采用 `etalon-executor/1`，提供 `molcascade`、旧 `prism` 和独立 `prism_bridge_v1`。先 prepare 得到不可变配置、协议与 endpoint，再用返回的 endpoint 创建 campaign。已有 campaign 使用 register，要求 endpoint 完全匹配。相同记录重复注册幂等；修改协议需使用新 endpoint。配置摘要绑定科学输入内容及资产身份，派发前再次验证。
 
 | executor | 配置 | 实际范围 |
 |---|---|---|
 | `molcascade` | `cascade`、`readout`，可选 `files` | readout 明确 `stage_id`、`contract_id`、`value_column`；复用可组合组件协议，无强制默认筛选层级 |
 | `prism` | 绝对 `receptor_path`、环境 `python`、`production_ns`；可选 `timeout_per_molecule` | 固定 MM-PBSA、kcal/mol、minimize、受体绑定 handoff、单次 readout |
+| `prism_bridge_v1` | `request_template`、`transport`、`job_root`、`receptor_path`、`seeds`；可选 `poll_seconds`、`wait_seconds` | 独立 v1、固定苯模板、mean_residue_contacts/count、wall_second；每 campaign 一个模板 |
+
+新 bridge 的配置复用 `examples/prism_round1_config.example.json` 中对应字段，外层仍是
+`{kind,configuration,endpoint}`。prepare 只读取输入、解释器和独立 PRISM 源码树指纹；不会运行模拟。
+本地/SSH 仍使用显式路径映射。注册要求 campaign 的 `cost_unit=wall_second`；派发前检查冻结配置，
+非模板候选和无授权 seed 返回 unsupported。可导入多个设计分子，不代表该 bridge 能模拟它们。
+运行中断时保留同一 action/request 和两层预留；runtime reconcile 对已确认的 job 只调用 status/result，
+不提交或恢复计算。提交回执丢失且无法确定 job 时继续保留未决状态，不猜测失败或创建新 action。
+
+设计来源导入入口：`python -m etalon design check --bundle /absolute/bundle.json`、
+`design import --bundle /absolute/bundle.json --database /absolute/campaign.sqlite`、
+`design index --database /absolute/campaign.sqlite`。也可在 workflow 注册 `design.import` 节点，
+参数为 `database,bundle_path` 和可选 `mode`。验证依赖 `.[design]` 的 jsonschema；
+默认 `pool` 模式复用已有分子特征实现和 `MOLECULAR_REPRESENTATION`（依赖 `.[cascade,active]`）。
+其他表示可显式使用 `--mode index_only`，只保存身份、姿势与诊断，不编造特征或改写现有表示。
+
+消费端固定 `prism-design-candidate-bundle/1` 的生产端 schema SHA256，校验所有相对引用、
+哈希/大小、分层身份、来源槽位分母、raw→processed 关系和准入状态。分子去重与状态/pose/来源动作
+分别保存；未知、未评估和拒绝项保留原始原因及记录引用。氢化不解除 protonation unresolved，
+导入不生成观测、费用或自动 handoff，`readiness.md` 仍为 unsupported。旧 generation.read_chunk
+和旧 manifest 路径保持原语义，不能作为完整 bundle 导入。
+
+`examples/validate_round2.py` 在新 SQLite 副本中注册 bridge，通过正式 `recover_bridge_action`
+两次读取每个第一轮 job 的 status/result。旧账本缺失 runtime 授权收据时，仅从原观测 provenance
+逐项核对并原样回填到副本；报告明确这是历史兼容重放，未签发新授权，也不是新 runtime 任务。
+脚本随后用公开四槽位夹具验证 index_only，并在独立分子表示数据库上两次调用公共
+`python -m etalon design import --mode pool`，检查一分子、两姿势、四槽位和零观测/费用。
+它禁止 submit/resume，记录命令、实际解释器与模块路径；不会启动新模拟、生成或训练。
 
 PRISM 会调用原有构建/模拟路径，需外部 GROMACS/AmberTools 等环境和真实亲和力结果。平衡完成或程序退出码 0 不会生成虚构 binding energy。当前 executor 不覆盖完整 FEP 编排，也不提供多个独立 replica；其统计可靠性仍受现有科学检查约束。MolQuarry 的构象或结构文件不能自动冒充模拟受体坐标系中的 docked pose。
 
@@ -156,3 +216,28 @@ worker 通过数据库 epoch 和本机锁取得唯一任务执行权；心跳约
 | [Temporal activity idempotency](https://docs.temporal.io/activity-definition#idempotency)、[heartbeat](https://docs.temporal.io/encyclopedia/detecting-activity-failures#activity-heartbeat) | 持久控制流不能自动消除外部副作用重复；取消需执行端配合 | 科学 child 身份、持久取消、先对账再恢复、未知支出不归零 |
 
 因此当前 ETALON 的优势是 CADD 专用的证据、身份、预算和恢复约束；相对 STELLA 的通用工具扩展与策略迁移仍有限。下一步扩展远程调度、独立 replica/FEP、实际 GPU 计费或模板学习时，应各自增加操作契约、来源记录和故障验证，继续使用现有科学准入层。
+
+
+## 单动作宿主入口
+
+`runtime.api.prepare_action(request)`、`submit_action(request, workspace=..., plan_id=...)`、
+`read_action_result(handle)` 将一个 `etalon-action/1` 请求映射为原 runtime 的单节点作业。
+`active.evaluate` 只需 `database/candidate_id/endpoint_id`；宿主选择不调用 GP 或强制 skill。
+数值入口 `active.run` 保留。两条路径共用 reserve、授权、executor、恢复收据 observer、resolve；
+confirmation_reserve 是 campaign 已承诺的预算，在宿主选用路径仍然生效。
+
+先按 workspace/request_id 查原记录，再检查新派发条件；余额下降不改变原任务身份。
+plan_id 排除 request_id、method_use_refs、evidence_refs，但绑定参数、额度、候选、端点、执行器和不可变文件。
+迟到归因追加 MethodUse，重放返回原归因。非空方法引用为同 campaign 字符串 ID，或
+`{"database": "absolute path", "record_id": "method-use-..."}`；均核对实际 MethodUse。
+
+CLI 同源入口为 `etalon action prepare|submit|result|events --config <JSON>`；submit 另给
+`--workspace/--plan-id`，events 支持 `--after-sequence` 或 `--cursor <JSON>`。
+事件日志引用为 `{"kind":"campaign","database":"absolute path"}` 或
+`{"kind":"runtime","workspace":"absolute path","job_id":"optional"}`；返回的 next_cursor
+含 `log_id/after_sequence`，跨日志拒绝，空页后仍可读取新事件。普通 hook 在提交后消费，observer 仍专属恢复。
+
+结果执行、verification.state、observations.admission 分开；费用引用 CampaignStore，runtime 同源汇总
+标 additive=false。未知结果保留费用与预留；结果读取、reconcile 不自动重派。
+当前 detached worker 依赖 Linux `/proc` 身份和 POSIX 锁，Windows prepare 返回明确能力限制；
+本地 fixture 的 in-process worker 测试不证明 Windows 后台作业、真实 PRISM 或真实宿主调用。

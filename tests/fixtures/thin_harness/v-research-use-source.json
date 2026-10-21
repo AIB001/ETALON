@@ -1,0 +1,29 @@
+{
+  "status": "passed",
+  "fixed_source_sha256": "cd99711db238f5c57c1927cc40ff520da7f8a25cd6f798c3002a7a2059c30d5c",
+  "fixed_source_files": 1183,
+  "protected_total": 209,
+  "protected_unchanged": 207,
+  "intentional_changes": {
+    "src/etalon/research/README.md": {
+      "baseline": "da3b8c98b09f516dcef4c01c12994f1ff2c1fd10b6b211c09ae310bb30e007d8",
+      "current": "1a0cc0533afd5ed2fb4ed1cb3fc52f1b7be81c9fe1faae121203899191630aa8"
+    },
+    "src/etalon/research/runtime.py": {
+      "baseline": "c76a8c93158e05a63ceb723c5fe0520671310fddd7c64ad3c06cd2130f08a38a",
+      "current": "bea93bae34be98dc6c83b4f9f957e500bf0c81a4a73c8b5c71d522bff69e8cd9"
+    }
+  },
+  "production_files_verified": 926,
+  "independent_cases": [
+    "test_v_replay_checks_distinct_original_model_and_resource_not_only_observation[model]",
+    "test_v_replay_checks_distinct_original_model_and_resource_not_only_observation[resource]",
+    "test_v_unequal_group_sizes_have_equal_mass_without_claiming_independent_rows",
+    "test_v_existing_resource_role_rejects_program_atomically_even_with_good_model_evidence",
+    "test_v_feedback_can_return_future_query_but_never_dispatch_or_compile_it"
+  ],
+  "independent_tests": "5 passed / 2.48s, first attempt",
+  "runtime_review": "Only declared bindings/readout/type/stop guards and revalidation of saved model and reused resource artifacts; old signatures and categorical str(value) semantics retained. Undeclared scientific identities remain outside this interface.",
+  "algorithm_preservation": "empirical_model/calibration/diagnostics bytes unchanged",
+  "scope": "engineering fixture and raw baseline failures; no new scientific execution"
+}

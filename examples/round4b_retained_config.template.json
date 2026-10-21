@@ -1,0 +1,117 @@
+{
+  "schema": "etalon-r4b-retained-baseline-config/1",
+  "scope": "TEMPLATE: replace preparation admission IDs after real prepare; root reviews and freezes this file",
+  "strategy": "retained_baseline_due_insufficient_intervention_support",
+  "evaluation_cost_weight": 0.001,
+  "protocol_sha256": "c1a55edb3b403e68438f34af9c0afc45852ee319506be39032ac716c9f773e66",
+  "input_freeze_sha256": "9ef521f2dca94e459fa440aa48435e9cf5bf787317d09da37831e95909ff21ca",
+  "split": {
+    "tasks": {
+      "mcl1": {
+        "role": "train",
+        "family": "bcl2",
+        "group": "bcl2"
+      },
+      "thrombin": {
+        "role": "train",
+        "family": "trypsin_like_serine_protease",
+        "group": "trypsin_like_serine_protease"
+      },
+      "ptp1b": {
+        "role": "train",
+        "family": "protein_tyrosine_phosphatase",
+        "group": "protein_tyrosine_phosphatase"
+      },
+      "eg5": {
+        "role": "calibration",
+        "family": "kinesin",
+        "group": "kinesin"
+      },
+      "pfkfb3": {
+        "role": "calibration",
+        "family": "pfkfb",
+        "group": "pfkfb"
+      },
+      "pde2": {
+        "role": "calibration",
+        "family": "cyclic_nucleotide_pde",
+        "group": "cyclic_nucleotide_pde"
+      },
+      "cdk2": {
+        "role": "train",
+        "family": "protein_kinase",
+        "group": "protein_kinase"
+      },
+      "tnks2": {
+        "role": "train",
+        "family": "parp",
+        "group": "parp"
+      },
+      "hif2a": {
+        "role": "train",
+        "family": "pas_domain",
+        "group": "pas_domain"
+      },
+      "ca2": {
+        "role": "test",
+        "family": "alpha_carbonic_anhydrase",
+        "group": "alpha_carbonic_anhydrase"
+      },
+      "ar": {
+        "role": "test",
+        "family": "aldo_keto_reductase",
+        "group": "aldo_keto_reductase"
+      },
+      "mmp12": {
+        "role": "test",
+        "family": "matrix_metallopeptidase",
+        "group": "matrix_metallopeptidase"
+      }
+    },
+    "grouping_evidence": "coordinator round4b INPUT_POLICY.md + frozen sequence/ECFP4 audit; old nine groups are seen",
+    "protocol_sha256": "c1a55edb3b403e68438f34af9c0afc45852ee319506be39032ac716c9f773e66"
+  },
+  "preparation_admissions": {
+    "ar": {
+      "p0": "TO_BE_ADMITTED_ar_p0",
+      "p1": "TO_BE_ADMITTED_ar_p1"
+    },
+    "ca2": {
+      "p0": "TO_BE_ADMITTED_ca2_p0",
+      "p1": "TO_BE_ADMITTED_ca2_p1"
+    },
+    "cdk2": {
+      "p1": "TO_BE_ADMITTED_cdk2_p1"
+    },
+    "eg5": {
+      "p1": "TO_BE_ADMITTED_eg5_p1"
+    },
+    "hif2a": {
+      "p0": "TO_BE_ADMITTED_hif2a_p0",
+      "p1": "TO_BE_ADMITTED_hif2a_p1"
+    },
+    "mcl1": {
+      "p1": "TO_BE_ADMITTED_mcl1_p1"
+    },
+    "mmp12": {
+      "p0": "TO_BE_ADMITTED_mmp12_p0",
+      "p1": "TO_BE_ADMITTED_mmp12_p1"
+    },
+    "pde2": {
+      "p1": "TO_BE_ADMITTED_pde2_p1"
+    },
+    "pfkfb3": {
+      "p1": "TO_BE_ADMITTED_pfkfb3_p1"
+    },
+    "ptp1b": {
+      "p1": "TO_BE_ADMITTED_ptp1b_p1"
+    },
+    "thrombin": {
+      "p1": "TO_BE_ADMITTED_thrombin_p1"
+    },
+    "tnks2": {
+      "p1": "TO_BE_ADMITTED_tnks2_p1"
+    }
+  },
+  "baseline_admissions": {}
+}

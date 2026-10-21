@@ -2094,7 +2094,9 @@ def _shard_counts(
         return None
     if stage.status in {StageRunStatus.SUCCEEDED, StageRunStatus.CACHED}:
         return None
-    complete, total = count_completed_shards(checkpoints_root / stage.cache_key)
+    from molcascade.runtime.cache import checkpoint_directory_name
+
+    complete, total = count_completed_shards(checkpoints_root / checkpoint_directory_name(stage.cache_key))
     return (complete, total) if total else None
 
 

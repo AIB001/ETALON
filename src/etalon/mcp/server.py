@@ -1,102 +1,63 @@
-"""Assemble ETALON's MCP server, and serve the workflow a model needs to drive it.
+"""Serve domain tools and optional capability resources over stdio.
 
-Run it as ``python -m etalon.mcp`` over stdio.
-
-Two halves. The tools are the surface a model acts through, and they are classified by what they
-spend so the classification is visible before a choice rather than after it. The resources are the
-documents a model should read first: the campaign workflow, and the findings the workflow's decisions
-rest on.
-
-Serving the workflow as a resource rather than trusting it to a system prompt is deliberate. A model
-driving 750,000 molecules through five tiers makes decisions whose justification lives in
-measurements -- that one MM-PBSA trajectory is not reproducible to 12 kcal/mol, that 110 of 120 pairs
-in a diverse shortlist are not alchemical edges, that eight engineer-hours can equal a GPU-year -- and
-a workflow summarised from memory loses exactly those numbers. The resource is the same file the
-Claude Code skill uses, so a model reaching ETALON through either path reads the same procedure.
+The host owns research decisions. Tool registration and cost discovery share a
+single path; skills, references and short host guidance are loaded on demand.
 """
 
 from __future__ import annotations
 
 import json
+import inspect
 from pathlib import Path
 from typing import Any
 
 from etalon.mcp._common import Cost, require_mcp
+from etalon.skills import ROLE_PATH, bundle_root, catalog, read_member
+from etalon.skills import WORKFLOWS as WORKFLOWS  # Preserve the public catalog import.
 
-#: The skill, shipped inside the package so an installed ETALON serves the same text the repository's
-#: .claude/skills directory holds. Kept as one file with one copy on disk; see ``_skill_path``.
+#: Stable entrypoint URI. Full capability bundles also ship in installed wheels.
 SKILL_RESOURCE = "etalon://skills/campaign"
 RUNTIME_RESOURCE = "etalon://runtime"
 
 
-#: Every workflow document this server exposes, by the slug in its resource URI.
-#:
-#: One document, two consumers: a Claude Code skill reads ``.claude/skills/<name>/SKILL.md`` and an MCP
-#: client reads ``etalon://skills/<slug>``. A second copy would drift, so both read the same file.
-#:
-#: ``campaign`` is the expensive-stage regime. ``sweep`` is the throughput regime, and it exists as a
-#: separate document rather than a section because the two share almost no tools: a campaign with no
-#: simulation stage takes none of the paths ``campaign`` guards, and a reader given both at once has to
-#: work out which half applies before doing anything.
-WORKFLOWS: dict[str, str] = {
-    "campaign": "etalon-campaign",
-    "sweep": "etalon-screening-sweep",
-    "gate-calibration": "etalon-gate-calibration",
-    "generation-planning": "etalon-generation-planning",
-    "monitoring": "etalon-campaign-monitoring",
-    "install": "etalon-install",
-}
-
-
 def _skill_path(slug: str = "campaign") -> Path:
-    """Where a workflow document lives, preferring the repository copy when running from it."""
+    """Compatibility accessor for the entrypoint of a complete capability bundle."""
+    return bundle_root(slug) / "SKILL.md"
 
-    if slug not in WORKFLOWS:
-        raise KeyError(f"no such workflow {slug!r}; known: {sorted(WORKFLOWS)}")
-    name = WORKFLOWS[slug]
-    here = Path(__file__).resolve()
-    repository = here.parents[3] / ".claude" / "skills" / name / "SKILL.md"
-    if repository.is_file():
-        return repository
-    installed = here.parent / "skills" / f"{slug}.md"
-    if installed.is_file():
-        return installed
-    raise FileNotFoundError(
-        f"no workflow document for {slug!r}. It should be at .claude/skills/{name}/SKILL.md in the "
-        f"repository, or packaged at etalon/mcp/skills/{slug}.md."
-    )
+
+def tool_modules() -> tuple[Any, ...]:
+    """One module source for registration, cost discovery and compatibility clients."""
+    from etalon.mcp import active, data, evidence, execution, governance, host, methods, planning, runtime, sweep
+
+    return (planning, governance, active, execution, data, runtime, sweep, host, methods, evidence)
+
+
+def register_tools(server: Any) -> None:
+    """One registration path for the actual server and its cost index."""
+    for module in tool_modules():
+        module.register(server)
 
 
 def build() -> Any:
     """Construct the server with every tool and resource registered."""
 
-    from etalon.mcp import active, data, execution, governance, planning, runtime, sweep
-
     server_class = require_mcp()
     mcp = server_class("etalon")
-
-    planning.register(mcp)
-    governance.register(mcp)
-    active.register(mcp)
-    execution.register(mcp)
-    data.register(mcp)
-    runtime.register(mcp)
-    sweep.register(mcp)
+    register_tools(mcp)
 
     @mcp.resource("etalon://skills/molquarry")
     def molquarry_workflows() -> str:
         """Discover all pinned acquisition workflows and their reference resource URIs."""
-        from etalon.boundary.infra import load
-
-        load("molquarry")
-        from molquarry.skills import list_skills
-
         rows = []
-        for entry in list_skills()["skills"]:
+        for entry in catalog(skills=sorted(slug for slug in WORKFLOWS
+                                          if slug.startswith("molquarry-")))["skills"]:
             slug = entry["name"].removeprefix("molquarry-")
             uri = "etalon://skills/molquarry/" + slug
-            rows.append({**entry, "uri": uri, "references": [
-                uri + "/" + path for path in entry["resources"]
+            resources = [row["path"] for row in entry["files"]]
+            rows.append({"name": entry["name"], "description": entry["description"],
+                         "entrypoint": entry["entrypoint"], "resources": resources,
+                         "uri": uri, "references": [
+                uri + "/" + path for path in resources
                 if path.startswith("references/")
             ]})
         return json.dumps({"skills": rows, "execution": "Use ETALON data tools for sealed acquisition."},
@@ -109,68 +70,43 @@ def build() -> Any:
         Use ETALON's data tools for sealed acquisition and campaign ingress. These documents
         also describe advanced MolQuarry SDK workflows, not additional ETALON MCP tools.
         """
-        from etalon.boundary.infra import load
-
-        load("molquarry")
-        from molquarry.skills import read_skill
-
-        return read_skill("molquarry-" + skill)["content"]
+        return read_member("molquarry-" + skill)["content"]
 
     @mcp.resource("etalon://skills/molquarry/{skill}/references/{reference}")
     def molquarry_reference(skill: str, reference: str) -> str:
         """The reference document linked by each pinned MolQuarry workflow."""
-        from etalon.boundary.infra import load
-
-        load("molquarry")
-        from molquarry.skills import read_skill
-
-        return read_skill("molquarry-" + skill, "references/" + reference)["content"]
+        return read_member("molquarry-" + skill, "references/" + reference)["content"]
 
     @mcp.resource(SKILL_RESOURCE)
     def campaign_workflow() -> str:
-        """The complete CADD campaign workflow: the order, the decision points, and the refusals.
-
-        Read this before calling any tool. It covers generation through relative free energy, says
-        which steps are free and which spend GPU-days, and carries the measurements its decisions rest
-        on -- because a workflow recalled without its numbers is a workflow whose refusals look
-        arbitrary.
-
-        **If the campaign has no MD, MM-PBSA or FEP stage, read ``etalon://skills/sweep`` instead.**
-        Almost everything this document guards is guarding the expensive stage, and a screening-only
-        campaign takes none of those paths -- measured, one 1,056,280-molecule campaign ran to
-        completion calling none of the handoff or spend tools. The risk there is a miscalibrated gate
-        applied a million times, and ``sweep`` is the document about that.
-        """
-
-        return _skill_path("campaign").read_text(encoding="utf-8")
+        """Optional capability for expensive execution and scientific evidence admission."""
+        return read_member("campaign")["content"]
 
     @mcp.resource("etalon://skills")
     def workflows() -> str:
-        """Every workflow document on this server, and when each one applies."""
-
-        return json.dumps(
-            {
-                "workflows": [
-                    {"uri": f"etalon://skills/{slug}", "skill": name, "regime": regime}
-                    for slug, name, regime in (
-                        ("campaign", "etalon-campaign", "an expensive stage exists (MD/MM-PBSA/FEP)"),
-                        ("sweep", "etalon-screening-sweep", "screening only, throughput-limited"),
-                        ("gate-calibration", "etalon-gate-calibration", "setting or changing any gate"),
-                        ("generation-planning", "etalon-generation-planning", "choosing generators"),
-                        ("monitoring", "etalon-campaign-monitoring", "supervising a long run"),
-                        ("install", "etalon-install", "setting up a machine"),
-                    )
-                ],
-                "start_with": "campaign if a simulation stage exists, sweep if not",
-            },
-            ensure_ascii=False,
-        )
+        """Optional skills, supporting files and independently versioned host guidance."""
+        report = catalog()
+        # Retain the old index shape for existing readers, without a mandatory route.
+        report["workflows"] = [
+            {"uri": f"etalon://skills/{row['slug']}", "skill": row["name"],
+             "regime": row["description"]} for row in report["skills"]]
+        return json.dumps(report, ensure_ascii=False)
 
     @mcp.resource("etalon://skills/{slug}")
     def workflow(slug: str) -> str:
         """One workflow document; discover the slugs at ``etalon://skills``."""
 
-        return _skill_path(slug).read_text(encoding="utf-8")
+        return read_member(slug)["content"]
+
+    @mcp.resource("etalon://skills/{slug}/references/{name}")
+    def skill_reference(slug: str, name: str) -> str:
+        """Read one supporting reference; exact members are listed in the skill catalog."""
+        return read_member(slug, "references/" + name)["content"]
+
+    @mcp.resource("etalon://host")
+    def host_guidance() -> str:
+        """Short research responsibilities and skill usage guidance for the host."""
+        return ROLE_PATH.read_bytes().decode("utf-8")
 
     @mcp.resource(RUNTIME_RESOURCE)
     def runtime_workflow() -> str:
@@ -218,33 +154,35 @@ def build() -> Any:
     return mcp
 
 
-def costs() -> dict[str, str]:
-    """Every tool's spend classification, for a caller that wants it as data.
+def tool_catalog() -> dict[str, dict[str, str]]:
+    """Short descriptions and declared costs from the actual registration path."""
 
-    Derived from the decorator rather than from a list, so a tool cannot be added without one.
-    """
-
-    from etalon.mcp import active, data, execution, governance, planning, runtime
-
-    found: dict[str, str] = {}
+    found: dict[str, dict[str, str]] = {}
 
     class Collector:
         def tool(self) -> Any:
             def decorate(function: Any) -> Any:
-                cost = getattr(function, "etalon_cost", Cost.SPENDS)
-                found[function.__name__] = cost.value
+                cost = getattr(function, "etalon_cost", None)
+                if not isinstance(cost, Cost):
+                    raise ValueError(f"tool {function.__name__} has no explicit cost classification")
+                if function.__name__ in found:
+                    raise ValueError(f"duplicate tool name: {function.__name__}")
+                description = (inspect.getdoc(function) or "").split("\n\n", 1)[0]
+                found[function.__name__] = {
+                    "cost": cost.value, "description": " ".join(description.split()),
+                }
                 return function
 
             return decorate
 
     collector = Collector()
-    planning.register(collector)
-    governance.register(collector)
-    active.register(collector)
-    execution.register(collector)
-    data.register(collector)
-    runtime.register(collector)
+    register_tools(collector)
     return found
+
+
+def costs() -> dict[str, str]:
+    """Every tool's declared spend class; preserve the original discovery shape."""
+    return {name: item["cost"] for name, item in tool_catalog().items()}
 
 
 def main() -> None:

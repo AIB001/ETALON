@@ -1,0 +1,231 @@
+{
+  "schema": "prism-design-compiled/1",
+  "design_id": "synthetic-test-only-m0",
+  "parent_design_id": "synthetic-test-only",
+  "task": "fragment_replacement",
+  "annotation": {
+    "path": "F:\\life_healthy\\PRISM\\.agent-local\\round2\\shared-fixture\\source\\annotation\\complexes\\0tst\\designspec.json",
+    "sha256": "e72f3a3560e749f2cbaa3920c3503e65690838bc3d6e931693365a35a6efd31e"
+  },
+  "annotation_root": "F:\\life_healthy\\PRISM\\.agent-local\\round2\\shared-fixture\\source\\annotation",
+  "inputs": {
+    "reference_ligand": {
+      "path": "F:\\life_healthy\\PRISM\\.agent-local\\round2\\shared-fixture\\source\\run\\inputs\\reference_backend.sdf",
+      "sha256": "405389f60c6673eda0b6fb9a845cb3a85bfec931997a6baab971359ca5e277bc"
+    },
+    "receptor": {
+      "path": "F:\\life_healthy\\PRISM\\.agent-local\\round2\\shared-fixture\\source\\run\\inputs\\receptor.pdb",
+      "sha256": "8ccdeb41502364a80376ae391bb4f8ce9df8e8d08d7f3f6daa17d11025cea5b9"
+    },
+    "pocket": {
+      "path": "F:\\life_healthy\\PRISM\\.agent-local\\round2\\shared-fixture\\source\\run\\inputs\\pocket.pdb",
+      "sha256": "8ccdeb41502364a80376ae391bb4f8ce9df8e8d08d7f3f6daa17d11025cea5b9"
+    },
+    "backend_pocket": {
+      "path": "F:\\life_healthy\\PRISM\\.agent-local\\round2\\shared-fixture\\source\\run\\inputs\\pocket_backend.pdb",
+      "sha256": "8ccdeb41502364a80376ae391bb4f8ce9df8e8d08d7f3f6daa17d11025cea5b9"
+    }
+  },
+  "reference_atom_map_to_backend_index_0based": {
+    "10": 0,
+    "12": 1,
+    "14": 2,
+    "16": 3,
+    "18": 4,
+    "20": 5,
+    "22": 6,
+    "24": 7,
+    "26": 8
+  },
+  "fixed_indices_0based": [
+    3,
+    4,
+    5,
+    6,
+    7,
+    8
+  ],
+  "editable_indices_0based": [
+    0,
+    1,
+    2
+  ],
+  "attachment_index_0based": 3,
+  "new_fragment_heavy_atoms_range": [
+    2,
+    6
+  ],
+  "constraints": [
+    {
+      "id": "chemical_validity",
+      "kind": "chemical_validity",
+      "priority": "hard",
+      "operator": "eq",
+      "value": true,
+      "unit": "boolean",
+      "verifier_protocol_ref": "rdkit-sanitize-and-single-component/1",
+      "selector_ref": null,
+      "descriptor": null,
+      "evaluation_context": "chemical_graph",
+      "missing_policy": "reject_or_mark_unknown_never_pass",
+      "origin": "assistant_proposed_pilot_requirement",
+      "calibration_status": "pilot_policy_not_experimentally_calibrated",
+      "source_evidence_refs": [
+        "inputs.evidence"
+      ]
+    },
+    {
+      "id": "fixed_subgraph",
+      "kind": "fixed_subgraph",
+      "priority": "hard",
+      "operator": "eq",
+      "value": true,
+      "unit": "boolean",
+      "verifier_protocol_ref": "mapped-core-graph-and-stereo/1",
+      "selector_ref": "core",
+      "descriptor": null,
+      "evaluation_context": "chemical_graph",
+      "missing_policy": "reject_or_mark_unknown_never_pass",
+      "origin": "assistant_proposed_pilot_requirement",
+      "calibration_status": "pilot_policy_not_experimentally_calibrated",
+      "source_evidence_refs": [
+        "inputs.evidence"
+      ]
+    },
+    {
+      "id": "single_attachment_boundary",
+      "kind": "single_attachment_boundary",
+      "priority": "hard",
+      "operator": "eq",
+      "value": 1,
+      "unit": "count",
+      "verifier_protocol_ref": "mapped-boundary/1",
+      "selector_ref": null,
+      "descriptor": null,
+      "evaluation_context": "chemical_graph",
+      "missing_policy": "reject_or_mark_unknown_never_pass",
+      "origin": "assistant_proposed_pilot_requirement",
+      "calibration_status": "pilot_policy_not_experimentally_calibrated",
+      "source_evidence_refs": [
+        "inputs.evidence"
+      ]
+    },
+    {
+      "id": "formal_charge",
+      "kind": "formal_charge",
+      "priority": "hard",
+      "operator": "eq",
+      "value": 0,
+      "unit": "elementary_charge",
+      "verifier_protocol_ref": "rdkit-formal-charge/1",
+      "selector_ref": null,
+      "descriptor": null,
+      "evaluation_context": "chemical_graph",
+      "missing_policy": "reject_or_mark_unknown_never_pass",
+      "origin": "assistant_proposed_pilot_requirement",
+      "calibration_status": "pilot_policy_not_experimentally_calibrated",
+      "source_evidence_refs": [
+        "inputs.evidence"
+      ]
+    },
+    {
+      "id": "new_unspecified_stereocenter_count",
+      "kind": "new_unspecified_stereocenter_count",
+      "priority": "hard",
+      "operator": "eq",
+      "value": 0,
+      "unit": "count",
+      "verifier_protocol_ref": "mapped-stereo-difference/1",
+      "selector_ref": null,
+      "descriptor": null,
+      "evaluation_context": "chemical_graph",
+      "missing_policy": "reject_or_mark_unknown_never_pass",
+      "origin": "assistant_proposed_pilot_requirement",
+      "calibration_status": "pilot_policy_not_experimentally_calibrated",
+      "source_evidence_refs": [
+        "inputs.evidence"
+      ]
+    },
+    {
+      "id": "core_rmsd",
+      "kind": "core_rmsd",
+      "priority": "hard",
+      "operator": "le",
+      "value": 0.5,
+      "unit": "angstrom",
+      "verifier_protocol_ref": "receptor-frame-core-rmsd-no-ligand-alignment/1",
+      "selector_ref": "core",
+      "descriptor": null,
+      "evaluation_context": "raw_generated_pose",
+      "missing_policy": "reject_or_mark_unknown_never_pass",
+      "origin": "assistant_proposed_pilot_requirement",
+      "calibration_status": "pilot_policy_not_experimentally_calibrated",
+      "source_evidence_refs": [
+        "inputs.evidence"
+      ]
+    },
+    {
+      "id": "new_fragment_heavy_atoms",
+      "kind": "new_fragment_heavy_atoms",
+      "priority": "hard",
+      "operator": "between",
+      "value": [
+        2,
+        6
+      ],
+      "unit": "count",
+      "verifier_protocol_ref": "mapped-new-fragment-size/1",
+      "selector_ref": null,
+      "descriptor": null,
+      "evaluation_context": "chemical_graph",
+      "missing_policy": "reject_or_mark_unknown_never_pass",
+      "origin": "assistant_proposed_pilot_requirement",
+      "calibration_status": "pilot_policy_not_experimentally_calibrated",
+      "source_evidence_refs": [
+        "inputs.evidence"
+      ]
+    }
+  ],
+  "coordinate_frame": "original_receptor_frame_no_ligand_alignment",
+  "rdkit_version": "2026.09.1",
+  "growth_prior": null,
+  "transformations": {
+    "ligand": "remove_H_and_atom_map_labels; preserve_heavy_order_graph_and_coordinates",
+    "pocket": "remove_CONECT_only",
+    "removed_CONECT_count": 0
+  },
+  "enforcement": {
+    "fixed_subgraph": "native_conditional_request_plus_independent_verification",
+    "attachment_charge_size_pose_stereo": "independent_postgeneration_verification",
+    "descriptor_objectives": "independent_postgeneration_scoring"
+  },
+  "input_validation": {
+    "status": "VALIDATED",
+    "design_id": "synthetic-test-only",
+    "task": "fragment_replacement",
+    "spec_sha256": "e72f3a3560e749f2cbaa3920c3503e65690838bc3d6e931693365a35a6efd31e",
+    "review_tier": "candidate_for_m0_pilot",
+    "eligible_for_compilation": true,
+    "atom_map_to_source_index_0based": {
+      "10": 0,
+      "12": 1,
+      "14": 2,
+      "16": 3,
+      "18": 4,
+      "20": 5,
+      "22": 6,
+      "24": 7,
+      "26": 8
+    },
+    "geometry": {
+      "pocket_key_match_fraction": 1.0,
+      "pocket_max_displacement_A": 0.0,
+      "nearest_protein_heavy_distance_A": 3.200500012498047,
+      "ligand_fraction_within_4A": 0.5555555555555556,
+      "ligand_fraction_within_pocket_4A": 0.5555555555555556,
+      "metals_within_3A": []
+    },
+    "rdkit_version": "2026.09.1",
+    "affinity_or_design_improvement_verified": false
+  }
+}

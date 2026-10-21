@@ -106,6 +106,15 @@ def screen_status(workspace: str | Path, run_id: str) -> dict[str, Any]:
         report[key] = json.loads(report[key]) if report[key] else None
     report["cost_status"] = "not_metered"
     report["state_semantics"] = "last journaled state; investigate logs after a host/worker crash; no automatic retry"
+    # ``state`` has two values and a screen has three outcomes. A run in which every molecule was
+    # gated out is ``succeeded`` here, because it finished and its artifacts are valid; whether it
+    # committed a shortlist or found nothing left is ``result["outcome"]``, which is the field to
+    # branch on. Saying so here because a reader who branches on ``state`` alone cannot tell a
+    # shortlist from an exhausted funnel, and the two call for opposite next actions.
+    report["outcome_semantics"] = (
+        "state is terminal-or-not; result.outcome is the three-way answer "
+        "(committed / exhausted / failed)"
+    )
     return report
 
 
@@ -188,9 +197,33 @@ def _worker(workspace: str, run_id: str) -> int:
         run = screen.run(plan, run_id=run_id, workers=request["workers"], devices=request["devices"] or None)
         result = run.as_dict()
         # Preserve partial artifacts, but never declare a partial/failed run successful.
-        state = "succeeded" if run.status == "SUCCEEDED" and not run.failed else "failed"
+        #
+        # Read through ``outcome``, not through ``status`` and ``failed``, because there are three
+        # outcomes and this read them as two. MolCascade reports a run in which every molecule was
+        # gated out as ``FAILED`` with a failed stage -- correctly, a stage did raise -- and
+        # ``ScreenResult.outcome`` exists to classify exactly that case as ``"exhausted"`` rather
+        # than ``"failed"``. This function held the ``ScreenResult`` the whole time and never asked
+        # it: the condition above made every exhausted batch a failed job.
+        #
+        # The consequence was not cosmetic. An exhausted batch's docking scores are all committed
+        # to the artifact store -- one measured batch held 7,545 of them -- so filing it as failed
+        # invites a retry of work that already did what it was asked, and a campaign whose alarm
+        # condition is "a batch failed" fires on a measurement. The job row carried ``failed``
+        # while its own ``result`` payload carried ``"outcome": "exhausted"``, which is the two
+        # halves of this function disagreeing in the same write.
+        #
+        # ``terminal`` is required as well, and not as decoration: ``outcome`` is derived from the
+        # stages, so a run that stopped before any stage failed classifies as ``"committed"`` --
+        # the same string a finished screen produces. See ``Sweep.record``, which refuses a
+        # non-terminal result for the same reason.
+        state = "succeeded" if run.terminal and run.outcome != "failed" else "failed"
         if state == "failed":
-            error = "MolCascade did not complete successfully; inspect result.stages and the log"
+            error = (
+                f"MolCascade's run record is {run.status}, which is not a terminal state; "
+                "the screen did not finish"
+                if not run.terminal
+                else "MolCascade did not complete successfully; inspect result.stages and the log"
+            )
         if any(_file_hash(Path(p)) != sha for p, sha in request["inputs"].items()):
             state, error = "failed", "screen inputs changed during execution; artifacts are not validated results"
     except Exception as caught:

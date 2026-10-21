@@ -9,6 +9,53 @@ from etalon.mcp._common import Cost, absolute_path, ok, threaded_tool, tool
 
 def register(mcp: Any) -> None:
     @mcp.tool()
+    @threaded_tool(Cost.FREE)
+    def etalon_action_prepare(request: dict[str, Any]) -> str:
+        """FREE. Validate and bind one supported host-selected action without dispatch or a skill gate."""
+        from etalon.runtime.api import prepare_action
+
+        return ok(prepared=prepare_action(request))
+
+    @mcp.tool()
+    @threaded_tool(Cost.SPENDS)
+    def etalon_action_submit(request: dict[str, Any], workspace: str, plan_id: str) -> str:
+        """SPENDS. Submit a prepared action through existing budget, execution and recovery checks.
+
+        Replays identify the original execution; unresolved results require reconciliation.
+        """
+        from etalon.runtime.api import submit_action
+
+        return ok(handle=submit_action(request, workspace=workspace, plan_id=plan_id))
+
+    @mcp.tool()
+    @threaded_tool(Cost.FREE)
+    def etalon_action_result(handle: dict[str, Any]) -> str:
+        """FREE. Read execution, verification, admission and accounting as separate existing facts.
+
+        Pass the complete handle object returned by etalon_action_submit unchanged. A campaign
+        action ID or an offline etalon_active_replay result is not a runtime action handle.
+        Inspect replay outcomes through campaign status and campaign events instead.
+        """
+        from etalon.runtime.api import read_action_result
+
+        return ok(result=read_action_result(handle))
+
+    @mcp.tool()
+    @threaded_tool(Cost.FREE)
+    def etalon_events_read(log_ref: dict[str, Any], after_sequence: int | dict[str, Any] = 0,
+                          limit: int = 100) -> str:
+        """FREE. Page committed events with log identity; this does not run hooks or restart work.
+
+        log_ref is {"kind": "campaign", "database": "/absolute/path/campaign.sqlite"} or
+        {"kind": "runtime", "workspace": "/absolute/path/runtime", "job_id": "optional-job-id"}.
+        Start with after_sequence=0; for subsequent pages pass the returned cursor unchanged.
+        Only campaign and runtime are valid kinds. Paths must name existing logs.
+        """
+        from etalon.runtime.api import read_events
+
+        return ok(**read_events(log_ref, after_sequence=after_sequence, limit=limit))
+
+    @mcp.tool()
     @tool(Cost.FREE)
     def etalon_workflow_capabilities() -> str:
         """FREE. List registered workflow operations and their required/optional argument names.
@@ -25,7 +72,7 @@ def register(mcp: Any) -> None:
     @threaded_tool(Cost.CHEAP)
     def etalon_executor_prepare(kind: str, configuration: dict[str, Any],
                                  endpoint: dict[str, Any]) -> str:
-        """CHEAP. Freeze a molcascade or prism executor and its explicit endpoint without dispatch.
+        """CHEAP. Freeze molcascade, legacy prism or independent prism_bridge_v1 without dispatch.
 
         MolCascade needs cascade/readout; PRISM needs absolute receptor_path/python and explicit
         production_ns. Returns a prepared executor to use for campaign creation and registration.
@@ -84,7 +131,7 @@ def register(mcp: Any) -> None:
 
         May run real data acquisition, screening, active learning or registered PRISM execution.
         Same job ID and plan return the existing job. External mode waits for explicit decisions.
-        Use workflow_status/observe/artifact; client disconnection does not stop the worker.
+        Use etalon_workflow_status, etalon_workflow_observe and etalon_workflow_artifact; client disconnection does not stop the worker.
         """
         from etalon.runtime.service import submit
 
@@ -104,7 +151,7 @@ def register(mcp: Any) -> None:
     def etalon_workflow_observe(workspace: str, job_id: str) -> str:
         """FREE. Read the identified controller observation with ready nodes and verified result summaries.
 
-        External controllers submit exactly observation_id/node_id/reason through workflow_advance.
+        External controllers submit exactly observation_id/node_id/reason through etalon_workflow_advance.
         A model's finish request cannot replace verification of every required node.
         """
         from etalon.runtime.service import observe

@@ -1,0 +1,7 @@
+{
+  "owner": "independent PRISM",
+  "source": "prism/contracts/design-candidate-bundle-v1.schema.json",
+  "schema_version": "prism-design-candidate-bundle/1",
+  "sha256": "4a96481779b1110f6ad9b3b4c259d7d893c089031f3b6e8fd60ea06042de5de0",
+  "policy": "byte-for-byte pinned consumer copy; producer owns schema; reject unknown fields"
+}

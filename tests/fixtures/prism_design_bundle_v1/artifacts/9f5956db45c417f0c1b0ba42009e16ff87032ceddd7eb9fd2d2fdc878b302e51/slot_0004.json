@@ -1,0 +1,12 @@
+{
+  "slot": 4,
+  "status": "NOT_ATTEMPTED",
+  "sdf": null,
+  "error": "Backend did not report this slot",
+  "candidate_id": "flowr_root_0004",
+  "validation": null,
+  "qc": null,
+  "selected": false,
+  "duplicate_of": null,
+  "hydrogenation": null
+}

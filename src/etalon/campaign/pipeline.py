@@ -186,7 +186,11 @@ def _render(plan_: Plan) -> list[str]:
 
 @dataclass
 class Pipeline:
-    """A campaign's intended shape, renderable before anything is spent."""
+    """An optional numeric funnel plan, renderable before anything is spent.
+
+    ``stages`` may select a subset or caller-defined stages via ``overrides``.
+    The default funnel is a compatibility policy, not a prerequisite for other APIs.
+    """
 
     pool: int
     budget_gpu_hours: float
@@ -281,9 +285,10 @@ class Pipeline:
     def expensive_budget(self, plan_: Plan, stage_id: str = "mmgbsa_ensemble") -> int:
         """How many molecules the plan gives to one tier, for an acquisition budget.
 
-        The link between the economics and the learning: :class:`etalon.campaign.Acquisition` takes
-        a budget in molecules, and this is where that number should come from rather than from a
-        round figure somebody liked.
+        One optional link between economics and acquisition: callers may use this estimate
+        to set :class:`etalon.campaign.Acquisition`'s molecule budget. Acquisition can also
+        receive a directly justified budget without constructing a Pipeline. Neither value
+        grants permission to spend or replaces execution's resource constraints.
         """
 
         for tier in plan_.funnel.tiers:

@@ -62,6 +62,14 @@ def diagnose(*, prism_python: str | None = None) -> dict[str, Any]:
             cascade = False
             components["problem"] = f"{type(error).__name__}: {error}"
     try:
+        # Deferred, and the deferral is the only thing keeping this from being an import cycle:
+        # ``mcp.execution`` imports ``doctor.diagnose`` to answer ``etalon_doctor``, and this
+        # reaches back into ``mcp._common`` to ask whether the MCP dependency is installed at all.
+        # Both directions are deferred so neither is a runtime edge, and it is the one cycle in
+        # this package that nothing annotated -- the ``authority`` / ``campaign`` one carries a
+        # note at its import site. A diagnostic that reported "MCP ready" by asking the tool layer
+        # that imports it would be circular in the argument as well as in the imports, which is
+        # why this asks ``require_mcp`` rather than anything that registers a tool.
         from etalon.mcp._common import require_mcp
 
         require_mcp()

@@ -406,3 +406,24 @@ def test_benchmark_controls_and_reproducibility(tmp_path):
     assert len(first["runs"]) == 6
     assert "neither CADD efficacy" in first["claim"]
     assert all(r["balance"]["spent"] <= 64 and r["balance"]["reserved"] == 0 for r in first["runs"])
+
+
+def test_the_stop_reason_agrees_with_the_predicate_every_spend_is_gated_on() -> None:
+    """Two raw `<` comparisons picked the reason a campaign records for why it stopped.
+
+    `fits_budget` is the predicate every actual spend goes through, and it is not a bare `>=`: it
+    carries a relative tolerance for ordinary roundoff between positive finite amounts, and it
+    refuses to let a zero or negative balance fund a positive quote. A raw `remaining < cost`
+    disagrees with it at both ends, so a campaign that really had run out could be recorded as
+    having had "no eligible actions" -- a different diagnosis with a different remedy.
+    """
+
+    import inspect
+
+    import etalon.active.runner as runner
+
+    source = inspect.getsource(runner)
+    assert "remaining < cost_quote" not in source
+    assert "remaining < min(cost_quote" not in source
+    assert "not fits_budget(cheapest, remaining)" in source
+    assert source.count("fits_budget") >= 3, "the import plus both comparisons"

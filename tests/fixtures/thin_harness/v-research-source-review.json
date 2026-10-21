@@ -1,0 +1,26 @@
+{
+  "status": "passed",
+  "baseline_sha256": "aab89b2d5a82571569a87e3e4ddae518f2d74f070d1e119084ec2f95232d31f2",
+  "fixed_source_sha256": "e88a7ba697bdb0f61e9f7fe9e9bd00415f5dba889e72b76c81d4e3b1ad5604ea",
+  "fixed_source_files": 1175,
+  "protected_files": 209,
+  "protected_unchanged": true,
+  "research_files": 38,
+  "policy_executable_ast_unchanged": [
+    "src/etalon/campaign/loop.py",
+    "src/etalon/campaign/propose.py",
+    "src/etalon/campaign/pipeline.py",
+    "src/etalon/campaign/supervisor.py"
+  ],
+  "supervisor_bytes_unchanged": true,
+  "fixed_production_files": 925,
+  "independent_tests": [
+    "test_v_joint_challenge_after_two_real_bindings_not_marginal_attribution",
+    "test_v_acquired_setup_and_joint_measured_costs_do_not_debit_ledger",
+    "test_v_equality_rule_and_replay_revalidate_evidence_after_binding",
+    "test_v_direct_suggestions_skip_unrelated_policy_and_enforce_probe_dependencies",
+    "test_v_failed_bind_keeps_unknown_and_no_method_gate_or_false_label"
+  ],
+  "independent_result": "5 passed; no initial failure",
+  "scope": "synthetic fixture and independent actual SDK; no scientific gain"
+}

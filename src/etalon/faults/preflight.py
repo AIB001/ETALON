@@ -37,7 +37,8 @@ from etalon.faults.attribution import Observation
 #: Coordinate sources that are real coordinates. The other two enum values --
 #: ``TWO_D_DEPICTION`` and ``NONE`` -- are legal in the contract precisely so a
 #: producer can admit to them, and are exactly what this layer refuses.
-_REAL_COORDINATES = frozenset({"DOCKED_POSE", "EMBEDDED_CONFORMER"})
+_REAL_COORDINATES = frozenset({"DOCKED_POSE", "SUPPLIED_POSE", "EMBEDDED_CONFORMER"})
+_RECEPTOR_BOUND = frozenset({"DOCKED_POSE", "SUPPLIED_POSE"})
 
 #: Hydrogen states a force-field build can use. ``POLAR_ONLY`` is included because some
 #: scoring functions expect exactly that; a caller whose consumer is a force field
@@ -113,7 +114,7 @@ def check_record(
         ),
         Observation(
             "F_POSE_WITHOUT_RECEPTOR",
-            fired=source == "DOCKED_POSE" and not receptor_id,
+            fired=source in _RECEPTOR_BOUND and not receptor_id,
             detail=(
                 f"coordinate_source={source!r}, receptor_id="
                 f"{'absent' if not receptor_id else str(receptor_id)[:32] + '…'}"
@@ -123,7 +124,7 @@ def check_record(
 
     # The receptor comparison. Three states rather than two, because "I could not
     # check" and "it matches" must not look alike.
-    if source != "DOCKED_POSE":
+    if source not in _RECEPTOR_BOUND:
         observations.append(
             Observation(
                 "F_RECEPTOR_NOT_THE_ONE_SCORED",

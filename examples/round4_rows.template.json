@@ -1,0 +1,58 @@
+[
+  {
+    "task_id": "mcl1",
+    "sample_unit": "task",
+    "independence_group": "bcl2",
+    "source_kind": "measured",
+    "loss_definition": "round4-assay-comparable-pair-order-group-mean/1",
+    "cost_unit": "wall_second",
+    "outcomes": {
+      "q1": null,
+      "q2": null
+    },
+    "losses": {
+      "fixed_pool_vina": null,
+      "fixed_pool_vinardo": null,
+      "abstain": 1.0
+    },
+    "resource_costs": {
+      "r0": null,
+      "r1": null,
+      "r2": null
+    },
+    "evidence": [
+      "artifact-REPLACE-WITH-REAL-RELEASE",
+      "artifact-REPLACE-WITH-REAL-RECEIPTS"
+    ],
+    "outcome_evidence": {
+      "q1": [
+        "artifact-REPLACE-WITH-REAL-RECEIPTS"
+      ],
+      "q2": [
+        "artifact-REPLACE-WITH-REAL-RECEIPTS"
+      ]
+    },
+    "loss_evidence": {
+      "fixed_pool_vina": [
+        "artifact-REPLACE-WITH-REAL-RELEASE"
+      ],
+      "fixed_pool_vinardo": [
+        "artifact-REPLACE-WITH-REAL-RELEASE"
+      ],
+      "abstain": [
+        "artifact-REPLACE-WITH-REAL-RELEASE"
+      ]
+    },
+    "cost_evidence": {
+      "r0": [
+        "artifact-REPLACE-WITH-REAL-RECEIPTS"
+      ],
+      "r1": [
+        "artifact-REPLACE-WITH-REAL-RECEIPTS"
+      ],
+      "r2": [
+        "artifact-REPLACE-WITH-REAL-RECEIPTS"
+      ]
+    }
+  }
+]

@@ -1,0 +1,24 @@
+{
+  "status": "passed",
+  "ready_sha256": "1edb4cb89a7d3d7015fe9641878a0930e70db23a06c0c324a3ad56535f821106",
+  "groups": {
+    "G0": {
+      "source_files": 1186,
+      "source_sha256": "087729eabbff1c89157e58634af393c6428d65f052585fa099e0e971edd03a2c",
+      "wheel_sha256": "dcf842dba633232534ce7aee1532e321ee26c33dcfa593569eb794858a897c14",
+      "equal_source_wheel_install_files": 328,
+      "bound_module_paths": 10
+    },
+    "G1": {
+      "source_files": 1191,
+      "source_sha256": "42052caadc6a4f733b1a4183a1ba7c168fa562a2a12d35569c8b552e50b99581",
+      "wheel_sha256": "2d5d314049bee845b7fca1a5e2844146e8e6577cf680cf96b375eb27e21d82b5",
+      "equal_source_wheel_install_files": 328,
+      "bound_module_paths": 10
+    }
+  },
+  "actual_installed_module": "F:\\life_healthy\\integration\\thin-harness-efficiency-20261021\\i\\G1-installed\\etalon\\skills.py",
+  "actual_scoped_read": true,
+  "protocol_probe": "two actual stdio processes, six responses structurally cross-checked; initialization separate, cache uncontrolled; not native or E efficacy",
+  "boundary": "Source-only local batch example remains in source archive, not claimed to be an installed package command; E result approval still separate"
+}

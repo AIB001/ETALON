@@ -1,0 +1,22 @@
+{
+  "status": "passed_for_checked_engineering_scope",
+  "source_protection": {
+    "scope": "same 209 protected asset/research/bridge/design files",
+    "all_unchanged_between_G0_G1": true
+  },
+  "independent_tests": "4 passed / 1.49s",
+  "first_attempt": "3 passed/1 failed: V text-mode Windows CRLF fixture expected LF; fixed explicit bytes, not product implementation; first XML retained",
+  "actual_cases": [
+    "test_v_scoped_catalog_never_resolves_unselected_bundles_and_roundtrips",
+    "test_v_default_catalog_legacy_shape_and_selected_all_bytes_agree",
+    "test_v_external_revision_remains_directly_readable_and_original_snapshot_immutable",
+    "test_v_batch_separate_workspaces_do_not_alias_and_failed_read_cannot_erase_unknown"
+  ],
+  "limits": [
+    "selected bundle still hashes all its members; summary avoids unrelated bundles and omits inventories, not a cache",
+    "local batch uses actual synthetic durable receipt reads, no worker execution or scientific benefit",
+    "summary byte reduction from deliberately long synthetic records is not end-to-end efficiency proof"
+  ],
+  "E_comparison": "pending actual formal runs",
+  "installed_snippets": "v/installed-examples.json actual two packaged examples passed"
+}

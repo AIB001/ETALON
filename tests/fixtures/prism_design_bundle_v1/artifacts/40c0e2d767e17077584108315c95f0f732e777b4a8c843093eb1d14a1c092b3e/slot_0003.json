@@ -1,0 +1,12 @@
+{
+  "slot": 3,
+  "status": "DECODE_FAILED",
+  "sdf": null,
+  "error": "synthetic decode failure",
+  "candidate_id": "flowr_root_0003",
+  "validation": null,
+  "qc": null,
+  "selected": false,
+  "duplicate_of": null,
+  "hydrogenation": null
+}

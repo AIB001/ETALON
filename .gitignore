@@ -11,10 +11,12 @@ __pycache__/
 /runs/
 /pytest-of-*/
 
-# Keep documentation and research records local. The MCP resources for findings and
+# Keep local research notes and records local. The MCP resources for findings and
 # architectural decisions report their absence when these directories are not present.
 /findings/
-/docs/
+/docs/*
+# Public interface contracts and implementation handoffs are versioned.
+!/docs/thin-harness/
 
 # Chinese-language notes for this machine's install and the SND1 campaign. Same reason as
 # /docs/: a record of one run, carrying absolute paths, that would drift from the code.

@@ -78,11 +78,87 @@ _DIRECTION_BY_KIND = {
 }
 
 
+#: The other spelling of the same two conventions, and the reason it has to be here.
+#:
+#: :mod:`etalon.active.schema` validates an endpoint's ``direction`` against
+#: ``{"minimize", "maximize"}`` and has no ``MIXED`` at all, while this module declares
+#: ``LOWER_STRONGER`` / ``HIGHER_STRONGER`` / ``MIXED``. Two vocabularies for one concept, in one
+#: repository, with no translation between them -- so a row that reached :func:`_direction` from the
+#: active side declared its convention in words this module did not recognise, and fell through to
+#: the ``score_kind`` table as though it had declared nothing.
+_DIRECTION_SYNONYMS = {
+    "MINIMIZE": LOWER_STRONGER,
+    "MAXIMIZE": HIGHER_STRONGER,
+}
+
+
 def _direction(row: Mapping[str, Any]) -> str:
+    """The convention one row's score runs under, or ``MIXED`` when it cannot be established.
+
+    Three cases, and the middle two are corrections.
+
+    A row that **declares one of this module's two conventions** is taken at its word.
+
+    A row that **declares the active layer's spelling** is translated. ``minimize`` and
+    ``maximize`` are the same two conventions under different names, so reading them is a
+    translation rather than a guess -- and it is the translation whose absence caused the defect
+    below.
+
+    A row that **declares something else** is ``MIXED``. It used to fall through to the
+    ``score_kind`` table and then to the ``LOWER_STRONGER`` default, which is the fail-open
+    direction. Measured on the 15 KarmaDock MDN rows of the live ``panel_v7`` run, which declare
+    ``HIGHER_STRONGER``: relabelled ``maximize`` with the score kind left alone the answer is right
+    by luck, because the kind table happens to know ``KARMADOCK_MDN``; relabelled ``maximize`` with
+    any score kind the table does not list, ``best_inactive`` moves from **67.329 to 17.285** --
+    the two opposite ends of the same panel, the best-scoring molecule swapped for the worst. The
+    same fallthrough also discarded an explicitly declared ``MIXED``, which is the one value whose
+    entire purpose is to fail closed, and read it as ``LOWER_STRONGER``.
+
+    Only a row that **omits** ``direction`` reaches :data:`_DIRECTION_BY_KIND`. That path is
+    deliberate and documented there: the contract declares the field non-nullable, so an absent one
+    is already irregular, and deriving from the score kind beats assuming. Declaring a direction
+    nobody recognises is a different thing from declaring none, and it is now treated as one.
+    """
+
     declared = str(row.get("direction") or "").strip().upper()
     if declared in (LOWER_STRONGER, HIGHER_STRONGER):
         return declared
+    if declared in _DIRECTION_SYNONYMS:
+        return _DIRECTION_SYNONYMS[declared]
+    if declared:
+        return MIXED
     return _DIRECTION_BY_KIND.get(str(row.get("score_kind") or "").strip().upper(), LOWER_STRONGER)
+
+
+def _finite(value: Any) -> float | None:
+    """A score as a float, or ``None`` for anything that cannot be ordered.
+
+    Not a type check with extra steps. A NaN is an instance of ``float``, fails every comparison,
+    and corrupts the two operations every verdict in this module is built from: ``min(nan, inf)``
+    returns ``nan``, so a molecule's best pose becomes NaN, and ``sorted`` over a list holding one
+    is insertion-order dependent, so the extremes become a property of whichever row the parquet
+    reader happened to yield first.
+
+    Measured on four molecules whose every score was NaN: ``best_active`` and ``best_inactive``
+    both came back NaN, both of :class:`Separation`'s counters came back 0, and ``separates``
+    reported ``True`` -- a ranking claim from a score that ordered nothing, reaching the operator
+    as "Rankable engines: ['unidock']". With a single NaN among finite inactives the verdict flipped
+    with the row order: the NaN row first gave ``separates True``, the finite row first gave
+    ``False``, from the same four facts.
+
+    An infinity is refused for the same reason and one more: ``float("inf")`` is this module's own
+    "no pose for this molecule yet" sentinel in ``min(canonical, kept.get(parent, inf))``, so a real
+    ``+inf`` score and an unmeasured molecule were the same value.
+
+    A missing or non-numeric score answers ``None`` too. "No number came back" and "a number that
+    cannot be ordered" are the same thing to everything downstream, and :func:`calibrate` reports
+    both with one note rather than pretending a report can tell them apart.
+    """
+
+    if not isinstance(value, (int, float)) or isinstance(value, bool):
+        return None
+    number = float(value)
+    return number if math.isfinite(number) else None
 
 #: Tiers whose criteria judge whether a *pose* is real rather than whether a *molecule* is good.
 #: A known active failing one of these has not been shown to be a poor binder -- it has been shown
@@ -187,10 +263,21 @@ class Separation:
     best_inactive: float | None
     #: Inactives scoring at least as well as the *best* active. Says whether a top-N cut would be
     #: contaminated, which is a weaker question than whether the score orders the panel.
-    inactives_above_best_active: int
-    #: Actives that an inactive outscores. This is the number :attr:`separates` turns on. On the SND1
-    #: panel it is 2 of 5 -- imatinib at -6.57 beats both co-crystal ligands, -6.05 and -5.90.
-    actives_below_best_inactive: int
+    #:
+    #: ``None`` when :attr:`direction` is ``MIXED``. The values this is counted over are then a
+    #: mixture of two conventions, and a count across a mixture is not a measurement of anything.
+    inactives_above_best_active: int | None
+    #: Actives **at or below** the best inactive -- the tie counts. This is the number
+    #: :attr:`separates` turns on. On the SND1 panel it is 2 of 5: imatinib at -6.57 beats both
+    #: co-crystal ligands, -6.05 and -5.90.
+    #:
+    #: The tie is counted because it used to not be, while the sibling count above has always been
+    #: tie-inclusive. Four molecules all scoring exactly -8.0 produced
+    #: ``inactives_above_best_active: 2`` and ``actives_below_best_inactive: 0`` in the same row --
+    #: so a score that is a constant reported that it separates the panel.
+    #:
+    #: ``None`` under ``MIXED``, for the reason above.
+    actives_below_best_inactive: int | None
 
     @property
     def separates(self) -> bool | None:
@@ -204,11 +291,19 @@ class Separation:
         weaker test reported that the score separates -- while imatinib was outscoring two of the five
         known binders. A campaign reading that boolean would have treated the docking score as a
         potency ranking on a target where it is not one.
+
+        "Outscores" includes the tie, and that is the second correction. An active scoring exactly
+        what the best inactive scores has not been ordered ahead of it, and a strict ``>`` said it
+        had: four molecules all scoring -8.0 came back ``separates True``. A constant is the
+        degenerate case of a score that ranks nothing, so it is the one case the predicate must not
+        answer yes to.
         """
 
         if not self.actives or not self.inactives:
             return None
         if self.direction == MIXED:
+            return None
+        if self.actives_below_best_inactive is None:
             return None
         return self.actives_below_best_inactive == 0
 
@@ -294,9 +389,23 @@ class Calibration:
             screened without an id column, so members are not traceable by name.
         ``a tier marked unavailable``
             Part of the funnel could not be read.
+        ``nothing registered``
+            Every tier read cleanly and the run contained no molecules. MolCascade's own
+            ``end_to_end`` is ``None`` there -- ``TierRecall.retention`` nulls on ``entering == 0``
+            -- and this returned 1.0, reporting full recall where the measurement it quotes reports
+            "unknown". Reproduced on a tier reading ``entering 0, surviving 0, lost []``, which is
+            what ``measure_recall`` produces when the parent population is empty: its
+            ``registered and not names`` refusal cannot fire on an empty set.
+
+        Whether the panel's *own* molecules were among the registered ones is a separate question
+        and is answered in :func:`calibrate`, which is the only place that has the names. A declared
+        id matching no library id can never appear in any tier's ``lost`` list, so it would count
+        here as surviving every gate.
         """
 
         if not self.actives:
+            return None
+        if not self.registered:
             return None
         if not self.all_tiers:
             return None
@@ -333,6 +442,14 @@ class Calibration:
         if not self.actives:
             reasons.append(
                 "the panel declares no known actives, so nothing about the gates was tested"
+            )
+        if self.all_tiers and not self.registered and not any(
+            tier.unavailable for tier in self.all_tiers
+        ):
+            reasons.append(
+                "every tier read cleanly and the run registered no molecules at all, so the panel "
+                "never entered the funnel. MolCascade's own end-to-end retention is null in this "
+                "case; the 1.0 this used to report was a retention product over an empty panel"
             )
         if not self.all_tiers:
             reasons.append(
@@ -427,22 +544,62 @@ class Enrichment:
     percentiles: tuple[float, ...]
     #: The panel's inactives, for contrast. A score with no enrichment puts both classes everywhere.
     inactive_percentiles: tuple[float, ...] = ()
+    #: What one unit of :attr:`population` is. Always ``"molecules"`` from :func:`enrichment`, which
+    #: collapses the population's poses the same way it collapses the panel's. Recorded rather than
+    #: assumed because the percentile is a share of this and nothing else said what it counted, and
+    #: ``docking_score/v1`` is keyed on ``pose_rank`` as well as ``parent_id``. On the ALK2 v7
+    #: artifacts the distinction is invisible -- 274,072 kcal/mol rows, all ``pose_rank`` 0, over
+    #: 274,043 molecules -- which is exactly why it has to be written down rather than inferred from
+    #: a denominator that happened to agree.
+    population_unit: str = "molecules"
+    #: Population values dropped before the denominator because they carried no orderable number.
+    #: Reported because a percentile over a silently shrunk population still looks computed.
+    population_dropped: int = 0
 
     @property
-    def actives(self) -> int:
-        return len(self.percentiles)
+    def actives(self) -> int | None:
+        """Known actives placed in the population.
+
+        ``None`` under ``MIXED``, where nothing was placed. Zero would be read as "the panel
+        declares no binders" by a panel that declares eight, and the count an operator wants in
+        that case is :attr:`Separation.actives`, which is measured without placing anything.
+        """
+
+        return None if self.direction == MIXED else len(self.percentiles)
 
     @property
     def best(self) -> float | None:
-        return self.percentiles[0] if self.percentiles else None
+        """The strongest known active's percentile, or ``None`` when nothing was placed.
+
+        The ``MIXED`` guard is here rather than in :meth:`as_dict` because the two must not
+        disagree. With it only in the serialiser, ``best`` read ``0.0`` while
+        ``as_dict()["best_percentile"]`` read ``None``, and :meth:`keep_for`'s own invariant --
+        ``keep_for(1.0) == worst`` -- broke on ``None == 0.0``.
+        """
+
+        if self.direction == MIXED or not self.percentiles:
+            return None
+        return self.percentiles[0]
 
     @property
     def worst(self) -> float | None:
-        return self.percentiles[-1] if self.percentiles else None
+        if self.direction == MIXED or not self.percentiles:
+            return None
+        return self.percentiles[-1]
 
     @property
     def median(self) -> float | None:
-        return statistics.median(self.percentiles) if self.percentiles else None
+        if self.direction == MIXED or not self.percentiles:
+            return None
+        return statistics.median(self.percentiles)
+
+    @property
+    def inactive_median(self) -> float | None:
+        """Where the panel's inactives sit, for contrast. ``None`` under ``MIXED``."""
+
+        if self.direction == MIXED or not self.inactive_percentiles:
+            return None
+        return statistics.median(self.inactive_percentiles)
 
     def recall_at(self, keep: float = DEFAULT_KEEP) -> float | None:
         """Fraction of known actives a "keep the best ``keep``" gate would retain.
@@ -451,7 +608,7 @@ class Enrichment:
         unevaluable rather than simply low.
         """
 
-        if not self.percentiles:
+        if self.direction == MIXED or not self.percentiles:
             return None
         return sum(1 for p in self.percentiles if p <= keep) / len(self.percentiles)
 
@@ -463,7 +620,7 @@ class Enrichment:
         are measured against the population rather than against each other.
         """
 
-        if not self.percentiles or not 0.0 < recall <= 1.0:
+        if self.direction == MIXED or not self.percentiles or not 0.0 < recall <= 1.0:
             return None
         needed = math.ceil(recall * len(self.percentiles))
         return self.percentiles[min(needed, len(self.percentiles)) - 1]
@@ -478,6 +635,8 @@ class Enrichment:
         a chosen size, which is a legitimate thing to want and a different claim from enrichment.
         """
 
+        if self.direction == MIXED:
+            return None
         if not self.percentiles or not self.inactive_percentiles:
             return None
         return statistics.median(self.percentiles) < statistics.median(self.inactive_percentiles)
@@ -487,15 +646,13 @@ class Enrichment:
             "engine_id": self.engine_id,
             "direction": self.direction,
             "population": self.population,
+            "population_unit": self.population_unit,
+            "population_dropped": self.population_dropped,
             "actives": self.actives,
             "best_percentile": self.best,
             "median_percentile": self.median,
             "worst_percentile": self.worst,
-            "inactive_median_percentile": (
-                statistics.median(self.inactive_percentiles)
-                if self.inactive_percentiles
-                else None
-            ),
+            "inactive_median_percentile": self.inactive_median,
             "informative": self.informative,
             "recall_at_0.5%": self.recall_at(0.005),
             "recall_at_1%": self.recall_at(0.01),
@@ -512,11 +669,28 @@ def percentile_threshold(
     A cascade gate takes a number, so this is where the percentile becomes one. Recording that the
     number came from here -- and from which population -- is what keeps it from being mistaken later
     for a statement about affinity.
+
+    Refuses a ``direction`` outside the two conventions ``docking_score/v1`` declares, rather than
+    falling through to "lower is stronger" the way the default argument does. ``MIXED`` reached here
+    as a direction and was read as Vina-family. Measured on the KarmaDock MDN scores of all 27 ALK2
+    v7 batches, 299,805 rows declaring ``HIGHER_STRONGER``: the best-2% cut is 59.359 and keeps
+    2.00% of them, while the same call read as Vina-family returns 20.200, which keeps 98.00%. Both
+    come back as a bare float in the same shape, so a gate that had stopped gating would have been
+    recorded as a 2% gate.
+
+    Population values that cannot be ordered are dropped before the cut, and ``None`` comes back
+    once nothing orderable is left. The consequence of a corrupted percentile is worse here than in
+    a verdict: the output is a number that gets applied to a million molecules.
     """
 
-    if not population or not 0.0 < keep <= 1.0:
+    if not 0.0 < keep <= 1.0:
         return None
-    ordered = sorted(population, reverse=direction == HIGHER_STRONGER)
+    if direction not in (LOWER_STRONGER, HIGHER_STRONGER):
+        return None
+    finite = [value for value in (_finite(entry) for entry in population) if value is not None]
+    if not finite:
+        return None
+    ordered = sorted(finite, reverse=direction == HIGHER_STRONGER)
     index = max(0, min(len(ordered) - 1, math.ceil(keep * len(ordered)) - 1))
     return ordered[index]
 
@@ -524,16 +698,44 @@ def percentile_threshold(
 def enrichment(
     scores: Iterable[Mapping[str, Any]],
     panel: Sequence[PanelMember],
-    population: Mapping[str, Sequence[float]],
+    population: Iterable[Mapping[str, Any]],
 ) -> tuple[Enrichment, ...]:
     """Place a panel's molecules in the distribution of everything the campaign screened.
+
+    **The population is rows, not one number per molecule, and the old signature was the defect.**
+    It asked for ``Mapping[str, Sequence[float]]`` -- a flat list of scores per engine -- and
+    ``docking_score/v1`` is keyed on ``(parent_id, engine_id, receptor_id, pose_rank)``, so a caller
+    holding those rows has to pick a reading before it can satisfy that type. Three readings are
+    available and they are not the same quantile: every row, the best pose per molecule, or the
+    one-liner ``{row["parent_id"]: row["score"] for row in rows}``, which is last-wins over a
+    best-first pose list. A pose-level denominator is a quantile over poses, so a molecule that
+    docked with nine modes is weighted nine times and a gate set from it keeps a different set of
+    molecules than the one intended.
+
+    On the ALK2 v7 campaign the three agree exactly, and that is worth recording rather than
+    assuming: both engines were configured to commit one pose per molecule, so the 274,072 kcal/mol
+    rows pooled over 27 batches carry ``pose_rank`` 0 and nothing else, cover 274,043 molecules, and
+    put the best-2% cut at -11.385 whichever reading is taken. **No threshold this campaign set
+    changes.** What changes is that the next cascade to raise ``num_modes`` cannot silently reweight
+    the quantile by pose count.
+
+    So the collapse is done here, by the same ``min`` over each molecule's poses that the panel side
+    has always used, and :attr:`Enrichment.population_unit` records what one unit of the denominator
+    counted. An annotation cannot stop the wrong call; taking the rows can.
+
+    Each row is canonicalised under **its own** ``direction``, so a population spanning two
+    conventions is not silently flipped one way. A genuine disagreement within one engine -- panel
+    rows declaring one convention and population rows the other -- makes that engine ``MIXED``, and
+    a ``MIXED`` engine gets a row reporting exactly that and no percentiles, rather than being
+    dropped or placed under a guessed heading.
 
     Args:
         scores: The panel's own ``docking_score/v1`` rows, as :func:`separation` takes them.
         panel: The molecules, with ``known_active`` declared.
-        population: Per engine, the scores of the screened library. Not the panel's scores: a panel
-            is tens of molecules and the question here is where they sit among hundreds of
-            thousands.
+        population: The ``docking_score/v1`` rows of the screened library. Not the panel's rows: a
+            panel is tens of molecules and the question here is where they sit among hundreds of
+            thousands. Poses are collapsed per molecule; a row with no ``parent_id`` counts as one
+            molecule of its own rather than merging with every other anonymous row.
     """
 
     actives = {m.parent_id for m in panel if m.known_active}
@@ -543,31 +745,58 @@ def enrichment(
     for row in scores:
         engine = str(row.get("engine_id", "")) or "unknown"
         parent = str(row.get("parent_id", ""))
-        value = row.get("score")
         if parent not in actives and parent not in inactives:
             continue
-        if not isinstance(value, (int, float)) or isinstance(value, bool):
+        value = _finite(row.get("score"))
+        if value is None:
             continue
         heading = _direction(row)
         directions.setdefault(engine, set()).add(heading)
-        canonical = float(value) if heading == LOWER_STRONGER else -float(value)
+        canonical = value if heading == LOWER_STRONGER else -value
         kept = best.setdefault(engine, {})
-        kept[parent] = min(canonical, kept.get(parent, float("inf")))
+        kept[parent] = min(canonical, kept.get(parent, math.inf))
+
+    screened: dict[str, dict[str, float]] = {}
+    dropped: dict[str, int] = {}
+    for index, row in enumerate(population):
+        engine = str(row.get("engine_id", "")) or "unknown"
+        value = _finite(row.get("score"))
+        if value is None:
+            dropped[engine] = dropped.get(engine, 0) + 1
+            continue
+        heading = _direction(row)
+        directions.setdefault(engine, set()).add(heading)
+        molecule = str(row.get("parent_id", "")) or f"#{index}"
+        canonical = value if heading == LOWER_STRONGER else -value
+        pool = screened.setdefault(engine, {})
+        pool[molecule] = min(canonical, pool.get(molecule, math.inf))
 
     rows: list[Enrichment] = []
     for engine in sorted(best):
-        seen = directions[engine]
+        seen = directions.get(engine) or set()
         heading = next(iter(seen)) if len(seen) == 1 else MIXED
-        values = population.get(engine) or ()
-        if not values:
+        canon = sorted(screened.get(engine, {}).values())
+        # Before the population check, not after. ``MIXED`` is a fact about the engine's rows and
+        # has to be reported whether or not a population came with them.
+        if heading == MIXED:
+            rows.append(
+                Enrichment(
+                    engine_id=engine,
+                    direction=MIXED,
+                    population=len(canon),
+                    percentiles=(),
+                    population_dropped=dropped.get(engine, 0),
+                )
+            )
             continue
-        canon = [float(v) if heading != HIGHER_STRONGER else -float(v) for v in values]
-        canon.sort()
+        if not canon:
+            continue
         total = len(canon)
 
-        def place(score: float) -> float:
+        def place(score: float, _canon: list[float] = canon, _total: int = total) -> float:
             # Share of the population at least as strong, in canonical (smaller is stronger) terms.
-            return bisect.bisect_right(canon, score) / total
+            # Bound as defaults: the closure outlives this iteration of the loop.
+            return bisect.bisect_right(_canon, score) / _total
 
         measured = best[engine]
         rows.append(
@@ -581,6 +810,8 @@ def enrichment(
                 inactive_percentiles=tuple(
                     sorted(place(v) for p, v in measured.items() if p in inactives)
                 ),
+                population_unit="molecules",
+                population_dropped=dropped.get(engine, 0),
             )
         )
     return tuple(rows)
@@ -615,6 +846,16 @@ def separation(
     Comparisons are done on a canonical form where smaller is always stronger; every number
     *reported* stays in the engine's own units, so ``best_active`` is a value a reader can look up in
     the run's own artifacts.
+
+    **An engine whose rows disagree about their own convention reports no numbers at all.** The
+    canonical form is a mixture there, and the un-flip applied to report it was chosen from a single
+    heading -- so a rising KarmaDock MDN came back in the shape of a kcal/mol score. There is no
+    scalar that undoes a mixture, so every extreme and both counts come back ``None`` and the
+    direction says ``MIXED``.
+
+    Scores that cannot be ordered are dropped at intake; :func:`calibrate` reports how many per
+    engine, because an engine whose every panel score was NaN used to vanish from this tuple and be
+    read downstream as a score that failed to rank.
     """
 
     actives = {member.parent_id for member in panel if member.known_active}
@@ -624,27 +865,48 @@ def separation(
     for row in scores:
         engine = str(row.get("engine_id", "")) or "unknown"
         parent = str(row.get("parent_id", ""))
-        value = row.get("score")
         if parent not in actives and parent not in inactives:
             continue
-        if not isinstance(value, (int, float)) or isinstance(value, bool):
+        value = _finite(row.get("score"))
+        if value is None:
             continue
         heading = _direction(row)
         directions.setdefault(engine, set()).add(heading)
-        canonical = float(value) if heading == LOWER_STRONGER else -float(value)
+        canonical = value if heading == LOWER_STRONGER else -value
         kept = by_engine.setdefault(engine, {})
         # Best pose per molecule, under this engine's own convention.
-        kept[parent] = min(canonical, kept.get(parent, float("inf")))
+        kept[parent] = min(canonical, kept.get(parent, math.inf))
 
     rows: list[Separation] = []
     for engine in sorted(by_engine):
         seen = directions[engine]
         heading = seen.pop() if len(seen) == 1 else MIXED
-        # Undo the canonical form for reporting, so every extreme is in the engine's own units.
-        shown = (lambda v: v) if heading != HIGHER_STRONGER else (lambda v: -v)
         measured = by_engine[engine]
         active_values = sorted(v for p, v in measured.items() if p in actives)
         inactive_values = sorted(v for p, v in measured.items() if p in inactives)
+        if heading == MIXED:
+            # No scalar undoes a mixture of two conventions. The predecessor of this branch fell
+            # through to the ``v -> v`` arm of ``shown`` -- the one for Vina-family scores -- and
+            # reported a rising KarmaDock MDN as though it were kcal/mol. The two counts below are
+            # computed from the canonical locals and never pass through ``shown``, so they look
+            # like cross-convention numbers and are not; they are nulled for the same reason.
+            rows.append(
+                Separation(
+                    engine_id=engine,
+                    direction=MIXED,
+                    actives=len(active_values),
+                    inactives=len(inactive_values),
+                    best_active=None,
+                    median_active=None,
+                    worst_active=None,
+                    best_inactive=None,
+                    inactives_above_best_active=None,
+                    actives_below_best_inactive=None,
+                )
+            )
+            continue
+        # Undo the canonical form for reporting, so every extreme is in the engine's own units.
+        shown = (lambda v: -v) if heading == HIGHER_STRONGER else (lambda v: v)
         best_active = active_values[0] if active_values else None
         best_inactive = inactive_values[0] if inactive_values else None
         rows.append(
@@ -663,9 +925,14 @@ def separation(
                     0 if best_active is None else sum(1 for v in inactive_values if v <= best_active)
                 ),
                 actives_below_best_inactive=(
+                    # ``>=``, not ``>``. An active scoring exactly what the best inactive scores
+                    # has not been ordered ahead of it, and the sibling count above has always
+                    # included its tie. Four molecules all scoring -8.0 reported
+                    # ``inactives_above_best_active: 2`` and ``actives_below_best_inactive: 0`` in
+                    # one row, so a constant was reported as a score that separates the panel.
                     0
                     if best_inactive is None
-                    else sum(1 for v in active_values if v > best_inactive)
+                    else sum(1 for v in active_values if v >= best_inactive)
                 ),
             )
         )
@@ -735,8 +1002,48 @@ def calibrate(
         named = {}
         notes.append(f"parent ids could not be joined to library names ({error})")
 
+    # Whether the panel's own molecules were in this run at all. ``parent_names`` is intake-level --
+    # it joins the registered molecules to the library's id column before any gate -- so a declared
+    # id missing from its values was never screened, which is a different thing from a gate having
+    # deleted it.
+    #
+    # Recall cannot see the difference and must not be asked to. It is computed from names: a
+    # declared id that matches no library id can never appear in any tier's ``lost`` list, so it
+    # counts as surviving every gate. Measured on a panel declared under this campaign's
+    # ``act_``/``neg_`` convention against a panel library whose id column carried the bare names:
+    # one tier reporting ``entering 3, surviving 0, lost [LDN-193189, SARACATINIB, aspirin]`` -- a
+    # funnel that deleted every molecule it was given -- calibrated to ``recall 1.0``,
+    # ``admissible True``, ``refusals ()``, and minted a signed authorization carving the pool.
+    observable = set(named.values())
+    absent = sorted(seen - observable) if observable else []
+    if (tiers or finalize) and absent:
+        shown_absent = absent if len(absent) <= 6 else [*absent[:6], f"... and {len(absent) - 6} more"]
+        finalize = finalize + (
+            TierVerdict(
+                tier_id="panel_identity",
+                title="the panel's own molecules, in this run",
+                entering=None,
+                surviving=None,
+                lost_actives=(),
+                lost_inactives=(),
+                unavailable=(
+                    f"{len(absent)} of the {len(panel)} declared panel members are not among the "
+                    f"{len(observable)} molecules this run registered under the library's own ids: "
+                    f"{shown_absent}. A declared id matching no library id cannot appear in any "
+                    "tier's lost list, so recall would count it as surviving every gate -- 1.0 for "
+                    "a funnel that deleted everything, when none of them match. Declare the panel "
+                    "under the library's id column, or re-screen the panel library under these ids."
+                ),
+            ),
+        )
+
     scores: list[dict[str, Any]] = []
     unmatched = 0
+    # Counted per engine so an engine that came back entirely unorderable can say so. The rows
+    # themselves stay in ``scores``: that table is the evidence a reader audits, and dropping them
+    # would leave the note as the only trace of a number that did arrive.
+    row_total: dict[str, int] = {}
+    row_unorderable: dict[str, int] = {}
     for artifact in screen.artifacts_carrying(result, DOCKING_SCORE):
         try:
             rows = screen.read(artifact, contract_id=DOCKING_SCORE)
@@ -750,6 +1057,10 @@ def calibrate(
             if member not in seen:
                 unmatched += 1
                 continue
+            engine = str(row.get("engine_id", "")) or "unknown"
+            row_total[engine] = row_total.get(engine, 0) + 1
+            if _finite(row.get("score")) is None:
+                row_unorderable[engine] = row_unorderable.get(engine, 0) + 1
             scores.append(
                 {
                     "parent_id": member,
@@ -759,6 +1070,30 @@ def calibrate(
                     "direction": row.get("direction"),
                 }
             )
+    for engine in sorted(row_unorderable):
+        count, total = row_unorderable[engine], row_total[engine]
+        note = (
+            f"{count} of {total} {engine} score rows for the panel carried no orderable number "
+            "(missing, NaN or infinite) and are excluded from the separation"
+        )
+        if count == total:
+            # Without this, an engine whose every score was NaN simply disappeared from the
+            # separation tuple with no note anywhere, and the operator was told "no engine's score
+            # ordered the panel" -- a measured negative, where the truth was that no number came
+            # back at all.
+            note += (
+                f". {engine} therefore does not appear in the separation at all, and its absence "
+                "there is for this reason rather than because its score failed to rank the panel"
+            )
+        else:
+            # Partial loss shrinks the panel the separation is measured over without shrinking the
+            # panel the recall is measured over, so the two disagree about how many actives exist.
+            note += (
+                ", so the separation for this engine is measured over fewer panel molecules than "
+                "the calibration declares"
+            )
+        notes.append(note)
+
     if not scores:
         notes.append(
             "no docking scores were readable for the panel, so score separation is unevaluable. "

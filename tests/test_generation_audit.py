@@ -8,6 +8,7 @@ final hit counts, and the arithmetic of small samples says those counts cannot s
 from __future__ import annotations
 
 import sys
+import math
 from pathlib import Path
 
 import pytest
@@ -51,6 +52,40 @@ def test_wilson_stays_inside_zero_and_one() -> None:
         wilson(11, 10)
     with pytest.raises(ValueError, match="at least one trial"):
         wilson(0, 0)
+
+
+@pytest.mark.parametrize("confidence", [.5, .9, .95, .99, math.nextafter(1.0, 0.0)])
+@pytest.mark.parametrize("trials", [1, 2, 10, 1000, 150_000])
+def test_scalar_wilson_matches_previous_scipy_formula(confidence, trials):
+    from scipy.stats import norm
+
+    z = float(norm.isf((1.0 - confidence) / 2.0))
+    for successes in {0, 1, trials // 2, trials - 1, trials}:
+        rate = successes / trials
+        denominator = 1.0 + z * z / trials
+        centre = (rate + z * z / (2 * trials)) / denominator
+        spread = z * math.sqrt(rate * (1.0 - rate) / trials + z * z / (4 * trials * trials)) / denominator
+        expected = (0.0 if successes == 0 else max(0.0, centre - spread),
+                    1.0 if successes == trials else min(1.0, centre + spread))
+        actual = wilson(successes, trials, confidence=confidence)
+        assert actual == pytest.approx(expected, rel=2e-14, abs=5e-16)
+        assert all(math.isfinite(v) for v in actual)
+        if successes == 0:
+            assert actual[0] == 0.0
+        if successes == trials:
+            assert actual[1] == 1.0
+
+
+@pytest.mark.parametrize("confidence", [0.0, 1.0, -.1, 1.1, math.nan, math.inf, -math.inf])
+def test_invalid_confidence_cannot_fabricate_reliable_bounds(confidence):
+    with pytest.raises(ValueError, match="confidence must be finite"):
+        wilson(4, 10, confidence=confidence)
+
+
+@pytest.mark.parametrize("successes,trials", [(0, 0), (0, -1), (-1, 10), (11, 10)])
+def test_scalar_quantile_keeps_invalid_count_rejection(successes, trials):
+    with pytest.raises(ValueError, match="at least one trial|not a rate"):
+        wilson(successes, trials)
 
 
 def test_qc_rates_separate_models_and_final_counts_do_not() -> None:

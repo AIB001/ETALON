@@ -1,0 +1,209 @@
+{
+  "schema": "thin-harness-research-optional-acceptance/1",
+  "frozen_before_results": true,
+  "baseline_sha256": "aab89b2d5a82571569a87e3e4ddae518f2d74f070d1e119084ec2f95232d31f2",
+  "baseline_files": 1170,
+  "existing_contract_ids_only": true,
+  "method_selection": "B confirmed existing bind_outcome, condition, exact_program; no new scientific algorithm required",
+  "cases": [
+    {
+      "area": "Legacy policy couplings: Campaign.round / Supervisor / propose",
+      "ids": [
+        "ACT-01",
+        "ACT-03",
+        "ACT-08",
+        "INT-03",
+        "HOST-01"
+      ],
+      "scenario": "Call a useful already-supplied operation without unrelated generation/planning/acquisition/measurement stages. Classify each apparent prerequisite by actual code and observed side effects.",
+      "pass": [
+        "Record concrete original forced dependency and smallest supported independent entry, or prove existing entry already composes without code change",
+        "At least one actual skipped stage is instrumented to fail if reached; expected optional method callback may be omitted",
+        "Preserve old default API behavior; new optional paths do not auto-dispatch omitted stage or require dummy measurement/skill/MethodVersion",
+        "Explicit scientific identity, gate/revision, handoff, permission and evidence guards remain enforced for the action that actually spends"
+      ],
+      "fail": [
+        "Deleting relevant authorization/chemical identity to make skip work",
+        "Only signatures/source availability used as proof of actual independent execution",
+        "New global router or mandatory all-stage sequence",
+        "Changing existing default strategy silently, discarding an optional legacy strategy, or constructing false artifacts to satisfy unneeded stages"
+      ]
+    },
+    {
+      "area": "Legacy advice and supervisor control",
+      "ids": [
+        "ACT-08",
+        "RES-02",
+        "RES-05",
+        "RES-07",
+        "HOST-01"
+      ],
+      "scenario": "Differentiate reading advice/status from explicitly executing one local management step. Use a pending/failed fixture to reject automatic continuation.",
+      "pass": [
+        "Read-only call preserves filesystem/schema/scientific rows, budget reservations and receipts",
+        "Explicitly mutating scheduler step is labeled and bounded; absent generators do not require generation driver, unrelated screen stage can be skipped only through a declared supported path",
+        "Invalid requested mutation cannot be reported as successful no-op; existing live-owner/unknown rules unchanged",
+        "Caller may stop or decline proposer output after real feedback without running extra stages"
+      ],
+      "fail": [
+        "Query launches/retries/reaps/repairs/migrates/settles by constructor side effect",
+        "Pending refunded or failure fee lost",
+        "Safe unrelated-stage bypass implemented by swallowing every exception",
+        "Old optional loop promoted to global host research controller"
+      ]
+    },
+    {
+      "area": "Method 1: calibration.bind_outcome",
+      "ids": [
+        "RES-08",
+        "MET-04",
+        "MET-05",
+        "INT-01",
+        "INT-03"
+      ],
+      "signature": "bind_outcome(journal, observation_id, rule, *, task_id, expected_bindings)",
+      "scenario": "Bind a durable synthetic Observation with an explicitly fixed OutcomeRule; supply the actual returned outcome to later reasoning.",
+      "pass": [
+        "Exact task/condition, measurement method, units, diagnostic role and current artifact hash verified",
+        "Measured threshold boundary uses below versus at_or_above exactly; failed/unsupported remains named nonnumeric status",
+        "Binding is explicitly append-only provenance mutation, not described as read-only; repeated identical bind adds no second record/event or charge",
+        "Mismatched task/condition/unit/method, wrong record type, changed bytes and heldout-as-diagnostic each refuse atomically",
+        "likelihood and causal_hypothesis remain null; raw Observation and previous records/fees remain unchanged"
+      ],
+      "fail": [
+        "Inventing a likelihood or causal label from binning",
+        "Silently editing threshold/old record after seeing outcome while claiming a prior freeze",
+        "New metadata record treated as scientific label, paid execution, or independent gain",
+        "Rejected binding leaves partial record/event or rewrites original observation"
+      ]
+    },
+    {
+      "area": "Method 2: diagnostics.condition",
+      "ids": [
+        "MET-04",
+        "RES-08",
+        "LEARN-03"
+      ],
+      "signature": "condition(model, observed)",
+      "scenario": "Use actual bound outcome(s) in explicit finite JointModel; include individually supported outcomes whose joint combination has no support.",
+      "pass": [
+        "Supported result normalizes posterior conditional on declared finite worlds and preserves model ID/assumptions",
+        "Zero joint support returns model_challenge with no invented posterior attribution; unknown probe rejected",
+        "No conversion of failed/unsupported strings to zero or successful measurement",
+        "No ledger mutation, execution, full fit or empirical-model construction required for this pure function"
+      ],
+      "fail": [
+        "Marginal support substituted for absent joint support",
+        "External mechanism ruled out or calibrated causal confidence claimed",
+        "Forced full policy training/controller.schedule before conditioning",
+        "Caller uses hardcoded expected result instead of actual binding output in claimed composition"
+      ]
+    },
+    {
+      "area": "Method 3: diagnostics.exact_program",
+      "ids": [
+        "ACT-03",
+        "RES-02",
+        "RES-05",
+        "MET-04"
+      ],
+      "signature": "exact_program(model, *, budget, max_depth, cost_weight, observed=None, acquired_resources=(), myopic=False, world_resource_costs=None, decision_resources=None)",
+      "scenario": "Condition on the previous actual result and obtain a finite advisory next action or abstention with explicit remaining budget; independently exercise no-budget or supported/unsupported branch.",
+      "pass": [
+        "Hard per-branch quotes respected; shared/acquired resource counted once; quote versus measured cost distinguished",
+        "No resource acquisition or job submission occurs merely from calculating a program",
+        "Zero-budget/no-depth and unsupported joint result can stop/abstain with preserved unknown decision when appropriate",
+        "Unknown resources, dependency violations, incompatible units, incomplete measured cost rows and measured cost above quote rejected under existing contracts",
+        "Exact finite-model output labeled reference baseline with bounded assumptions, not universally optimal research strategy"
+      ],
+      "fail": [
+        "Resource double count, loss of cost/correlation, or missing measured rows imputed zero",
+        "Scientific dependency erased to permit an invalid probe sequence",
+        "Returned tree made mandatory host workflow",
+        "A recommendation automatically creates reservations or executes"
+      ]
+    },
+    {
+      "area": "Actual optional composition",
+      "ids": [
+        "ACT-01",
+        "ACT-03",
+        "MET-03",
+        "MET-04",
+        "HOST-01"
+      ],
+      "scenario": "Demonstrate both a minimal single-method call and a useful partial combination; after observed feedback stop, choose another method, or request a bounded extra check.",
+      "pass": [
+        "2-3 selected existing methods get concrete callable input/output/assumptions/failure/stop content in optional guidance",
+        "At least one real prior output value/identity is visible in the subsequent input; alternative outcome changes next call or stopping behavior",
+        "B SDK composition, native host tool/file call and model adoption claims distinctly labeled",
+        "Host task prompt gives goal/data/resource constraints, not full ordered tool calls or full required program",
+        "Host may omit skill/skip unrelated methods; actual declaration remains host_reported unless stronger tool evidence exists"
+      ],
+      "fail": [
+        "A catalog or shortened skill is the sole composition evidence",
+        "Full fixed chain imposed on all tasks",
+        "Method record success or host self-report substitutes for actual algorithm calls",
+        "SDK helper pretending to be MCP/native; pure Python arithmetic substitutes for actual selected existing function"
+      ]
+    },
+    {
+      "area": "Compatibility, packaging, native evidence",
+      "ids": [
+        "INT-01",
+        "INT-02",
+        "INT-03",
+        "HOST-01",
+        "MET-01",
+        "MET-02",
+        "MET-07"
+      ],
+      "scenario": "Freeze exact sources before native tasks and preserve earlier snapshots; package new optional method content with its callable implementation.",
+      "pass": [
+        "Only assigned writers edit; baseline dirty/untracked scientific code and Windows fixes retained; intentional scientific changes explicitly diffed",
+        "Real interpreter/module/import paths and source bytes fixed for each SDK/native/install run",
+        "Each native attempt has isolated inputs/config, complete original prompt/tool request/response and actual terminal evidence; cold subprocess used for new lazy dependency path if relevant",
+        "New wheel resources/optional references exactly match source; engineering helper skill remains excluded",
+        "Original failures/timeouts and unknown model/monetary totals retained"
+      ],
+      "fail": [
+        "Exit0/config/metadata used as native behavior proof",
+        "Preloaded tests used as sole cold import evidence",
+        "Native run on old source claimed to test later code",
+        "Discarding a failed attempt or double-counting overlapping tests as independent coverage"
+      ]
+    },
+    {
+      "area": "Scientific boundaries and protected active work",
+      "ids": [
+        "LEARN-01",
+        "LEARN-02",
+        "LEARN-03",
+        "RES-08",
+        "INT-01"
+      ],
+      "scenario": "Keep this engineering continuation separate from real research evaluation and existing active PRISM_review processes.",
+      "pass": [
+        "Synthetic/previously seen data explicitly labeled; old R4b labels remain seen and R4b paused",
+        "No active PRISM_review jobs killed/restarted or shared source/environment overwritten",
+        "No new paid scoring/CRO, no new real scientific budget ledger, no commits/push",
+        "Method saving, actual use, method selection capability and independently controlled improvement reported separately",
+        "Independent scientific improvement remains not_run without new authorized unseen tasks and equal-budget controls"
+      ],
+      "fail": [
+        "2-3 method entries declared M/phi/S/G improvement",
+        "Renaming known data as independent test",
+        "Hypothetical or unmeasured costs silently filled zero",
+        "Engineering authorization treated as resuming R4b science"
+      ]
+    }
+  ],
+  "statuses": [
+    "passed",
+    "failed",
+    "not_run",
+    "blocked"
+  ],
+  "verifier_scope": "V writes own tests/evidence/DELIVERY_V only; never edits implementation or owner tests to pass",
+  "scientific_constraints_are_not_workflow_couplings": true
+}

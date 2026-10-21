@@ -1,0 +1,123 @@
+{
+  "status": "passed",
+  "native_exit": {
+    "returncode": 0,
+    "wall_seconds": 71.05374050140381,
+    "ended_unix": 1792543908.1312811
+  },
+  "fixed_source_sha256": "e88a7ba697bdb0f61e9f7fe9e9bd00415f5dba889e72b76c81d4e3b1ad5604ea",
+  "fixed_source_files": 1175,
+  "python": "F:\\life_healthy\\ETALON\\.venv\\Scripts\\python.exe",
+  "sdk_source": "F:\\life_healthy\\integration\\thin-harness-research-20261021\\c\\fixed-source\\src",
+  "mcp": [
+    {
+      "line": 11,
+      "tool": "etalon_capabilities",
+      "arguments": {}
+    },
+    {
+      "line": 16,
+      "tool": "etalon_skill_read",
+      "arguments": {
+        "slug": "campaign",
+        "member": "references/finite-diagnostics.md"
+      }
+    }
+  ],
+  "sdk_command_line": 24,
+  "shell_commands": 7,
+  "shell_nonzero": [
+    {
+      "line": 9,
+      "exit_code": 1
+    }
+  ],
+  "actual_methods": [
+    "calibration.bind_outcome",
+    "diagnostics.condition"
+  ],
+  "skipped": [
+    "diagnostics.exact_program"
+  ],
+  "actual_result": {
+    "execution_channel": "native-host shell to SDK",
+    "python": "F:\\life_healthy\\ETALON\\.venv\\Scripts\\python.exe",
+    "observation": {
+      "evidence": [
+        "artifact-d692e549db8c1d60bf8f1d439fd8667c6f8e56c627d325735715eb463e0e0e66"
+      ],
+      "experiment_id": "experiment-ed768aef65c9f3d27340743e6a56682f361f5a21d104cddb198114e8ac74012a",
+      "measurement_method_id": null,
+      "reason": "synthetic fixture outcome; no scientific execution",
+      "status": "failed",
+      "units": {},
+      "values": {}
+    },
+    "bound": {
+      "schema": "etalon-recorded-probe-outcome/1",
+      "observation_id": "observation-429320c5f3ed041b693e0d97d16c08a08f44286115291f3340c9aec95b15f016",
+      "probe_id": "x",
+      "task_id": "fixture-task",
+      "rule": {
+        "probe_id": "x",
+        "measurement_method_id": "fixed-readout/1",
+        "readout": "signal",
+        "unit": "count",
+        "threshold": 0.5,
+        "below": "low",
+        "at_or_above": "high"
+      },
+      "expected_bindings": {
+        "condition": "synthetic"
+      },
+      "outcome": "failed",
+      "source": "admitted_observation",
+      "likelihood": null,
+      "causal_hypothesis": null
+    },
+    "derived_record_id": "probeoutcome-c54b6b9070c0526856ea2197186bf25164f406068318b541039562371f0c27fb",
+    "support": {
+      "status": "model_challenge",
+      "world_indices": [],
+      "posterior": {},
+      "observed": {
+        "x": "failed"
+      },
+      "model_id": "jointmodel-10f29a637492b12deb21291617f79ebd8230188c689efff3ffa13b4efd9c6275",
+      "scope": "conditional on explicit finite model; external mechanisms remain possible"
+    },
+    "decision": "stop: actual bound outcome unsupported; decline optimization and model revision"
+  },
+  "old_records_unchanged": true,
+  "event_prefix_unchanged": true,
+  "derived_records_added": 1,
+  "budget": {
+    "budget": 4,
+    "spent": 0.25,
+    "reserved": 2.0,
+    "remaining": 1.75
+  },
+  "scientific_state_unchanged": true,
+  "exported_content_unchanged": true,
+  "usage": {
+    "input_tokens": 394435,
+    "cached_input_tokens": 329216,
+    "cache_write_input_tokens": 0,
+    "output_tokens": 1921,
+    "reasoning_output_tokens": 21
+  },
+  "model": null,
+  "monetary_cost": null,
+  "scientific_gain": "not_run",
+  "claude": "blocked prior 401; not retried",
+  "prompt_limit": "The phrase required derived provenance append is permitted can imply binder preference; this is not an unprompted binder-selection comparison. Prompt unchanged after launch.",
+  "acquisition_additional_test": "1 actual nonempty fit/propose passed using prior isolated sklearn overlay; not native and test added after native snapshot",
+  "raw_sha256": {
+    "prompt.txt": "2adc9c569cb1c2dc4c46311a268c5de4746429006c964442ca515880ff40d0c6",
+    "stdout.jsonl": "befe8521eafeed1610270befdbcec88c2a2cbd880c2711f89fc8aa287788baac",
+    "bounded_check.py": "6bc5f06c3f1eec0d6c0b09aef4a5728eeb84d5a46b83747cf3f94cb599047569",
+    "bounded-result.json": "5245675c3d02cb75bc4a950afc656b21c5e39a6d07af995c09ef084c6b28299c",
+    "launch.json": "006e963bc696472479bd61ef0939b0217aefd499c552351495f5cd26e2c23cfe",
+    "binding.json": "c9fed8cb61b001f3b3dad5a190e068f1c72b46e7f88656f98f7ae616dd63a50b"
+  }
+}

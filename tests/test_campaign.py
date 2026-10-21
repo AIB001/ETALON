@@ -844,3 +844,66 @@ def test_the_round_records_what_the_gate_permitted(tmp_path: Path) -> None:
     assert recorded["refused_count"] == len(outcome.refused_before_spending)
     for token in recorded["authorized"].values():
         assert len(token["record_sha256"]) == 64
+
+
+# -- the Consequence dispatch, written twice ---------------------------------
+
+
+def test_a_consequence_this_rule_has_no_branch_for_is_refused_not_withheld(monkeypatch) -> None:
+    """The dispatch ended in a bare `else` and would have withheld a whole new fault class.
+
+    `rule` sorts observations into four lists by `Fault.consequence`, which is the same four-way
+    decision `faults.preflight` exposes as `blocking` / `waived_blocking` / `unverifiable` /
+    `unchecked`. The two agree today because `Consequence` has exactly three members, and they
+    diverge the moment it has four, in opposite directions: `preflight.blocking` tests
+    `is Consequence.WRONG_SUBJECT` explicitly, so a new member is harmless there, while this ended
+    in `else: blocking.append(...)` and would silently withhold every measurement carrying it.
+
+    Withholding is the safe direction, which is why it was written that way. It is not a safe
+    default for a taxonomy member nobody has thought about yet, because what it changes is the
+    policy fitted against every later molecule.
+    """
+
+    from dataclasses import replace as replace_field
+
+    from etalon.faults import taxonomy
+
+    known = taxonomy.BY_CODE["F_RUN_NOT_REPRODUCIBLE"]
+    invented = replace_field(known, consequence="a_consequence_from_the_future")
+    monkeypatch.setitem(taxonomy.BY_CODE, "F_RUN_NOT_REPRODUCIBLE", invented)
+
+    with pytest.raises(ValueError, match="has no branch for"):
+        rule(Measurement("p", -8.0, -30.0,
+                         (Observation("F_RUN_NOT_REPRODUCIBLE", True, "no seed shim"),)))
+
+
+def test_the_three_consequences_are_each_sorted_into_their_own_list() -> None:
+    """The branches the refusal above protects, so the restructure is shown to preserve them."""
+
+    from etalon.faults.taxonomy import BY_CODE, Consequence
+
+    by_consequence: dict[Consequence, str] = {}
+    for code, fault in BY_CODE.items():
+        by_consequence.setdefault(fault.consequence, code)
+    assert set(by_consequence) == set(Consequence), "a consequence has no fault to test it with"
+
+    wrong_subject = rule(Measurement(
+        "p", -8.0, -30.0,
+        (Observation(by_consequence[Consequence.WRONG_SUBJECT], True, "fired"),),
+    ))
+    assert wrong_subject.admission is Admission.WITHHELD
+    assert by_consequence[Consequence.WRONG_SUBJECT] in wrong_subject.blocking
+
+    wrong_size = rule(Measurement(
+        "p", -8.0, -30.0,
+        (Observation(by_consequence[Consequence.WRONG_SIZE], True, "fired"),),
+    ))
+    assert wrong_size.teaches, "a wrong-size fault bounds a claim rather than withholding it"
+    assert by_consequence[Consequence.WRONG_SIZE] in wrong_size.bounded
+
+    unverifiable = rule(Measurement(
+        "p", -8.0, -30.0,
+        (Observation(by_consequence[Consequence.UNVERIFIABLE], True, "fired"),),
+    ))
+    assert unverifiable.teaches, "an unverifiable fault blocks a claim, never a spend"
+    assert by_consequence[Consequence.UNVERIFIABLE] in unverifiable.unverifiable

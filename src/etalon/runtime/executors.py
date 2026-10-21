@@ -73,11 +73,57 @@ def prepare_executor(kind: str, configuration: dict, endpoint: dict) -> dict:
                                "version": infra.version}})
         contract = _endpoint(endpoint, protocol, {"quantity": "mmpbsa", "units": "kcal/mol",
             "direction": "minimize", "requires_handoff": True, "queryable": True, "max_replicates": 1})
+    elif kind == "prism_bridge_v1":
+        normalized, inputs = _bridge_configuration(configuration)
+        template = normalized["request_template"]
+        contract = _endpoint({"max_replicates": len(normalized["seeds"]), **endpoint}, template["protocol_id"], {
+            "id": template["endpoint_id"], "quantity": "mean_residue_contacts", "units": "count",
+            "direction": "maximize", "requires_handoff": True, "queryable": True})
     else:
-        raise ValueError("executor kind must be molcascade or prism")
+        raise ValueError("executor kind must be molcascade, prism or prism_bridge_v1")
     body = {"schema": SCHEMA, "kind": kind, "configuration": normalized,
             "endpoint": contract.as_dict(), "inputs": inputs}
     return {**body, "executor_id": digest(body)}
+
+
+def _bridge_configuration(configuration: dict) -> tuple[dict, dict]:
+    from pathlib import PurePosixPath
+    from etalon.boundary.prism_v1 import CLITransport, validate_request
+
+    fields(configuration, {"request_template", "transport", "job_root", "receptor_path", "seeds"},
+           {"poll_seconds", "wait_seconds"})
+    fields(configuration["transport"], {"python", "cwd", "request_root"}, {"host", "timeout"})
+    transport = CLITransport(**configuration["transport"])
+    validate_request(configuration["request_template"])
+    seeds = configuration["seeds"]
+    if (not isinstance(seeds, list) or not seeds or len(set(seeds)) != len(seeds)
+            or any(type(s) is not int or not 0 <= s <= 2147483647 for s in seeds)):
+        raise ValueError("bridge seeds must be distinct supported integers")
+    normalized = json.loads(canonical(configuration))
+    normalized["receptor_path"] = str(absolute(configuration["receptor_path"]))
+    for key, default in (("poll_seconds", 2), ("wait_seconds", 3600)):
+        value = configuration.get(key, default)
+        finite(value, key, minimum=.001)
+        normalized[key] = float(value)
+    if transport.host:
+        if not PurePosixPath(configuration["job_root"]).is_absolute():
+            raise ValueError("SSH job_root must be an absolute POSIX path")
+    else:
+        absolute(configuration["job_root"])
+    receptor_hash = _file_hash(Path(normalized["receptor_path"]))
+    if receptor_hash != configuration["request_template"]["inputs"]["protein"]["sha256"]:
+        raise ValueError("local authorization receptor differs from target-host protein")
+    for artifact in configuration["request_template"]["inputs"].values():
+        transport.verify(artifact)
+    return normalized, {"receptor_sha256": receptor_hash, "producer": transport.fingerprint()}
+
+
+def _bridge(store: CampaignStore, configuration: dict):
+    from etalon.active.prism import PrismV1Executor
+    from etalon.boundary.prism_v1 import CLITransport
+
+    return PrismV1Executor(store, CLITransport(**configuration["transport"]),
+                           **{k: v for k, v in configuration.items() if k != "transport"})
 
 
 def _identity(prepared: dict) -> None:
@@ -126,7 +172,7 @@ def register_executor(database: str | Path, prepared: dict, rationale: str) -> d
     store = _store(database)
     endpoint = Endpoint(**record["endpoint"])
     with store.connection(write=True) as db:
-        _, endpoints = store._configuration(db)
+        spec, endpoints = store._configuration(db)
         if endpoint.id not in endpoints or endpoints[endpoint.id] != endpoint:
             raise ValueError("executor endpoint must exactly match its registered campaign endpoint")
         key = _PREFIX + endpoint.id
@@ -139,6 +185,12 @@ def register_executor(database: str | Path, prepared: dict, rationale: str) -> d
             if (db.execute("SELECT 1 FROM actions WHERE status IN ('reserved','running')").fetchone()
                     or db.execute("SELECT 1 FROM rounds WHERE status='running'").fetchone()):
                 raise StateError("resolve pending actions and rounds before registering an executor")
+            if record["kind"] == "prism_bridge_v1":
+                if spec.cost_unit != "wall_second":
+                    raise ValueError("prism_bridge_v1 requires campaign cost_unit=wall_second")
+                for existing in db.execute("SELECT body FROM metadata WHERE key LIKE ?", (_PREFIX + "%",)):
+                    if json.loads(existing[0])["kind"] == "prism_bridge_v1":
+                        raise StateError("bounded bridge supports one fixed template per campaign")
             if record["kind"] == "molcascade":
                 ProtocolRegistry(_TransactionStore(db)).bind_seed(endpoint.id, _recipe(record["configuration"]),
                                                                  rationale=rationale)
@@ -167,7 +219,8 @@ def registered_executors(database: str | Path) -> dict:
 
 def build_executor(database: str | Path, workspace: str | Path,
                    checkpoint: Callable[[], None] | None = None,
-                   process_observer: Callable[[int], None] | None = None) -> tuple[Callable, Path | None]:
+                   process_observer: Callable[[int], None] | None = None,
+                   endpoint_ids: tuple[str, ...] | None = None) -> tuple[Callable, Path | None]:
     """Reconstruct only registered dispatchers, preserving all endpoint admission guards."""
     root = absolute(workspace)
     for callback in (checkpoint, process_observer):
@@ -176,6 +229,11 @@ def build_executor(database: str | Path, workspace: str | Path,
     store = _store(database, read_only=True)
     _, endpoints = store.configuration()
     registered = registered_executors(database)
+    if endpoint_ids is not None:
+        if not endpoint_ids or any(key not in endpoints for key in endpoint_ids):
+            raise ValueError("selected executor endpoints must already exist")
+        endpoints = {key: endpoints[key] for key in endpoint_ids}
+        registered = {key: value for key, value in registered.items() if key in endpoints}
     missing = {key for key, endpoint in endpoints.items() if endpoint.queryable} - registered.keys()
     if missing:
         raise ValueError(f"queryable endpoints have no registered executor: {sorted(missing)}")
@@ -200,14 +258,50 @@ def build_executor(database: str | Path, workspace: str | Path,
         if (record is None or record["endpoint"] != endpoint.as_dict()
                 or action.endpoint_id != endpoint.id or action.candidate_id != candidate.id):
             raise ValueError("action is not bound to this registered executor")
+        if record["kind"] == "prism_bridge_v1":
+            for observation in store.observations():
+                if observation["action_id"] == action.id:
+                    return Evaluation.from_dict(observation["result"])
         try:
             _verify(record)
-        except (OSError, ValueError) as error:
+        except Exception as error:
+            if record["kind"] != "prism_bridge_v1" and not isinstance(error, (OSError, ValueError)):
+                raise
+            if record["kind"] == "prism_bridge_v1":
+                from etalon.active.runner import ExecutionPending
+
+                with store.connection() as db:
+                    previous = db.execute("SELECT 1 FROM metadata WHERE key=?",
+                                          ("prism-v1:request:" + action.id,)).fetchone()
+                if previous:
+                    raise ExecutionPending("existing bridge action cannot be reclassified after environment drift") from error
             return Evaluation(candidate.id, endpoint.id, None, endpoint.units, 0.0, status="blocked",
                 provenance={"phase": "executor_preflight", "executor_id": record["executor_id"],
                             "error": str(error), "cost_basis": "not dispatched"})
         if record["kind"] == "molcascade":
             result = cascade(action, candidate, endpoint, grant)
+        elif record["kind"] == "prism_bridge_v1":
+            from etalon.active.runner import ExecutionPending
+
+            writable = CampaignStore(store.path)
+            observations = {o["action_id"]: o for o in writable.observations()}
+            if action.id in observations:
+                return Evaluation.from_dict(observations[action.id]["result"])
+            template = record["configuration"]["request_template"]
+            if (candidate.id != template["candidate_id"] or candidate.smiles != "c1ccccc1"
+                    or action.replicate >= len(record["configuration"]["seeds"])):
+                return Evaluation(candidate.id, endpoint.id, None, endpoint.units, 0, status="blocked",
+                                  provenance={"error": "UNSUPPORTED: fixed bounded benzene template",
+                                              "executor_id": record["executor_id"]})
+            try:
+                bridge = _bridge(writable, record["configuration"])
+                # Record the original authorization for read-only result reconciliation.
+                with writable.connection(write=True) as db:
+                    db.execute("INSERT OR IGNORE INTO metadata VALUES (?,?)",
+                               ("runtime:bridge-authorization:" + action.id, canonical(grant.as_dict() if grant else None)))
+                result = bridge(action, candidate, endpoint, grant)
+            except ExecutionPending:
+                raise
         else:
             from etalon.active.adapters import StageExecutor
             from etalon.boundary.simulate import Simulate, discover
@@ -226,3 +320,27 @@ def build_executor(database: str | Path, workspace: str | Path,
         return result
 
     return dispatch, receptor_path
+
+
+def recover_bridge_action(database: str | Path, action) -> Evaluation | None:
+    """Reconcile an acknowledged bridge action without spending or resubmitting anything."""
+    from dataclasses import replace
+    from etalon.faults.preflight import check_record
+
+    store = _store(database)
+    record = registered_executors(database).get(action.endpoint_id)
+    if not record or record["kind"] != "prism_bridge_v1":
+        return None
+    _verify(record)
+    with store.connection() as db:
+        authorization = db.execute("SELECT body FROM metadata WHERE key=?",
+                                   ("runtime:bridge-authorization:" + action.id,)).fetchone()
+    if authorization is None:
+        return None
+    result = _bridge(store, record["configuration"]).read_existing(action)
+    if result is None:
+        return None
+    candidate = store.candidates()[action.candidate_id]
+    checks = check_record(candidate.handoff, receptor_path=Path(record["configuration"]["receptor_path"]))
+    return replace(result, checks=checks + result.checks, provenance={**result.provenance,
+                   "authorization": json.loads(authorization[0]), "endpoint_protocol": record["endpoint"]["protocol"]})

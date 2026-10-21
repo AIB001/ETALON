@@ -122,7 +122,9 @@ def _temporary_path(destination: Path) -> Path:
 
 
 def _fsync_file(path: Path) -> None:
-    with path.open("rb") as stream:
+    # Windows FlushFileBuffers requires a handle opened for writing. The file
+    # is our completed temporary output; r+b preserves its bytes.
+    with path.open("r+b" if os.name == "nt" else "rb") as stream:
         os.fsync(stream.fileno())
 
 

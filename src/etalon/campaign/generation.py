@@ -129,6 +129,15 @@ def read_chunk(path: Path, *, tag: str | None = None) -> list[tuple[str, str, st
     than yielding no molecules, and an ingest loop that did not expect an exception there stopped for
     twelve hours.
 
+    The guard is on every exception the reader can raise, not on ``OSError`` alone, and the
+    distinction is not hypothetical: ``SDMolSupplier`` is a C++ extension reached through a Boost
+    wrapper, so a zero-byte file surfaces as ``OSError`` while a record truncated mid-block, a
+    malformed counts line or a property block the parser cannot close come back as ``RuntimeError``
+    or as a Boost ``ArgumentError``, neither of which subclasses ``OSError``. A chunk nobody can
+    read is a barren chunk, which :class:`~etalon.campaign.supervisor.Supervisor` already reasons
+    about through :data:`BARREN_LIMIT`; narrowing the guard to the one type that was observed first
+    buys nothing except that the second type ends the campaign instead of the chunk.
+
     The identity key is the InChIKey **of the SMILES this function ships**, not of the molecule it
     read. The distinction is the whole of it: a key derived from the 3D molecule is not a function
     of the string the screen docks, and two keys for one docking input means that input is docked
@@ -162,7 +171,7 @@ def read_chunk(path: Path, *, tag: str | None = None) -> list[tuple[str, str, st
         return []
     try:
         molecules = list(Chem.SDMolSupplier(str(sdf), removeHs=True, sanitize=True))
-    except OSError:
+    except Exception:  # noqa: BLE001 -- an unreadable chunk is a barren chunk; see the docstring
         return []
 
     rows: list[tuple[str, str, str]] = []
@@ -218,10 +227,46 @@ class Generator:
         return self.directory / f"chunk_{index:03d}"
 
     def next_index(self) -> int:
-        """The first chunk index with no directory. Resuming is therefore free."""
+        """One past the highest chunk index on disk. Resuming is therefore free.
 
-        existing = sorted(p.name for p in self.directory.glob("chunk_*")) if self.directory.is_dir() else []
-        return len(existing) + 1
+        Two corrections, and both of them hand the next invocation an index that already has
+        output under it.
+
+        **Chunk directories are counted, and nothing else is.** ``PrismGeneration`` writes each
+        chunk's log beside the chunk itself, as ``chunk_003.log`` next to ``chunk_003/``, and
+        ``chunk_*`` matches both. So a glob-and-count read one finished chunk as two, and every
+        resumption advanced the index by two.
+
+        Measured on the ALK2 v7 generation tree, which ran this way from end to end: 270 chunk
+        directories, 270 sidecar logs, and every one of the 270 indices odd -- no even index at all
+        across six generators, 264 index values never written, ``pocket2mol_g3`` delivering 110
+        chunks and reaching ``chunk_219``. No molecule was lost, which is why it survived a whole
+        campaign unnoticed. What broke is that the index stopped counting chunks: ``Productivity``
+        is measured per chunk and :func:`finished_chunks` enumerates what is on disk, so a count
+        taken from the highest index was wrong by a factor of two, and ``seed`` is linear in the
+        index, so the campaign drew only odd-multiple seeds with nothing recording why.
+
+        **One past the highest, not the count.** A count collides with an existing directory the
+        moment there is a gap. With ``chunk_001`` and ``chunk_003`` on disk -- a middle chunk moved
+        aside after a crash, which is a thing an operator does -- the count is two and ``chunk_003``
+        is what gets reused: a second generation run writing into a finished chunk's directory,
+        under a different seed, mixing two samplings of the pocket under one manifest.
+        """
+
+        if not self.directory.is_dir():
+            return 1
+        indices: list[int] = []
+        for path in self.directory.glob("chunk_*"):
+            if not path.is_dir():
+                continue
+            try:
+                indices.append(int(path.name.removeprefix("chunk_")))
+            except ValueError:
+                # A directory under this prefix that is not a chunk index. Skipped rather than
+                # refused: it cannot collide with a numbered index, so it is not this method's
+                # business what it is.
+                continue
+        return max(indices, default=0) + 1
 
     def seed(self, index: int) -> int:
         """The seed for one chunk, stable across processes.
@@ -350,12 +395,31 @@ class Ingest:
             if str(chunk) not in self.consumed:
                 yield chunk
 
-    def consume(self, chunk: Path) -> list[tuple[str, str, str]]:
-        rows = read_chunk(chunk)
+    def read(self, chunk: Path) -> list[tuple[str, str, str]]:
+        """What a chunk holds. Does not mark it consumed -- see :meth:`retire`."""
+
+        return read_chunk(chunk)
+
+    def retire(self, chunk: Path) -> None:
+        """Record that a chunk has been dealt with, once it has been.
+
+        This used to be the back half of a single ``consume`` call that wrote this file *before*
+        handing the rows it had just read to the pool. So anything that made :meth:`.Sweep.admit`
+        raise -- a ledger whose lock was held, a full disk, a pool file opened read-only -- left the
+        chunk permanently recorded as consumed with none of its molecules admitted, and
+        :meth:`pending` does not offer a consumed chunk again.
+
+        That loss is not recoverable by re-running anything. The sampler is seeded and the seed is
+        recorded, but PRISM is not re-invoked for a chunk whose directory already exists, and the
+        SDF on disk is the only copy of what it produced; the campaign simply has fewer molecules
+        than its generators delivered, and nothing in the record says which ones or why. Splitting
+        the call is what lets the caller put the admission between the two halves, so a chunk is
+        retired because its molecules are in the pool rather than because they were read.
+        """
+
         self.consumed.add(str(chunk))
         self.state.parent.mkdir(parents=True, exist_ok=True)
         self.state.write_text(json.dumps(sorted(self.consumed)), encoding="utf-8")
-        return rows
 
 
 def chunk_measurements(generator: Generator, results: Sequence[ChunkResult], unique: Sequence[int]):
@@ -369,6 +433,25 @@ def chunk_measurements(generator: Generator, results: Sequence[ChunkResult], uni
 
     if len(results) != len(unique):
         raise ValueError("one uniqueness count per chunk result")
+    # A chunk that delivered nothing is kept, and dropping it was the other half of a defect.
+    #
+    # Viability is delivered over requested, so a chunk that delivered 0 of 5,000 is not a missing
+    # measurement -- it is the strongest viability measurement there is, and the one this module's
+    # whole doctrine is about: TargetDiff returning 2 of 100 on a 28 A box says the box is wrong,
+    # which is cheap to fix, and the number that says so is the low one. ``Chunk`` accepts
+    # ``delivered=0`` deliberately, ``Productivity.uniqueness`` returns ``(0.0, (0.0, 0.0))`` for a
+    # loop that delivered nothing, and ``cost_multiplier`` returns ``None`` rather than a large
+    # finite number. Nothing downstream needed protecting from these rows.
+    #
+    # Measured on the ALK2 v7 generation tree: 19 of 239 chunks delivered zero candidates, spread
+    # over three of the six generators -- and ``targetdiff_g2`` delivered zero in 8 chunks out of 8,
+    # which is exactly the case ``viable`` exists to catch and was being filtered out of its input.
+    #
+    # The fabricated fallback chunk went with it. It existed because the filter could empty the
+    # tuple, and it invented a ``seconds=1.0`` that no loop measured. With nothing filtered, a
+    # non-empty ``results`` always yields a non-empty ``chunks``, and an empty one is refused by
+    # ``Productivity`` itself with "productivity over no chunks measures nothing" -- which is the
+    # right answer rather than a profile built from a made-up row.
     return Productivity(
         tag=generator.tag,
         model=generator.model,
@@ -377,13 +460,11 @@ def chunk_measurements(generator: Generator, results: Sequence[ChunkResult], uni
             Chunk(
                 requested=result.requested,
                 delivered=max(result.delivered, 0),
-                unique=max(min(count, result.delivered), 0),
+                unique=max(min(count, max(result.delivered, 0)), 0),
                 seconds=max(result.seconds, 1e-6),
             )
             for result, count in zip(results, unique, strict=True)
-            if result.delivered > 0
-        )
-        or (Chunk(requested=generator.chunk, delivered=0, unique=0, seconds=1.0),),
+        ),
     )
 
 

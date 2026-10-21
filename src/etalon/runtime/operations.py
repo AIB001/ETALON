@@ -24,9 +24,11 @@ _OPERATIONS = {
     "campaign.import": ({"database", "snapshot"}, {"candidate_ids"}),
     "campaign.assays": ({"database", "snapshot", "review"}, set()),
     "campaign.handoffs": ({"database", "workspace", "artifact_id", "rationale"}, {"candidate_ids"}),
+    "design.import": ({"database", "bundle_path"}, {"mode"}),
     "screen.run": ({"config_path", "library_path"}, {"workers", "devices", "allow_copyleft"}),
     "screen.export": ({"workspace", "run_id"}, set()),
     "active.run": ({"database", "max_rounds"}, {"min_new_admitted"}),
+    "active.evaluate": ({"database", "candidate_id", "endpoint_id"}, set()),
 }
 
 
@@ -43,9 +45,11 @@ def validate_arguments(operation: str, arguments: dict, *, deferred: bool = Fals
         return
     if references(arguments):
         raise ValueError("unresolved workflow output reference")
-    for key in ("database", "snapshot", "workspace", "config_path", "library_path"):
+    for key in ("database", "snapshot", "workspace", "config_path", "library_path", "bundle_path"):
         if key in arguments:
             absolute(arguments[key])
+    if operation == "design.import" and arguments.get("mode", "pool") not in {"pool", "index_only"}:
+        raise ValueError("design import mode must be pool or index_only")
     for key in ("allow_partial", "allow_copyleft"):
         if key in arguments and type(arguments[key]) is not bool:
             raise ValueError(f"{key} must be an explicit boolean")
@@ -73,10 +77,21 @@ def input_hashes(value: Any) -> dict[str, str]:
     if isinstance(value, dict):
         if "$ref" in value:
             return result
+        if value.get("schema") == "etalon-executor/1" and value.get("kind") == "prism_bridge_v1":
+            from etalon.runtime.executors import _identity
+            _identity(value)
+            receptor = absolute(value["configuration"]["receptor_path"])
+            return {str(receptor): file_hash(receptor)}
         for key, item in value.items():
             if key in {"database", "workspace", "python"}:
                 continue
-            if isinstance(item, str) and (key.endswith("_path") or key in {"path", "input_sdf"}):
+            if key == "bundle_path" and isinstance(item, str):
+                from etalon.data.design import read_bundle
+                checked = read_bundle(absolute(item))
+                result[checked["path"]] = checked["bundle_file_sha256"]
+                result.update({str(Path(checked["root"]) / ref["path"]): ref["sha256"]
+                               for ref in checked["references"].values()})
+            elif isinstance(item, str) and (key.endswith("_path") or key in {"path", "input_sdf"}):
                 path = absolute(item)
                 if not path.is_file():
                     raise FileNotFoundError(path)
@@ -116,6 +131,37 @@ def check_inputs(inputs: dict) -> None:
             raise StateError(f"planned input changed or disappeared: {name}")
 
 
+def action_binding(operation: str, parameters: dict) -> dict:
+    """Freeze relevant facts, never mutable SQLite bytes or an unrelated event cutoff."""
+    if operation != "active.evaluate":
+        return {"inputs": input_hashes(parameters)}
+    from etalon.runtime.executors import registered_executors, _verify
+    store = CampaignStore(absolute(parameters["database"]), read_only=True)
+    state = store.snapshot()
+    candidate = state["candidates"].get(parameters["candidate_id"])
+    endpoint = state["endpoints"].get(parameters["endpoint_id"])
+    if candidate is None or endpoint is None:
+        raise ValueError("evaluation requires a registered candidate and endpoint")
+    if not endpoint.queryable:
+        raise ValueError("historical-only endpoint is not executable")
+    record = registered_executors(store.path).get(endpoint.id)
+    if record is None or record["endpoint"] != endpoint.as_dict():
+        raise StateError("endpoint requires a matching registered executor")
+    _verify(record)
+    if record["kind"] == "prism_bridge_v1":
+        template = record["configuration"]["request_template"]
+        if candidate.id != template["candidate_id"] or candidate.smiles != "c1ccccc1":
+            raise ValueError("UNSUPPORTED: fixed bounded benzene template")
+    if endpoint.requires_handoff:
+        from etalon.authority.grant import authorize, require
+        receptor = Path(record["configuration"]["receptor_path"])
+        approved = authorize([candidate.handoff], receptor_path=receptor)
+        require(candidate.handoff, approved.grants, receptor_path=receptor)
+    return {"candidate": candidate.as_dict(), "endpoint": endpoint.as_dict(),
+            "campaign_spec": state["spec"].as_dict(), "executor": record,
+            "inputs": input_hashes(record)}
+
+
 def preflight(operation: str, parameters: dict, resources: dict) -> dict:
     validate_arguments(operation, parameters)
     inputs = input_hashes(parameters)
@@ -130,12 +176,31 @@ def preflight(operation: str, parameters: dict, resources: dict) -> dict:
         plan = plan_data(parameters["request"], budget=budget)
         inputs.update({entry["path"]: entry["sha256"] for entry in plan["inputs"]})
         return {"inputs": inputs, "data_plan_id": plan["plan_id"]}
+    if operation == "active.evaluate":
+        from etalon.active.budget import cost_quote, fits_budget
+        from etalon.runtime.executors import registered_executors
+        binding = action_binding(operation, parameters)
+        store = CampaignStore(absolute(parameters["database"]), read_only=True)
+        state = store.snapshot()
+        if state["balance"]["reserved"] or any(a["status"] in {"reserved", "running"} for a in state["actions"]) or any(r["status"] == "running" for r in state["rounds"]):
+            raise StateError("active journal needs result/cost reconciliation before dispatch")
+        endpoint = state["endpoints"][parameters["endpoint_id"]]
+        quote = cost_quote(endpoint, state["observations"])
+        unit = "campaign:" + state["spec"].cost_unit
+        if resources.get(unit, -1) < quote or not fits_budget(quote, state["balance"]["remaining"]):
+            raise ValueError("insufficient action limit or campaign budget for the quoted execution")
+        attempts = sum(a["candidate_id"] == parameters["candidate_id"] and a["endpoint_id"] == endpoint.id
+                       for a in state["actions"])
+        if attempts >= endpoint.max_replicates:
+            raise StateError("replicate limit reached; implicit retries are not permitted")
+        return {"inputs": {**inputs, **binding["inputs"]}, "action_binding": binding,
+                "registry_hash": digest(registered_executors(store.path)), "quote": {unit: quote}}
     if operation == "active.run":
         from etalon.runtime.executors import registered_executors
 
         store = CampaignStore(absolute(parameters["database"]), read_only=True)
         state = store.status()
-        if state["pending"] or any(r["status"] == "running" for r in state["rounds"]):
+        if state["balance"]["reserved"] or state["pending"] or any(r["status"] == "running" for r in state["rounds"]):
             raise StateError("active journal needs result/cost reconciliation before dispatch")
         registry = registered_executors(store.path)
         if any(e["queryable"] and e["id"] not in registry for e in state["endpoints"]):
@@ -183,9 +248,12 @@ def execute(operation: str, params: dict, ctx: Any) -> dict:
         for prepared in params["executors"]:
             register_executor(created["database"], prepared, rationale="Executor explicitly declared in frozen workflow")
         return _record_campaign_result(operation, params, created, ctx.root)
-    if operation in {"campaign.import", "campaign.assays", "campaign.handoffs"}:
+    if operation in {"campaign.import", "campaign.assays", "campaign.handoffs", "design.import"}:
         store = CampaignStore(absolute(params["database"]))
-        if operation == "campaign.import":
+        if operation == "design.import":
+            from etalon.data.design import import_bundle
+            result = import_bundle(store, params["bundle_path"], mode=params.get("mode", "pool"))
+        elif operation == "campaign.import":
             from etalon.data.library import import_candidates
 
             result = import_candidates(store, Path(params["snapshot"]), candidate_ids=params.get("candidate_ids"))
@@ -218,24 +286,30 @@ def execute(operation: str, params: dict, ctx: Any) -> dict:
 
         result = Screen(params["workspace"]).export_shortlist(params["run_id"], ctx.root / "shortlist.sdf")
         return {**result, "sha256": file_hash(Path(result["path"]))}
-    if operation == "active.run":
+    if operation in {"active.run", "active.evaluate"}:
         from etalon.active.runner import ActiveCampaign
         from etalon.runtime.executors import build_executor, registered_executors
 
         store = CampaignStore(absolute(params["database"]))
         if digest(registered_executors(store.path)) != ctx.preflight.get("registry_hash"):
             raise StateError("registered executors changed after preflight; inspect a fresh plan")
-        start = {"action_ids": [a["id"] for a in store.actions()], "balance": store.balance(),
-                 "admitted": len(store.observations(admitted_only=True))}
+        initial = store.snapshot()
+        start = {"action_ids": [a["id"] for a in initial["actions"]], "balance": initial["balance"],
+                 "admitted": sum(o["admitted"] for o in initial["observations"]),
+                 "resource_executions": initial["resource_executions"]}
         ctx.receipt("active_start", start)
         executor, receptor = build_executor(store.path, ctx.root / "actions", checkpoint=ctx.checkpoint,
-                                             process_observer=ctx.process_observer)
+                                             process_observer=ctx.process_observer,
+                                             endpoint_ids=(params["endpoint_id"],) if operation == "active.evaluate" else None)
 
         def observed(action, evaluation):
             ctx.receipt("action:" + action.id, {"action": action.as_dict(), "result": evaluation.as_dict()})
 
-        outcome = ActiveCampaign(store, executor, receptor_path=receptor,
-                                  checkpoint=ctx.checkpoint, result_observer=observed).run(max_rounds=params["max_rounds"])
+        campaign = ActiveCampaign(store, executor, receptor_path=receptor,
+                                  checkpoint=ctx.checkpoint, result_observer=observed)
+        outcome = (campaign.evaluate(params["candidate_id"], params["endpoint_id"],
+                                     max_cost=ctx.preflight["quote"]["campaign:" + store.configuration()[0].cost_unit])
+                   if operation == "active.evaluate" else campaign.run(max_rounds=params["max_rounds"]))
         return active_result(store, start, outcome)
     raise ValueError("unregistered operation")
 
@@ -418,6 +492,14 @@ def _verify_campaign(operation: str, params: dict, result: dict, *, workspace: P
         if any(result["result"].get(key) != value for key, value in checked.items() if key != "bound"):
             raise StateError("handoff receipt differs from the verified MolCascade contract")
         evidence.update(artifact_id=checked["artifact_id"], records=checked["records"])
+    elif operation == "design.import":
+        from etalon.data.design import verify_import
+        checked = verify_import(store, params["bundle_path"], mode=params.get("mode", "pool"))
+        if any(result["result"].get(k) != v for k, v in checked.items()
+               if k not in {"added_candidates", "added_records", "imported"}):
+            raise StateError("design import result differs from indexed source")
+        evidence.update(bundle_id=checked["bundle_id"], schema_sha256=checked["schema_sha256"],
+                        source_kind=checked["source_kind"], indexed_slots=checked["indexed_slots"])
     return evidence
 
 
@@ -450,7 +532,12 @@ def _active_interval(snapshot: dict, start: dict, end: list | None = None) -> li
     prior = snapshot["actions"][:len(before)]
     prior_ids = set(before)
     balance = start.get("balance", {})
-    if (not isinstance(balance, dict) or balance.get("spent") != sum(a["cost"] for a in prior)
+    resources = start.get("resource_executions", {})
+    if (not isinstance(resources, dict) or any(record.get("status") != "settled"
+            or snapshot.get("resource_executions", {}).get(key) != record for key, record in resources.items())):
+        raise StateError("active starting resource charges differ from their original same-ledger records")
+    prior_cost = sum(a["cost"] for a in prior) + sum(record["cost"] for record in resources.values())
+    if (not isinstance(balance, dict) or balance.get("spent") != prior_cost
             or balance.get("reserved") != 0
             or any(a["status"] in {"reserved", "running"} for a in prior)
             or start.get("admitted") != sum(o["admitted"] for o in snapshot["observations"]
@@ -560,9 +647,12 @@ def verify(operation: str, params: dict, result: dict, *, active_start: dict | N
         from etalon.boundary.screen import Screen
 
         run = result["run"]
-        if run["status"] != "SUCCEEDED" or run["failed_stages"] or not run["stages"]:
-            raise StateError("screening did not finish successfully; Python return is not scientific success")
         screen = Screen(result["workspace"])
+        native = screen.state(result["run_id"])
+        if native is None or canonical(native.as_dict()) != canonical(run):
+            raise StateError("screen result differs from its committed native record")
+        if not native.terminal or native.outcome == "failed" or not native.stages:
+            raise StateError("screening did not finish successfully; Python return is not scientific success")
         # Screen's own construction pins MolCascade, so this call is redundant today and is here
         # because the next reader should not have to know that to be sure this import is pinned.
         load("molcascade")
@@ -570,16 +660,18 @@ def verify(operation: str, params: dict, result: dict, *, active_start: dict | N
 
         artifacts = LocalArtifactStore(screen.workspace)
         ids = [s["artifact_id"] for s in run["stages"] if s["artifact_id"] is not None and s["error"] is None]
-        if len(ids) != len(run["stages"]):
+        if not native.exhausted and len(ids) != len(run["stages"]):
             raise StateError("screen has missing or uncommitted stages")
+        if any(stage.error is not None and stage != native.exhaustion for stage in native.stages):
+            raise StateError("screen also contains failures unrelated to terminal exhaustion")
         for key in ids:
             artifacts.artifact_directory(key, verify=True)
-        evidence["artifact_ids"] = ids
+        evidence.update(artifact_ids=ids, outcome=native.outcome, exhausted_at=run.get("exhausted_at"))
     elif operation == "screen.export":
         if file_hash(Path(result["path"])) != result["sha256"]:
             raise StateError("exported shortlist changed")
         evidence["sha256"] = result["sha256"]
-    elif operation == "active.run":
+    elif operation in {"active.run", "active.evaluate"}:
         actual = _active_facts(result, database=params["database"], active_start=active_start,
                                action_receipts=action_receipts)
         if digest(actual["observations"]) != digest(result["observations"]):
@@ -597,7 +689,7 @@ def verify(operation: str, params: dict, result: dict, *, active_start: dict | N
         evidence.update(admitted=admitted, action_ids=actual["action_ids"], cost=actual["cost"],
                         cost_unit=actual["cost_unit"], active_start_sha256=digest(result["active_start"]),
                         admission="CampaignStore scientific rulings; not model self-evaluation")
-    elif operation in {"campaign.create", "campaign.import", "campaign.assays", "campaign.handoffs"}:
+    elif operation in {"campaign.create", "campaign.import", "campaign.assays", "campaign.handoffs", "design.import"}:
         evidence.update(_verify_campaign(operation, params, result, workspace=workspace))
     else:
         raise ValueError("unregistered operation cannot be verified")
@@ -613,7 +705,7 @@ def accounting(operation: str, result: dict, resources: dict, *, database: str |
         for unit, key in (("http_requests", "requests"), ("http_bytes", "response_bytes")):
             if unit in spent:
                 spent[unit], basis[unit] = usage[key], "measured by MolQuarry request/stream meter"
-    if operation == "active.run":
+    if operation in {"active.run", "active.evaluate"}:
         actual = _active_facts(result, database=database, active_start=active_start, action_receipts=action_receipts)
         if actual["pending"]:
             raise StateError("active outcomes remain unreconciled; retain unknown cost reservations")
@@ -630,7 +722,7 @@ def recover(operation: str, params: dict, ctx: Any) -> dict | None:
     receipts = ctx.receipts()
     if "completed" in receipts:
         result = receipts["completed"]["result"]
-        if operation == "active.run":
+        if operation in {"active.run", "active.evaluate"}:
             if "active_start" not in receipts:
                 raise StateError("active completion has no durable starting ownership receipt")
             _active_facts(result, database=params["database"], active_start=receipts["active_start"],
@@ -645,11 +737,31 @@ def recover(operation: str, params: dict, ctx: Any) -> dict | None:
             if operation == "data.prepare":
                 result["library_path"] = str(path / "library.csv")
             return result
-    if operation == "active.run" and "active_start" in receipts:
+    if operation == "design.import":
+        from etalon.data.design import verify_import
+        store = CampaignStore(absolute(params["database"]))
+        try:
+            checked = verify_import(store, params["bundle_path"], mode=params.get("mode", "pool"))
+        except StateError:
+            return None
+        return _record_campaign_result(operation, params,
+            {"database": str(store.path), "result": checked, "state": store.status()}, ctx.root)
+    if operation in {"active.run", "active.evaluate"} and "active_start" in receipts:
+        from etalon.active.schema import Action
+        from etalon.runtime.executors import recover_bridge_action
+
         store = CampaignStore(absolute(params["database"]))
         snapshot = store.snapshot()
         owned = {a["id"] for a in _active_interval(snapshot, receipts["active_start"])}
         observations = {o["action_id"] for o in snapshot["observations"]}
+        for raw in snapshot["actions"]:
+            if raw["id"] not in owned or raw["id"] in observations or "action:" + raw["id"] in receipts:
+                continue
+            action = Action(**{key: raw[key] for key in Action.__dataclass_fields__})
+            result = recover_bridge_action(store.path, action)
+            if result is not None:
+                ctx.receipt("action:" + action.id, {"action": action.as_dict(), "result": result.as_dict()})
+        receipts = ctx.receipts()
         prepared = _action_receipt_results(receipts, snapshot, owned)
         for action_id, result in prepared.items():
             if action_id not in observations:

@@ -37,6 +37,8 @@ from etalon.runtime.store import RuntimeStore
 def plan(spec: dict) -> dict:
     normalized = workflow(spec)
     inputs = operations.input_hashes([node["arguments"] for node in normalized["nodes"]])
+    if "action_binding" in normalized:
+        inputs.update(normalized["action_binding"].get("inputs", {}))
     return {"plan_id": plan_id(normalized, inputs), "spec": normalized, "inputs": inputs,
             "scope": "bounded registered operations; quoted costs remain distinguished from measured usage"}
 
@@ -197,7 +199,7 @@ def _verify_dependencies(job: dict, dependencies: list[str]) -> None:
             if node["state"] != "verified":
                 raise StateError("step dependency is not verified")
             kwargs = {}
-            if node["definition"]["operation"] == "active.run":
+            if node["definition"]["operation"] in {"active.run", "active.evaluate"}:
                 receipts = RuntimeStore(job["workspace"]).receipts(job["id"], node["id"])
                 kwargs = {"active_start": receipts.get("active_start"), "action_receipts": receipts}
             elif node["definition"]["operation"].startswith("campaign."):
@@ -212,7 +214,7 @@ def _over_budget(job: dict) -> bool:
 def _complete(ctx: Context, node: dict, parameters: dict, result: dict, *, recovered: bool = False) -> bool:
     operation = node["definition"]["operation"]
     kwargs = {}
-    if operation == "active.run":
+    if operation in {"active.run", "active.evaluate"}:
         receipts = ctx.receipts()
         kwargs = {"active_start": receipts.get("active_start"), "action_receipts": receipts}
     spent, basis = operations.accounting(operation, result, node["definition"]["resources"],
@@ -278,6 +280,9 @@ def _control(store: RuntimeStore, job_id: str, epoch: int, checkpoint, *, transp
         parameters = resolve(definition["arguments"], {n["id"]: n["result"] for n in job["nodes"] if n["state"] == "verified"})
         with _resource_lock(parameters):
             prepared = operations.preflight(definition["operation"], parameters, definition["resources"])
+            binding = job["plan"]["spec"].get("action_binding")
+            if binding is not None and canonical(binding) != canonical(operations.action_binding(definition["operation"], parameters)):
+                raise StateError("action scientific binding changed after preparation")
             ctx = Context(store, job_id, epoch, selected["id"], check=checkpoint)
             ctx.preflight = prepared
             store.start_node(job_id, epoch, definition, parameters, decision)
@@ -380,7 +385,7 @@ def _settle_failure(ctx: Context, node: dict, settlement: dict) -> None:
     if frozen and (canonical(frozen["settlement"]) != canonical(settlement) or frozen["evidence_sha256"] != evidence_sha):
         raise StateError("failure settlement or its evidence changed after the settlement was recorded")
     prepared = {}
-    if node["definition"]["operation"] == "active.run":
+    if node["definition"]["operation"] in {"active.run", "active.evaluate"}:
         from etalon.active.schema import Evaluation
 
         store = CampaignStore(absolute(node["parameters"]["database"]))
@@ -398,8 +403,15 @@ def _settle_failure(ctx: Context, node: dict, settlement: dict) -> None:
             endpoints = store.configuration()[1]
             actual = operations.active_result(store, start)
             unit = "campaign:" + actual["cost_unit"]
-            if settlement["costs"].get(unit) != actual["cost"] + sum(costs.values()):
-                raise ValueError("workflow settlement must equal existing and newly reconciled campaign charges")
+            if any(costs[action["id"]] < action["cost"] for action in pending):
+                raise ValueError("final action cost cannot discard already measured partial execution charges")
+            # action_costs are final totals, not increments over a pending action's
+            # already measured partial charges. Count those charges exactly once.
+            pending_ids = {action["id"] for action in pending}
+            terminal_cost = sum(action["cost"] for action in store.actions()
+                                if action["id"] in actual["action_ids"] and action["id"] not in pending_ids)
+            if settlement["costs"].get(unit) != terminal_cost + sum(costs.values()):
+                raise ValueError("workflow settlement must equal terminal charges plus final unresolved action totals")
             for action in pending:
                 prepared[action["id"]] = Evaluation(action["candidate_id"], action["endpoint_id"], None,
                                     endpoints[action["endpoint_id"]].units, costs[action["id"]], status="failed",
@@ -449,7 +461,7 @@ def _settle_failure(ctx: Context, node: dict, settlement: dict) -> None:
         store.recover_idle_rounds(reason=settlement["reason"])
     else:
         ctx.receipt("failure_settlement", {"settlement": settlement, "evidence_sha256": evidence_sha, "actions": {}})
-    final_lock = store.connection(write=True) if node["definition"]["operation"] == "active.run" else nullcontext()
+    final_lock = store.connection(write=True) if node["definition"]["operation"] in {"active.run", "active.evaluate"} else nullcontext()
     with final_lock as db:
         if db is not None:
             # Other callers need not honor the runtime's file lock. Hold the

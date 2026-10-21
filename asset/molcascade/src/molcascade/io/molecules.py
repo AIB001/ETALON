@@ -79,6 +79,23 @@ def _same_file_state(before: os.stat_result, after: os.stat_result) -> bool:
     )
 
 
+def _source_path_state(path: Path) -> os.stat_result:
+    """Compare path and reader through the same Windows stat implementation.
+
+    On Windows, path.stat() and fstat() can expose different ctime semantics
+    (creation versus metadata-change time). Opening the path again and using
+    fstat keeps every identity, size and timestamp check, without accepting a
+    tolerance or dropping ctime. Callers still reject symlinks explicitly.
+    """
+    if os.name != "nt":
+        return path.stat()
+    descriptor = os.open(path, os.O_RDONLY | getattr(os, "O_BINARY", 0))
+    try:
+        return os.fstat(descriptor)
+    finally:
+        os.close(descriptor)
+
+
 def snapshot_regular_file(source: str | Path, destination: str | Path) -> SourceSnapshot:
     """Copy and hash a regular non-symlink file, detecting concurrent mutation."""
 
@@ -95,7 +112,7 @@ def snapshot_regular_file(source: str | Path, destination: str | Path) -> Source
         descriptor = os.open(input_path, flags)
         with os.fdopen(descriptor, "rb") as reader:
             before = os.fstat(reader.fileno())
-            path_before = input_path.stat()
+            path_before = _source_path_state(input_path)
             if (
                 not stat.S_ISREG(before.st_mode)
                 or input_path.is_symlink()
@@ -113,7 +130,7 @@ def snapshot_regular_file(source: str | Path, destination: str | Path) -> Source
                 writer.flush()
                 os.fsync(writer.fileno())
             after = os.fstat(reader.fileno())
-            path_after = input_path.stat()
+            path_after = _source_path_state(input_path)
             if (
                 input_path.is_symlink()
                 or not _same_file_state(before, after)
@@ -150,7 +167,7 @@ def read_regular_file_bounded(
     oversized = False
     with os.fdopen(descriptor, "rb") as reader:
         before = os.fstat(reader.fileno())
-        path_before = input_path.stat()
+        path_before = _source_path_state(input_path)
         if (
             not stat.S_ISREG(before.st_mode)
             or input_path.is_symlink()
@@ -168,7 +185,7 @@ def read_regular_file_bounded(
                 oversized = True
                 buffer.clear()
         after = os.fstat(reader.fileno())
-        path_after = input_path.stat()
+        path_after = _source_path_state(input_path)
         if (
             input_path.is_symlink()
             or not _same_file_state(before, after)

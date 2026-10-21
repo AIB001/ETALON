@@ -27,6 +27,7 @@ dev = ["pytest>=7", "ruff>=0.6"]
 mcp = ["mcp>=1.12,<2"]
 llm = ["httpx>=0.27,<1"]
 active = ["numpy>=1.24", "scipy>=1.10"]
+design = ["jsonschema>=4.18"]
 molecules = ["numpy>=1.26", "scipy>=1.10", "rdkit>=2024.9", "pydantic>=2.10,<3"]
 cascade = [
     "numpy>=1.26", "scipy>=1.10", "rdkit>=2024.9", "pydantic>=2.10,<3",
@@ -70,23 +71,34 @@ packages = ["src/etalon"]
 
 [tool.hatch.build.targets.wheel.force-include]
 # One document, two consumers: a Claude Code skill reads .claude/skills/<name>/SKILL.md and an MCP
-# client reads etalon://skills/<slug>. The wheel carries a copy because an installed package has no
-# .claude directory, and mcp/server.py::_skill_path falls back to these.
+# client reads etalon://skills/<slug>. Complete bundles are used by the current
+# reader; the original six flat copies remain for older package consumers.
 #
 # Listed one by one rather than globbed, because the destination is the SLUG and the source is the
 # DIRECTORY and the two differ: sweep <- etalon-screening-sweep, monitoring <- etalon-campaign-monitoring.
 # A glob would ship etalon-screening-sweep/SKILL.md under a name nothing looks up.
 #
-# Five of these were missing. Only `campaign` was ever force-included, so a wheel-installed server
-# raised FileNotFoundError for the other five -- including `sweep`, which is the document a
-# screening-only campaign is routed to and the one that carries the gate-calibration argument.
-# tests/test_mcp.py asserts this table against WORKFLOWS so the next one added cannot be forgotten.
+# Tests resolve every registered bundle's actual source through these mappings,
+# and compare complete source/wheel/install content, including pinned assets.
 ".claude/skills/etalon-campaign/SKILL.md" = "etalon/mcp/skills/campaign.md"
 ".claude/skills/etalon-screening-sweep/SKILL.md" = "etalon/mcp/skills/sweep.md"
 ".claude/skills/etalon-gate-calibration/SKILL.md" = "etalon/mcp/skills/gate-calibration.md"
 ".claude/skills/etalon-generation-planning/SKILL.md" = "etalon/mcp/skills/generation-planning.md"
 ".claude/skills/etalon-campaign-monitoring/SKILL.md" = "etalon/mcp/skills/monitoring.md"
 ".claude/skills/etalon-install/SKILL.md" = "etalon/mcp/skills/install.md"
+# Complete bundles retain relative references for host exports and MCP reads.
+# The flat entrypoint copies above remain available to older package consumers.
+".claude/skills/etalon-campaign" = "etalon/mcp/skills/bundles/campaign"
+".claude/skills/etalon-screening-sweep" = "etalon/mcp/skills/bundles/sweep"
+".claude/skills/etalon-gate-calibration" = "etalon/mcp/skills/bundles/gate-calibration"
+".claude/skills/etalon-generation-planning" = "etalon/mcp/skills/bundles/generation-planning"
+".claude/skills/etalon-campaign-monitoring" = "etalon/mcp/skills/bundles/monitoring"
+".claude/skills/etalon-install" = "etalon/mcp/skills/bundles/install"
+".claude/skills/etalon-data-design" = "etalon/mcp/skills/bundles/data-design"
+".claude/skills/etalon-research" = "etalon/mcp/skills/bundles/research"
+".claude/skills/etalon-skill-improvement" = "etalon/mcp/skills/bundles/skill-improvement"
+# MolQuarry bundles stay at their original asset path in both source and wheel;
+# skills.bundle_root and the legacy resource URIs resolve these same bytes.
 "asset" = "etalon/_assets"
 
 [tool.hatch.build]

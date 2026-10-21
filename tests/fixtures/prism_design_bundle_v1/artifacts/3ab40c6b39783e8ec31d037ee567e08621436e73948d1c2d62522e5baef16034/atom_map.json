@@ -1,0 +1,86 @@
+{
+  "pdb_id": "0tst",
+  "atoms": [
+    {
+      "atom_map": 10,
+      "element": "C",
+      "xyz_angstrom": [
+        -3.3265,
+        -0.1469,
+        -0.0268
+      ]
+    },
+    {
+      "atom_map": 12,
+      "element": "C",
+      "xyz_angstrom": [
+        -1.8663,
+        -0.2342,
+        0.388
+      ]
+    },
+    {
+      "atom_map": 14,
+      "element": "C",
+      "xyz_angstrom": [
+        -0.9383,
+        0.2322,
+        -0.7343
+      ]
+    },
+    {
+      "atom_map": 16,
+      "element": "C",
+      "xyz_angstrom": [
+        0.5121,
+        0.1481,
+        -0.3293
+      ]
+    },
+    {
+      "atom_map": 18,
+      "element": "C",
+      "xyz_angstrom": [
+        1.245,
+        -1.0254,
+        -0.5508
+      ]
+    },
+    {
+      "atom_map": 20,
+      "element": "C",
+      "xyz_angstrom": [
+        2.5827,
+        -1.108,
+        -0.1609
+      ]
+    },
+    {
+      "atom_map": 22,
+      "element": "C",
+      "xyz_angstrom": [
+        3.1982,
+        -0.0213,
+        0.4575
+      ]
+    },
+    {
+      "atom_map": 24,
+      "element": "C",
+      "xyz_angstrom": [
+        2.4762,
+        1.1482,
+        0.6885
+      ]
+    },
+    {
+      "atom_map": 26,
+      "element": "C",
+      "xyz_angstrom": [
+        1.1384,
+        1.2326,
+        0.2993
+      ]
+    }
+  ]
+}

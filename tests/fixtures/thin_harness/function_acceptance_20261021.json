@@ -1,0 +1,234 @@
+{
+  "schema": "thin-harness-function-acceptance/1",
+  "frozen_before_function_results": true,
+  "baseline": {
+    "path": "F:\\life_healthy\\integration\\thin-harness-functions-20261021\\baseline.zip",
+    "sha256": "24b76668c45a72bd5c3517ffa6ef5bf9776f90e07a7f37b707bb36d32419cdc8",
+    "files": 1157
+  },
+  "source_of_requirements": [
+    "docs/thin-harness/README.md#function-migration",
+    "ACTION_CONTRACT.md",
+    "RESULT_CONTRACT.md",
+    "METHOD_CONTRACT.md",
+    "ACCEPTANCE.md"
+  ],
+  "existing_ids_only": true,
+  "no_new_workflow_framework": true,
+  "cases": [
+    {
+      "functional_rows": [
+        "FM-05"
+      ],
+      "contracts": [
+        "ACT-03",
+        "ACT-08",
+        "RES-03",
+        "RES-05",
+        "HOST-01"
+      ],
+      "scenario": "Screen one explicitly supplied existing small batch without generation, global campaign planning, mandatory method record or unused tiers. Observe zero admitted hits then stop; optionally run a later different declared protocol on a new action/batch.",
+      "must_observe": [
+        "Actual existing plan_screen/submit_screen/screen_status or sweep function calls with exact inputs; synthetic executor clearly marked",
+        "Real persisted action/receipt identities, fees and zero-hit count; no fabricated zero-valued successful observations",
+        "Only requested batch executed; no hidden generator/planner invocation; prior protocol/output/budget history immutable after later method choice"
+      ],
+      "fail_if": [
+        "Skipping generator or skill requires unrelated previous stage or global router",
+        "Zero hits silently becomes failed or successful numeric zero; incurred fees discarded",
+        "Changing later method overwrites old batch/protocol/receipt",
+        "Mocked facade returns are sole proof of independent capability"
+      ]
+    },
+    {
+      "functional_rows": [
+        "FM-06"
+      ],
+      "contracts": [
+        "RES-08",
+        "MET-04",
+        "ACT-08",
+        "LEARN-03"
+      ],
+      "scenario": "Call the actual calibrate/separation/enrichment function on a declared synthetic panel alone; a constant, tied, reversed-direction or insufficient-support result must permit rejecting/changing the proposed gate without dispatching a campaign.",
+      "must_observe": [
+        "Exact existing function signature, direction/unit, molecular counting and invalid/unknown semantics",
+        "No implicit authorization or scientific dispatch from calibration query",
+        "Existing revision-bound authorization checks still reject stale or mismatched gate identity"
+      ],
+      "fail_if": [
+        "Advice automatically authorizes a gate or starts the full pipeline",
+        "Undefined/NaN/insufficient support fabricated as a zero success metric",
+        "Removing revision guard or rewriting old measured rows is necessary to skip a stage"
+      ]
+    },
+    {
+      "functional_rows": [
+        "FM-07"
+      ],
+      "contracts": [
+        "ACT-02",
+        "ACT-03",
+        "ACT-08",
+        "MET-04",
+        "HOST-01"
+      ],
+      "scenario": "Use actual generation-productivity or campaign-planning calculation alone, then choose an existing supplied molecule route or one generator rather than following all suggested stages.",
+      "must_observe": [
+        "Exact real numerical function inputs and outputs, measured versus estimated yield/cost distinguished",
+        "Proposal remains advisory; no generator, screen or paid executor automatically launched by reading proposal",
+        "A bounded changed choice or explicit stop follows observed feedback; previous proposal and costs preserved"
+      ],
+      "fail_if": [
+        "Reading a proposal forces Campaign/Supervisor/propose full loop",
+        "Skipping generation requires dummy generation artifacts",
+        "Estimated cost/yield or missing outcome represented as actual measured success",
+        "Removing legacy optional numerical strategy needed merely to prove openness"
+      ]
+    },
+    {
+      "functional_rows": [
+        "FM-08"
+      ],
+      "contracts": [
+        "RES-02",
+        "RES-07",
+        "ACT-06",
+        "HOST-01"
+      ],
+      "scenario": "Read real persisted workflow/sweep status, heartbeat and receipts on an engineering fixture containing unresolved execution, without running other skills or scheduling work. Explain unknown and stop.",
+      "must_observe": [
+        "Before/after executions, observations, budget reservations and receipt digests unchanged by read-only diagnosis",
+        "Actual status/receipt evidence supports pending/unknown; absence of heartbeat alone is not proof of terminal failure",
+        "Recommendation to recover/cancel separated from an authorized mutation; no background research loop"
+      ],
+      "fail_if": [
+        "Status read silently dispatches/retries/settles",
+        "Unknown reservation refunded or scalar zero substituted",
+        "Claiming cancellation from PID absence without original identity/receipt semantics",
+        "Claiming full monitoring migration solely from previous execution recovery tests"
+      ]
+    },
+    {
+      "functional_rows": [
+        "FM-09"
+      ],
+      "contracts": [
+        "MET-04",
+        "RES-08",
+        "LEARN-03",
+        "INT-03"
+      ],
+      "scenario": "Select one already implemented research numerical or diagnostic function, give its exact callable signature and a small synthetic input, and invoke it without controller.schedule, training a new full policy, or reopening R4b.",
+      "must_observe": [
+        "One named concrete existing function and source path; actual algorithm invocation/result, not just a new method metadata record",
+        "Skill states when useful, required input role/units, returned value and uncertainty, and explicit stopping/failure conditions",
+        "Nontrivial counterexample e.g. insufficient support/invalid role/constant panel matches existing scientific semantics",
+        "All old research sources and historical ledgers unchanged except explicitly owned justified edits"
+      ],
+      "fail_if": [
+        "A new wrapper merely repeats documentation without proving real callable method",
+        "Forced MethodVersion/approval gate before numerical call",
+        "Old released labels reused as unseen evaluation or synthetic result claimed independent gain",
+        "Algorithm semantics weakened to make advice look usable"
+      ]
+    },
+    {
+      "functional_rows": [
+        "FM-10"
+      ],
+      "contracts": [
+        "MET-01",
+        "MET-02",
+        "MET-03",
+        "MET-05",
+        "MET-07",
+        "HOST-01"
+      ],
+      "scenario": "In a fresh isolated native-host data copy, retain an existing complete parent snapshot/version, revise local method content, append a new MethodVersion whose structured parents contains the exact existing parent record ID, then append an observed partial trial/use.",
+      "must_observe": [
+        "Official native CLI actual tool request includes nonempty parents with exact existing parent MethodVersion ID; persisted journal record resolves it",
+        "Old and new byte-complete snapshots independently verify and have distinct content hashes",
+        "All prior method records, observations, budgets and initial event prefix are byte/semantic unchanged; only intended new records appended",
+        "Old parentless record stays parentless; unrelated new root version with parents=[] still accepted",
+        "Partial use declaration remains host_reported unless direct tool evidence proves more"
+      ],
+      "fail_if": [
+        "Parent ID appears only in prose change_summary or requested but rejected write",
+        "Old parentless version rewritten to manufacture lineage",
+        "Mutable content path replaces frozen parent or stale snapshot hash accepted",
+        "New record exists only in hand-authored summary instead of real native response and SQLite",
+        "Implementing universal nonempty-parent requirement"
+      ]
+    },
+    {
+      "functional_rows": [
+        "FM-05",
+        "FM-06",
+        "FM-07",
+        "FM-08",
+        "FM-09",
+        "FM-10"
+      ],
+      "contracts": [
+        "HOST-01",
+        "MET-03",
+        "INT-01",
+        "INT-02",
+        "INT-03"
+      ],
+      "scenario": "Native host goals constrain task, data and resource scope, not the complete tool sequence. Skill use may be omitted, partial, composed or changed; feedback can trigger stop.",
+      "must_observe": [
+        "Per-run isolated input/config/workspace, official CLI identity, actual prompt and tool request/response JSONL, source/module/import identity",
+        "At least one substantive selected capability and visible feedback-dependent changed step or stop; failures retained",
+        "Fixture SDK runs, real native host calls, real CPU algorithms and independent scientific improvement distinctly labeled",
+        "Updated skill exports/packages bind exact current bytes; no forced full reference injection"
+      ],
+      "fail_if": [
+        "Prompt supplies mandatory complete ordered calls or demands all pipeline stages",
+        "Configuration, exit0, self-report or Python MCP client substitutes for native behavior",
+        "Docs/tool descriptions command global first-tool router or mandatory skill",
+        "Claude existing401 silently promoted to pass or retried without usable new auth evidence"
+      ]
+    },
+    {
+      "functional_rows": [
+        "FM-05",
+        "FM-06",
+        "FM-07",
+        "FM-08",
+        "FM-09",
+        "FM-10"
+      ],
+      "contracts": [
+        "LEARN-01",
+        "LEARN-02",
+        "RES-05",
+        "INT-01"
+      ],
+      "scenario": "Report scoped engineering capability and preserve failures, provenance and resource distinctions.",
+      "must_observe": [
+        "Baseline1157 source files and protected scientific/local fixes preserved, no staging or shared environment changes",
+        "Inherited failure costs and unknown outcomes unchanged; native tokens, fixture estimates, measured time and unknown monetary totals separated",
+        "Scientific improvement remains not_run absent authorized unseen tasks and equal-budget independent controls"
+      ],
+      "fail_if": [
+        "Sum overlapping pytest groups as independent coverage",
+        "Declare M/S/phi/G benefit from saved methods, documentation reduction or familiar replay",
+        "Restart paused R4b or new PRISM/CRO tasks to produce acceptance evidence"
+      ]
+    }
+  ],
+  "report_values": [
+    "passed",
+    "failed",
+    "not_run",
+    "blocked"
+  ],
+  "verifier_constraints": [
+    "V only changes owned independent tests/evidence/DELIVERY_V",
+    "No changing production or owner tests to fit outcomes",
+    "Refinements identify a genuinely ambiguous callable but do not weaken frozen failure criteria",
+    "No requirement to rewrite already composable algorithms; prove existing behavior when sufficient"
+  ]
+}

@@ -1,0 +1,47 @@
+{
+  "schema": "etalon-independent-engineering-cases/1",
+  "evidence_level": "synthetic engineering fixtures only",
+  "cases": [
+    {
+      "id": "ACT-01/02/03/09",
+      "scenario": "Select a supported candidate without a method; submit, await result, then submit an additional candidate absent from the first request. Replay the first request after spending funds.",
+      "must_hold": ["method_use_refs can be empty", "second action does not require a declared DAG", "original job and action identities are reused", "costs and action counts do not grow on replay"],
+      "mutations": ["same request_id with a different candidate", "same request_id with different resource limits"],
+      "mutation_expectation": "conflict without additional dispatch"
+    },
+    {
+      "id": "ACT-04",
+      "scenario": "Prepare an action, append an unrelated research method record, and submit. Separately mutate a bound endpoint or executor configuration.",
+      "must_hold": ["unrelated method note does not invalidate a prepared action", "relevant binding change is stale before dispatch"],
+      "forbidden_shortcuts": ["hash the whole SQLite database", "bind the global event tail"]
+    },
+    {
+      "id": "RES-01/02/05/06",
+      "scenario": "Inject a completed result with wrong units and a measured nonzero cost; separately leave execution unresolved with a reservation.",
+      "must_hold": ["execution completion is distinct from rejection", "known failed cost remains charged", "missing result stays null", "unresolved reservation remains held", "runtime attribution does not add the campaign cost again", "declared quote is not labeled measured"]
+    },
+    {
+      "id": "EVT-01",
+      "scenario": "Write 137 committed fixture events to each of two independent logs, read in pages of 17, read an empty page, append one event, and continue.",
+      "must_hold": ["all events are seen exactly once during a forward read", "empty page preserves the continuation position", "event references distinguish logs with equal sequence numbers", "cursor from a different log is rejected"],
+      "event_count": 137,
+      "page_limit": 17
+    },
+    {
+      "id": "EVT-02/03/04",
+      "scenario": "Replay an event; simulate action submission before consumer checkpoint persistence; fail the handler; then produce an ordinary research note from an evaluation hook.",
+      "must_hold": ["stable request identity survives checkpoint loss", "handler version participates in processing identity", "handler error does not roll back committed facts", "ordinary research note is not recursively treated as an evaluation", "skip and stop are representable"]
+    },
+    {
+      "id": "MET-01/02/03/05",
+      "scenario": "Snapshot a custom bundle outside the built-in catalog with SKILL.md, references/evidence.md and scripts/check.py. Modify only the reference, then remove only the script.",
+      "must_hold": ["explicit custom reference is supported", "both mutations change content identity", "old snapshots remain retrievable", "record replay is idempotent", "claimed content_verified without verifiable bytes is rejected", "content_verified does not imply observed use"],
+      "bundle_files": ["SKILL.md", "references/evidence.md", "scripts/check.py"]
+    },
+    {
+      "id": "MET-07/RES-08/LEARN-03",
+      "scenario": "Try a new unpromoted method; record a hypothesis; attempt to declare an independent evaluation with diagnostic or previously exposed evidence.",
+      "must_hold": ["unpromoted methods can be represented and tried", "hypothesis does not become an observation", "independence requires validated split and lineage", "released historical tests do not become unseen"]
+    }
+  ]
+}

@@ -1,0 +1,45 @@
+{
+  "schema": "etalon-independent-acceptance/1",
+  "round": "thin-harness-efficiency-20261021",
+  "protocol_sha256": "8e1b17e87f2f332c16fcf1c5cc852c9826e699b7a1a4088c5d544cdb1159d8a1",
+  "E_freeze_sha256": "4dd17d485a08270e2157dfa8929e3d4d24c3d41451583f55b1e7378b1d9075e7",
+  "status": "bounded_engineering_and_native_checks_passed_model_errors_preserved_no_gain_claim",
+  "passed": {
+    "independent_source_tests": {"passed": 4, "seconds": 1.49, "first_attempt": "3 passed/1 failed: V fixture CRLF assumption corrected without changing implementation; original XML preserved"},
+    "source_wheel_install": "G0 and G1 each 328 exact files; G1 installed summary/read and two real reference SDK examples verified outside checkout",
+    "historical_frequency": "73 source hashes,111 raw unique completed calls verified; selected engineering sample only",
+    "native": "Six real Codex CLI runs: requested gpt-6.1-sol/medium; actual backend revision unknown; six semantic loss=0 under frozen rubric, exact run order and visible budgets respected",
+    "preservation": "Frozen non-database inputs/guidance, referenced artifact bytes, old research records/event prefix, scientific state and spent/reserved unchanged; only three permitted diagnostic derived appends",
+    "model_runner_boundaries": "Two length rejections without forward and one explicitly missing checkpoint failure/fallback; all real costs retained; no pending remains"
+  },
+  "native_group_totals": {
+    "G0": {"wall_seconds": 213.6344210000243, "completed_calls": 17, "input_tokens": 374802, "output_tokens": 4069},
+    "G1": {"wall_seconds": 264.4622378000058, "completed_calls": 17, "input_tokens": 380185, "output_tokens": 4359},
+    "G2": {"wall_seconds": 224.01813740000944, "completed_calls": 13, "input_tokens": 375599, "output_tokens": 3909}
+  },
+  "failed_model_choices": [
+    {"id": "dev_unknown", "expected": "unknown", "actual": "compare", "answer_confidence": 0.9834},
+    {"id": "eval_batch", "expected": "partial", "actual": "success", "answer_confidence": 0.8225}
+  ],
+  "model_counts": {
+    "development_correct": "1/2",
+    "semantic_evaluation_correct": "5/6; five groups because negation pair shares one group",
+    "actual_native_adoption": "0/2 G2 runs",
+    "all_requests_including_smoke": 12,
+    "actual_forwards_including_smoke": 9,
+    "formal_forwards": 8,
+    "conservative_wall_charged_seconds": 113.926560300024,
+    "pending": []
+  },
+  "not_established": [
+    "G1 end-to-end efficiency improvement; both G1 hosts directly inspected SDK and skipped optional skills/catalog",
+    "Laya incremental native benefit; neither G2 host called it",
+    "Production high frequency, general model accuracy, independent S/phi/G/M gains or scientific efficacy",
+    "Exact backend model revision, monetary costs, electricity, complete dependency download wire bytes"
+  ],
+  "not_run": ["Jev", "New scientific scoring or CRO orders", "R4b recovery", "Claude native retry this round"],
+  "decision": "Retain verified optional engineering interfaces and reproducible examples. Do not enable Laya by default or treat its probability as result/scientific admission. No new framework, router, tuning, permanent service or global threshold was introduced by V.",
+  "evidence_root": "F:/life_healthy/integration/thin-harness-efficiency-20261021",
+  "evidence": ["v/frequency-independent.json", "v/native-progress.json", "v/semantic-review.json", "v/native-final-accounting.json", "v/model-final-review.json", "v/installed-examples.json", "v/review-output-path-correction.json"],
+  "provenance_limit": "V initial pre-review report was reconstructed after its output-name collision; explicitly not original bytes. E original FREEZE_V1 and all raw experimental outputs preserved. E native used fixed source imports; installed component verification is separate."
+}

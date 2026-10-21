@@ -57,7 +57,7 @@ from typing import Any
 
 from etalon.authority.gate import GateAuthorization, require_gate
 from etalon.boundary.infra import etalon_revision
-from etalon.boundary.screen import Screen, ScreenResult
+from etalon.boundary.screen import TERMINAL_RUN_STATUSES, Screen, ScreenResult
 from etalon.campaign.ledger import Ledger
 
 #: Molecules per batch. Twenty thousand, and the number is a scheduling decision rather than a
@@ -508,7 +508,9 @@ class Sweep:
                 db.execute("ROLLBACK")
                 raise SweepError(
                     f"{batch_id} is not claimable: it does not exist, is already claimed, or is "
-                    "already recorded. Call pending() for what is available."
+                    "already recorded. Read Sweep.pending(), or etalon_sweep_status from the "
+                    "tool surface, for the batches that are available -- pending() is a Python "
+                    "method and an MCP caller has no way to reach it."
                 )
             db.execute("COMMIT")
         claimed = self.batch(batch_id)
@@ -532,6 +534,38 @@ class Sweep:
         if recorded is None:
             raise SweepError(f"{batch_id} was never emitted")
         if recorded.recorded:
+            # One exception to append-only, and it is a repair rather than a relaxation.
+            #
+            # The pool's outcome is committed to SQLite and the ledger row is appended *after* it,
+            # as two writes with no transaction around them. So anything that makes the append fail
+            # -- the ledger's nonblocking lock held by a status tool reading it, a full disk, or a
+            # non-finite float anywhere in ``screen.provenance()``, which ``json.dumps(...,
+            # allow_nan=False)`` refuses -- leaves the batch recorded in the pool and absent from
+            # the ledger. Measured: contend the ledger with a shared lock, call ``record``, and the
+            # pool reports ``recorded: 1`` and ``by_outcome: {'committed': 1}`` while the ledger
+            # file has zero lines. The retry then hit this guard and raised, permanently, so the
+            # hole could never be filled by anything.
+            #
+            # That is the worst shape a failure can take here, because this module's whole premise
+            # is that the ledger is the authority and everything else is a derivative. A batch with
+            # no ledger row did not happen as far as any audit is concerned, while ``state()``
+            # reads the pool and goes on reporting it as recorded -- so the two disagree and
+            # nothing says so.
+            #
+            # Re-recording the *same* outcome for the *same* run is therefore allowed, and does
+            # nothing except append the row that is missing. Re-recording a different outcome, or
+            # the same one from a different run, is the measurement-overwrite this guard exists to
+            # refuse and still raises.
+            same_measurement = (
+                recorded.outcome == result.outcome
+                and recorded.run_id == result.run_id
+                and result.status in TERMINAL_RUN_STATUSES
+            )
+            if same_measurement and not self._ledger_has_batch(batch_id):
+                self._append_batch_entry(
+                    batch_id, recorded, result, recorded.revision_id or result.revision_id
+                )
+                return recorded
             raise SweepError(
                 f"{batch_id} is already recorded as {recorded.outcome!r}. An outcome is append-only; "
                 "screen a new batch rather than overwriting a measurement."
@@ -546,7 +580,7 @@ class Sweep:
         # length. ``recover`` (:525) and the MCP record tool (mcp/sweep.py:344) each already
         # refuse this; the invariant belongs here, where the row is actually written, so that a
         # driver calling the campaign API directly cannot bypass it.
-        if result.status not in ("SUCCEEDED", "FAILED"):
+        if result.status not in TERMINAL_RUN_STATUSES:
             raise SweepError(
                 f"{batch_id}'s run {result.run_id} is {result.status}, which is not a terminal "
                 "state. An unfinished run has committed stages and no outcome, and recording one "
@@ -594,6 +628,33 @@ class Sweep:
                     "write. An outcome is append-only; read batch() for the one that landed."
                 )
             db.execute("COMMIT")
+        self._append_batch_entry(batch_id, recorded, result, revision)
+        updated = self.batch(batch_id)
+        assert updated is not None
+        return updated
+
+    def _ledger_has_batch(self, batch_id: str) -> bool:
+        """Whether the ledger already carries this batch's row.
+
+        Only consulted on the repair path in :meth:`record`, so the cost of reading every entry is
+        paid once per hole rather than once per batch.
+        """
+
+        return any(
+            entry.kind == "batch" and entry.round_id == batch_id
+            for entry in self.ledger.entries()
+        )
+
+    def _append_batch_entry(
+        self, batch_id: str, recorded: Batch, result: ScreenResult, revision: str
+    ) -> None:
+        """The batch's ledger row, written from one place.
+
+        Factored out because :meth:`record` writes it on two paths -- once after committing the
+        pool's outcome, and once to fill a hole left by an append that failed after that commit --
+        and a row built twice is a row that eventually differs between the two.
+        """
+
         self.ledger.append(
             "batch",
             batch_id,
@@ -620,9 +681,6 @@ class Sweep:
             # with the same fallback the gate uses for a batch with no row value to read.
             etalon=recorded.etalon or (etalon_revision() or None),
         )
-        updated = self.batch(batch_id)
-        assert updated is not None
-        return updated
 
     # -- recovery -----------------------------------------------------------
 
@@ -655,7 +713,7 @@ class Sweep:
             state = None if batch.run_id is None else self.screen.state(batch.run_id)
             if state is None:
                 state = self.screen.state(batch.batch_id)  # the conventional run id is the batch id
-            if state is not None and state.status in ("SUCCEEDED", "FAILED"):
+            if state is not None and state.status in TERMINAL_RUN_STATUSES:
                 self.record(batch.batch_id, state)
                 actions.append(
                     Recovery(batch.batch_id, "recorded", f"run finished as {state.outcome}")
@@ -729,76 +787,111 @@ class Sweep:
     def state(self) -> dict[str, Any]:
         """One reading of the whole sweep, for a supervisor or a status command."""
 
-        done = self.done()
-        by_outcome: dict[str, int] = {}
-        for batch in done:
-            assert batch.outcome is not None
-            by_outcome[batch.outcome] = by_outcome.get(batch.outcome, 0) + 1
         with closing(self._connect()) as db:
-            total, pooled = db.execute(
-                "SELECT COUNT(*), COALESCE(SUM(batch IS NULL), 0) FROM molecule"
-            ).fetchone()
-            by_source = dict(
-                db.execute(
-                    "SELECT source, COUNT(*) FROM molecule GROUP BY source ORDER BY 2 DESC"
-                ).fetchall()
-            )
-            # Whether one SMILES means one row is a property of *this* pool, not of the code: a
-            # pool filled before the invariant existed keeps its violations, because rewriting a
-            # finished campaign's pool to fit a new rule would destroy the record of what was
-            # actually screened. So the reading asks the database rather than assuming.
-            index_sql = db.execute(
-                "SELECT sql FROM sqlite_master WHERE type='index' AND name=?", (_SMILES_INDEX,)
-            ).fetchone()
-            one_per_smiles = index_sql is not None and "UNIQUE" in str(index_sql[0]).upper()
-            smiles_conflicts = (
-                0
-                if one_per_smiles
-                else int(
-                    db.execute(
-                        "SELECT COUNT(*) FROM "
-                        "(SELECT smiles FROM molecule GROUP BY smiles HAVING COUNT(*) > 1)"
-                    ).fetchone()[0]
-                )
-            )
-        revisions = sorted({b.revision_id for b in done if b.revision_id})
-        etalon_revisions = sorted({b.etalon for b in done if b.etalon})
-        return {
-            "pool": {
-                "unique": int(total),
-                "awaiting_batch": int(pooled),
-                "by_source": by_source,
-                "one_row_per_smiles": one_per_smiles,
-                # How many SMILES this pool holds more than once. Zero by construction where the
-                # invariant is enforced; a count of molecules screened twice where it is not.
-                "smiles_conflicts": smiles_conflicts,
-            },
-            "batches": {
-                "emitted": len(done) + len(self.pending()) + len(self.outstanding()),
-                "pending": len(self.pending()),
-                "outstanding": len(self.outstanding()),
-                "recorded": len(done),
-                "by_outcome": by_outcome,
-            },
-            "batch_size": self.batch_size,
-            "revisions": revisions,
-            # The ETALON revisions that screened these batches, a different question from the funnel
-            # revision and one that used to be unanswerable: six commits separate the v6 and v7
-            # campaigns' screening windows, five of them touching sweep.py, calibrate.py or
-            # supervisor.py, and neither ledger records which one ran.
-            "etalon_revisions": etalon_revisions,
-            "etalon": etalon_revision(),
-            "gate": None if self.gate is None else self.gate.as_dict(),
-            # More than one revision across recorded batches means the funnel changed mid-campaign.
-            # Not an error -- a campaign may legitimately retune -- but enrichment computed across
-            # the boundary is not attributable to anything, so the reading says so out loud. Two
-            # ETALON revisions break comparability for the same reason and were previously
-            # invisible: the funnel can be byte-identical while the code choosing the molecules and
-            # reading the result back is not. A batch carved before the column existed carries no
-            # revision and counts as neither agreeing nor disagreeing, the only honest reading of a
-            # null.
-            "comparable": len(revisions) <= 1 and len(etalon_revisions) <= 1,
-        }
+            db.execute("BEGIN")
+            return _state_from_db(db, self.batch_size, self.gate)
+
+
+def read_sweep_status(pool: str | Path, *, batch_size: int = DEFAULT_BATCH_SIZE) -> dict[str, Any]:
+    """Read an existing pool without schema migration, generation, recovery, or ledger writes.
+
+    SQLite uses its normal read locking so committed WAL records remain visible. Its shared-memory
+    bookkeeping may change; this call never changes scientific rows or requests an immutable view.
+    Missing optional provenance columns remain unknown instead of migrating historical databases.
+    """
+    path = Path(pool).expanduser().absolute()
+    if any(Path(str(path) + suffix).is_symlink() for suffix in ("", "-wal", "-shm", "-journal")):
+        raise ValueError("sweep pool and sidecars must not be symlinks")
+    if not path.is_file():
+        raise FileNotFoundError(f"no sweep pool at {path}")
+    with closing(sqlite3.connect(path.as_uri() + "?mode=ro", uri=True, timeout=30.0)) as db:
+        db.execute("PRAGMA query_only=ON")
+        db.execute("BEGIN")
+        return _state_from_db(db, batch_size, None)
+
+
+def _state_from_db(db: sqlite3.Connection, batch_size: int,
+                   gate: GateAuthorization | None) -> dict[str, Any]:
+    columns = {row[1] for row in db.execute("PRAGMA table_info(batch)")}
+    required = {"batch_id", "size", "emitted_at", "claimed_by", "claimed_at", "run_id",
+                "revision_id", "outcome", "recorded_at"}
+    if not required.issubset(columns):
+        raise SweepError(f"unsupported batch schema; missing columns: {sorted(required - columns)}")
+    selected = [name if name in columns else f"NULL AS {name}" for name in
+                ("batch_id", "size", "emitted_at", "claimed_by", "claimed_at", "run_id",
+                 "revision_id", "outcome", "recorded_at", "gate", "etalon")]
+    batches = [Batch(*row) for row in db.execute("SELECT " + ", ".join(selected) + " FROM batch")]
+    done = [batch for batch in batches if batch.recorded]
+    pending = [batch for batch in batches if batch.claimed_by is None and not batch.recorded]
+    outstanding = [batch for batch in batches if batch.claimed_by is not None and not batch.recorded]
+    by_outcome: dict[str, int] = {}
+    for batch in done:
+        assert batch.outcome is not None
+        by_outcome[batch.outcome] = by_outcome.get(batch.outcome, 0) + 1
+    total, pooled = db.execute(
+        "SELECT COUNT(*), COALESCE(SUM(batch IS NULL), 0) FROM molecule"
+    ).fetchone()
+    by_source = dict(
+        db.execute(
+            "SELECT source, COUNT(*) FROM molecule GROUP BY source ORDER BY 2 DESC"
+        ).fetchall()
+    )
+    # Whether one SMILES means one row is a property of *this* pool, not of the code: a
+    # pool filled before the invariant existed keeps its violations, because rewriting a
+    # finished campaign's pool to fit a new rule would destroy the record of what was
+    # actually screened. So the reading asks the database rather than assuming.
+    index_sql = db.execute(
+        "SELECT sql FROM sqlite_master WHERE type='index' AND name=?", (_SMILES_INDEX,)
+    ).fetchone()
+    one_per_smiles = index_sql is not None and "UNIQUE" in str(index_sql[0]).upper()
+    smiles_conflicts = (
+        0
+        if one_per_smiles
+        else int(
+            db.execute(
+                "SELECT COUNT(*) FROM "
+                "(SELECT smiles FROM molecule GROUP BY smiles HAVING COUNT(*) > 1)"
+            ).fetchone()[0]
+        )
+    )
+    revisions = sorted({b.revision_id for b in done if b.revision_id})
+    etalon_revisions = sorted({b.etalon for b in done if b.etalon})
+    return {
+        "pool": {
+            "unique": int(total),
+            "awaiting_batch": int(pooled),
+            "by_source": by_source,
+            "one_row_per_smiles": one_per_smiles,
+            # How many SMILES this pool holds more than once. Zero by construction where the
+            # invariant is enforced; a count of molecules screened twice where it is not.
+            "smiles_conflicts": smiles_conflicts,
+        },
+        "batches": {
+            "emitted": len(done) + len(pending) + len(outstanding),
+            "pending": len(pending),
+            "outstanding": len(outstanding),
+            "recorded": len(done),
+            "by_outcome": by_outcome,
+        },
+        "batch_size": batch_size,
+        "revisions": revisions,
+        # The ETALON revisions that screened these batches, a different question from the funnel
+        # revision and one that used to be unanswerable: six commits separate the v6 and v7
+        # campaigns' screening windows, five of them touching sweep.py, calibrate.py or
+        # supervisor.py, and neither ledger records which one ran.
+        "etalon_revisions": etalon_revisions,
+        "etalon": etalon_revision(),
+        "gate": None if gate is None else gate.as_dict(),
+        # More than one revision across recorded batches means the funnel changed mid-campaign.
+        # Not an error -- a campaign may legitimately retune -- but enrichment computed across
+        # the boundary is not attributable to anything, so the reading says so out loud. Two
+        # ETALON revisions break comparability for the same reason and were previously
+        # invisible: the funnel can be byte-identical while the code choosing the molecules and
+        # reading the result back is not. A batch carved before the column existed carries no
+        # revision and counts as neither agreeing nor disagreeing, the only honest reading of a
+        # null.
+        "comparable": len(revisions) <= 1 and len(etalon_revisions) <= 1,
+    }
 
 
 def library_rows(
@@ -1019,4 +1112,5 @@ __all__ = [
     "SweepError",
     "as_json",
     "library_rows",
+    "read_sweep_status",
 ]

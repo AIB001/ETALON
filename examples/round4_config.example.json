@@ -1,0 +1,159 @@
+{
+  "schema": "etalon-round4-consumer-config/1",
+  "scope": "PROPOSED numerical hyperparameters; coordinator must freeze before real fit; quotes are hard action bounds, not measured cost",
+  "split": {
+    "tasks": {
+      "mcl1": {
+        "role": "train",
+        "group": "bcl2",
+        "family": "bcl2"
+      },
+      "thrombin": {
+        "role": "train",
+        "group": "trypsin_like_serine_protease",
+        "family": "trypsin_like_serine_protease"
+      },
+      "ptp1b": {
+        "role": "train",
+        "group": "protein_tyrosine_phosphatase",
+        "family": "protein_tyrosine_phosphatase"
+      },
+      "eg5": {
+        "role": "calibration",
+        "group": "kinesin",
+        "family": "kinesin"
+      },
+      "pfkfb3": {
+        "role": "calibration",
+        "group": "pfkfb",
+        "family": "pfkfb"
+      },
+      "pde2": {
+        "role": "calibration",
+        "group": "cyclic_nucleotide_pde",
+        "family": "cyclic_nucleotide_pde"
+      },
+      "cdk2": {
+        "role": "test",
+        "group": "protein_kinase",
+        "family": "protein_kinase"
+      },
+      "tnks2": {
+        "role": "test",
+        "group": "parp",
+        "family": "parp"
+      },
+      "hif2a": {
+        "role": "test",
+        "group": "pas_domain",
+        "family": "pas_domain"
+      }
+    },
+    "grouping_evidence": "coordinator input-freeze a0f13f3c96ddb040319af20eb06e9a3af90d6dd5218450106b12741b38068f80",
+    "protocol_sha256": "23d7cbf3f32ded8d1a139e5d1dc168eabd740b67d11796b5cdb71893db0bb3d2"
+  },
+  "catalog": {
+    "probes": [
+      {
+        "id": "q1",
+        "primitive": "measure",
+        "bindings": {
+          "scorer": "vinardo",
+          "subset": "first_three",
+          "reference": "r0"
+        },
+        "outcomes": [
+          "same",
+          "changed",
+          "failed"
+        ],
+        "resources": [
+          "r1"
+        ],
+        "depends_on": []
+      },
+      {
+        "id": "q2",
+        "primitive": "measure",
+        "bindings": {
+          "scorer": "vinardo",
+          "subset": "last_three",
+          "reference": "r0"
+        },
+        "outcomes": [
+          "same",
+          "changed",
+          "failed"
+        ],
+        "resources": [
+          "r2"
+        ],
+        "depends_on": []
+      }
+    ],
+    "resources": [
+      {
+        "id": "r0",
+        "quoted_cost": 300,
+        "unit": "wall_second",
+        "existing_artifact_id": null
+      },
+      {
+        "id": "r1",
+        "quoted_cost": 300,
+        "unit": "wall_second",
+        "existing_artifact_id": null
+      },
+      {
+        "id": "r2",
+        "quoted_cost": 300,
+        "unit": "wall_second",
+        "existing_artifact_id": null
+      }
+    ],
+    "decision_resources": {
+      "fixed_pool_vina": [
+        "r0"
+      ],
+      "fixed_pool_vinardo": [
+        "r0",
+        "r1",
+        "r2"
+      ],
+      "abstain": []
+    },
+    "loss_definition": "round4-assay-comparable-pair-order-group-mean/1",
+    "cost_unit": "wall_second",
+    "abstention": "abstain",
+    "initial_decision": "fixed_pool_vina",
+    "initial_resources": [
+      "r0"
+    ]
+  },
+  "learner": {
+    "budget": 900,
+    "max_depth": 2,
+    "cost_weight": 0.001,
+    "static_order": [
+      "q1",
+      "q2"
+    ],
+    "calibration_prefix": []
+  },
+  "calibration_selection": {
+    "mixture_weights": [
+      0.0,
+      0.25,
+      0.5,
+      0.75
+    ],
+    "cost_weights": [
+      0.0,
+      0.001,
+      0.01
+    ],
+    "selection_cost_weight": 0.001,
+    "probability_selection_metric": "group_mean_brier",
+    "scope": "candidate procedure implemented next; calibration selection scores are not independent assessment"
+  }
+}

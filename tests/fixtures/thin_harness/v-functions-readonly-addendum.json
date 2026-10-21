@@ -1,0 +1,38 @@
+{
+  "schema": "thin-harness-function-readonly-clarification/1",
+  "base_protocol_sha256": "9ff39fe7c2471c8ba6ec6dc6b9d272f988fa39d3f3e2503eecee0ed3b31106f2",
+  "timing": "Before V sees any new function acceptance results; I/A reported constructor side effects during implementation review. This adds explicit filesystem/schema counterexamples without editing the frozen base.",
+  "contracts": [
+    "ACT-08",
+    "RES-02",
+    "RES-07",
+    "INT-01",
+    "HOST-01"
+  ],
+  "functional_rows": [
+    "FM-05",
+    "FM-08"
+  ],
+  "counterexamples": [
+    {
+      "input": "Nonexistent workspace/pool path passed to status/progress",
+      "pass": "Return explicit missing/error/empty status according to API; parent directory, database and sidecar remain absent",
+      "fail": "Any constructor creates directories, empty database, log, runtime job or budget state during a query"
+    },
+    {
+      "input": "Valid legacy pool schema which writable open would migrate/index",
+      "pass": "Read using read-only compatible path, or clearly reject unsupported schema without mutation; old source DB and schema/index definitions unchanged",
+      "fail": "DDL/index/schema migration, history repair or implicit data normalization on status/progress read"
+    },
+    {
+      "input": "Existing pending/unknown pool with committed events and reservations",
+      "pass": "Before/after logical rows, schema/index, event prefix, jobs and budget equal; no new dispatch or settlement",
+      "fail": "Plain status/progress starts work, emits synthetic events, refunds unknown reserve or changes ledger"
+    }
+  ],
+  "evidence": [
+    "Record baseline directory listing/DB schema/index/rows and final comparison",
+    "Use real store/query functions; do not mock constructor or SQLite write behavior",
+    "Instrument dispatch to detect unintended work; mocks may guard forbidden side effects but cannot replace query itself"
+  ]
+}

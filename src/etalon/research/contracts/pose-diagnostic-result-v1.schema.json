@@ -1,0 +1,338 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "schema_version": {
+      "const": "prism-pose-diagnostic-result/1"
+    },
+    "capability": {
+      "type": "string",
+      "minLength": 1
+    },
+    "experiment_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "program_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "action_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "idempotency_key": {
+      "type": "string",
+      "minLength": 1
+    },
+    "execution_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "attempt": {
+      "const": 1
+    },
+    "request_sha256": {
+      "type": "string",
+      "pattern": "^[a-f0-9]{64}$"
+    },
+    "request_file_sha256": {
+      "type": "string",
+      "pattern": "^[a-f0-9]{64}$"
+    },
+    "method_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "status": {
+      "enum": [
+        "COMPLETED",
+        "FAILED",
+        "REJECTED",
+        "UNSUPPORTED",
+        "BUDGET_EXCEEDED"
+      ]
+    },
+    "supported": {
+      "type": "boolean"
+    },
+    "error": {
+      "anyOf": [
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "code": {
+              "type": "string",
+              "minLength": 1
+            },
+            "message": {
+              "type": "string",
+              "minLength": 1
+            }
+          },
+          "required": [
+            "code",
+            "message"
+          ]
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "input_bindings": {
+      "type": "object",
+      "additionalProperties": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "path": {
+            "type": "string",
+            "minLength": 1
+          },
+          "sha256": {
+            "type": "string",
+            "pattern": "^[a-f0-9]{64}$"
+          },
+          "bytes": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "role": {
+            "enum": [
+              "design_input",
+              "diagnostic_input",
+              "independent_validation",
+              "sealed_holdout"
+            ]
+          }
+        },
+        "required": [
+          "path",
+          "sha256",
+          "bytes",
+          "role"
+        ]
+      }
+    },
+    "input_identity": {
+      "anyOf": [
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "molecule_id": {
+              "type": "string",
+              "minLength": 1
+            },
+            "chemical_state_id": {
+              "type": "string",
+              "minLength": 1
+            },
+            "pose_id": {
+              "type": "string",
+              "minLength": 1
+            },
+            "receptor_state_id": {
+              "type": "string",
+              "minLength": 1
+            },
+            "coordinate_frame_id": {
+              "type": "string",
+              "minLength": 1
+            }
+          },
+          "required": [
+            "molecule_id",
+            "chemical_state_id",
+            "pose_id",
+            "receptor_state_id",
+            "coordinate_frame_id"
+          ]
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "artifacts": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "path": {
+            "type": "string",
+            "minLength": 1
+          },
+          "sha256": {
+            "type": "string",
+            "pattern": "^[a-f0-9]{64}$"
+          },
+          "bytes": {
+            "type": "integer",
+            "minimum": 0
+          }
+        },
+        "required": [
+          "path",
+          "sha256",
+          "bytes"
+        ]
+      }
+    },
+    "outcomes": {
+      "type": "array",
+      "items": {
+        "type": "object"
+      }
+    },
+    "counts": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "requested": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "attempted": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "succeeded": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "failed": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "not_attempted": {
+          "type": "integer",
+          "minimum": 0
+        }
+      },
+      "required": [
+        "requested",
+        "attempted",
+        "succeeded",
+        "failed",
+        "not_attempted"
+      ]
+    },
+    "cost": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "wall_second": {
+          "type": "number",
+          "minimum": 0
+        },
+        "cpu_second": {
+          "anyOf": [
+            {
+              "type": "number",
+              "minimum": 0
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "cpu_measurement": {
+          "type": "string",
+          "minLength": 1
+        },
+        "charge_identity": {
+          "type": "string",
+          "minLength": 1
+        }
+      },
+      "required": [
+        "wall_second",
+        "cpu_second",
+        "cpu_measurement",
+        "charge_identity"
+      ]
+    },
+    "producer": {
+      "type": "object"
+    },
+    "limitations": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "minLength": 1
+      }
+    },
+    "scientific_observations": {
+      "const": []
+    },
+    "protocol_instance_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "coupling": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "group_id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "shared_artifact_sha256s": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "pattern": "^[a-f0-9]{64}$"
+          }
+        },
+        "randomness": {
+          "enum": [
+            "independent_seed",
+            "shared_seed",
+            "deterministic_reanalysis"
+          ]
+        },
+        "independent_replicate": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "group_id",
+        "shared_artifact_sha256s",
+        "randomness",
+        "independent_replicate"
+      ]
+    }
+  },
+  "required": [
+    "schema_version",
+    "capability",
+    "experiment_id",
+    "program_id",
+    "action_id",
+    "idempotency_key",
+    "execution_id",
+    "attempt",
+    "request_sha256",
+    "request_file_sha256",
+    "method_id",
+    "protocol_instance_id",
+    "status",
+    "supported",
+    "error",
+    "input_bindings",
+    "input_identity",
+    "artifacts",
+    "outcomes",
+    "counts",
+    "cost",
+    "producer",
+    "limitations",
+    "scientific_observations",
+    "coupling"
+  ]
+}
