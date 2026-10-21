@@ -51,6 +51,7 @@ import statistics
 from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
+from types import MappingProxyType
 from typing import Any
 
 from etalon.boundary.screen import Screen, ScreenResult
@@ -190,10 +191,51 @@ STRUCTURAL_BACKENDS = frozenset({
     "derived.normalized_docking_score",
 })
 
+#: What a pose check measures. A tier judging the pose is not one thing, and the difference
+#: decides both the diagnosis and which remedies are legitimate.
+ACCURACY = "accuracy"
+CONSISTENCY = "consistency"
+
+#: The pose-judging backends whose metric measures *agreement between two searches* rather than
+#: *correctness of the pose*. Keyed on the backend for the same reason :data:`STRUCTURAL_BACKENDS`
+#: is: a cascade may call the tier anything.
+#:
+#: ``docking.redock_consistency`` says so itself, in its own module docstring -- "Independent
+#: re-search and fixed-frame pose consistency, never pose accuracy", and "the conventional 2 A
+#: crystal-redocking cutoff is an engineering default here, not a validation" -- and stamps
+#: ``"interpretation": "prediction_consistency_not_crystal_pose_accuracy"`` into every row of
+#: provenance it emits. ETALON read that metric, classified its tier as pose-judging, and then
+#: told the operator the one thing the evidence explicitly denies: that the docking had placed the
+#: molecule badly.
+#:
+#: Measured on SND1 pocket_A_w401, an eight-member panel with two co-crystal ligands:
+#:
+#:   member                    dock-redock RMSD   docked vs crystal pose   gate verdict
+#:   C26A2_QOY (7KNW)              4.04 A              1.09 A             deleted
+#:   C26A6_QOV (7KNX)              4.47 A              1.02 A             deleted
+#:   decoy_caffeine                0.25 A              --                 kept
+#:
+#: Both co-crystal ligands were docked to within ~1 A of their crystal poses -- correct by the
+#: conventional criterion -- and the gate deleted them both, while keeping the decoy whose pose
+#: sits 2.6 A off the pocket centre. On this panel the metric is anti-correlated with pose
+#: correctness, because what it actually measures is whether a 22 A box and the configured
+#: exhaustiveness let two searches converge, and a small rigid decoy wins that trivially.
+#:
+#: So for these backends the refusal must name the search, not the pose, and the threshold is
+#: revisable on evidence -- which is exactly the remedy an accuracy check must refuse.
+CONSISTENCY_BACKENDS = frozenset({"docking.redock_consistency"})
+
 #: The tier ids the shipped cascade uses for its pose tiers, kept only as the fallback for a run
 #: whose revision cannot be read. Judging by name is what this fix replaced; it is still better
 #: than judging by nothing, and :func:`calibrate` says in a note when it had to.
 LEGACY_STRUCTURAL_TIERS = frozenset({"t9_redock", "t10_docking_metrics"})
+
+#: The same fallback, carrying what each shipped pose tier measures. ``t9_redock`` is the
+#: consistency check; ``t10_docking_metrics`` holds pose strain and the normalized score, which
+#: judge the pose itself.
+LEGACY_TIER_MEASURES: Mapping[str, str] = MappingProxyType(
+    {"t9_redock": CONSISTENCY, "t10_docking_metrics": ACCURACY}
+)
 
 #: Fraction of the panel's known actives that must survive the funnel for the configuration to be
 #: admissible. One, and the default is not a round number chosen for neatness.
@@ -247,6 +289,11 @@ class TierVerdict:
     #: its criteria actually compiled to rather than from its id. ``False`` for an ordinary tier
     #: and for one whose backends could not be read -- see :data:`STRUCTURAL_BACKENDS`.
     structural: bool = False
+    #: For a structural tier, whether its check measures the pose's :data:`ACCURACY` or the
+    #: search's :data:`CONSISTENCY`. ``None`` for a tier that does not judge the pose. The two
+    #: fail for different reasons and admit different remedies, and a tier holding both is
+    #: reported as accuracy -- the costlier error is telling someone to widen a real pose check.
+    measures: str | None = None
 
     @property
     def deletes_actives(self) -> bool:
@@ -267,6 +314,9 @@ class TierVerdict:
             # Adding it changes the calibration digest, which is correct: a verdict that knows
             # which of its tiers judged the pose is a different verdict from one that did not.
             "structural": self.structural,
+            # Same argument one level finer: a stored calibration that does not say whether its
+            # pose check measured the pose or the search cannot be re-read for what it refused.
+            "measures": self.measures,
         }
 
 
@@ -493,7 +543,24 @@ class Calibration:
             if tier.unavailable:
                 reasons.append(f"tier {tier.tier_id} could not be read: {tier.unavailable}")
             if tier.deletes_actives:
-                if tier.structural:
+                if tier.measures == CONSISTENCY:
+                    reasons.append(
+                        f"tier {tier.tier_id} deleted known actives {list(tier.lost_actives)}. "
+                        "This tier judges the SEARCH, not the molecule and not the pose: its "
+                        "metric measures whether two independent docking runs agreed, which the "
+                        "redock backend states of itself -- \"never pose accuracy\", and its 2 A "
+                        "cutoff \"an engineering default here, not a validation\". So a known "
+                        "binder failing it does not mean the pose is wrong; it means the search "
+                        "did not converge, usually because the box is large, the exhaustiveness "
+                        "is low, or the molecule has many rotatable bonds. Do NOT drop it and do "
+                        "not widen it blind. Settle which it is first: if this target has a "
+                        "co-crystal ligand, measure the docked pose against the crystal pose -- "
+                        "that is the only evidence that separates a bad pose from an unconverged "
+                        "search. Then raise exhaustiveness or shrink the box; on this metric, and "
+                        "only on this metric, the threshold may afterwards be revisited on the "
+                        "measurement, because its own backend declines to call 2 A a validation."
+                    )
+                elif tier.structural:
                     reasons.append(
                         f"tier {tier.tier_id} deleted known actives {list(tier.lost_actives)}. "
                         "This tier judges the pose, not the molecule, so do NOT drop it: a known "
@@ -855,6 +922,24 @@ def structural_tiers(screen: Screen, result: ScreenResult) -> tuple[frozenset[st
     say "could not be read" rather than "not structural", which are opposite answers for a guard
     whose whole purpose is to refuse one particular remedy.
 
+    Kept as the coarse answer; :func:`pose_tiers` is the same read with what each tier measures.
+    """
+
+    measures, why_not = pose_tiers(screen, result)
+    return frozenset(measures), why_not
+
+
+def pose_tiers(screen: Screen, result: ScreenResult) -> tuple[Mapping[str, str], str | None]:
+    """Which of this run's tiers judge the pose, and whether each measures accuracy or consistency.
+
+    Returns tier id to :data:`ACCURACY` or :data:`CONSISTENCY`, and when the mapping could not be
+    established, the reason -- so a caller can say "could not be read" rather than "not
+    structural", which are opposite answers for a guard whose purpose is to refuse one remedy.
+
+    A tier carrying both kinds is reported as accuracy, because the two refusals differ in exactly
+    one respect -- whether the threshold may be revisited -- and offering that on a tier that holds
+    a real pose check is the costlier of the two mistakes.
+
     The revision a run records carries ``metadata.tiers`` with each tier's criteria, and
     ``stages`` with each stage's plugin. Composing them gives tier to backend, which is the
     question :data:`STRUCTURAL_BACKENDS` is about. Reading it from the revision rather than from
@@ -879,7 +964,7 @@ def structural_tiers(screen: Screen, result: ScreenResult) -> tuple[frozenset[st
     if not tiers:
         return frozenset(), f"{revision.name} records no tier structure"
 
-    found: set[str] = set()
+    found: dict[str, str] = {}
     for tier in tiers:
         if not isinstance(tier, Mapping):
             continue
@@ -889,13 +974,20 @@ def structural_tiers(screen: Screen, result: ScreenResult) -> tuple[frozenset[st
             # ``__gate`` beside it. Either carrying a pose-judging backend makes the tier one.
             for stage_id in (name, f"{name}__gate"):
                 head = plugin_of.get(stage_id, "").split("@", 1)[0]
-                if head in STRUCTURAL_BACKENDS:
-                    found.add(str(tier.get("id", "")))
-    return frozenset(found), None
+                if head not in STRUCTURAL_BACKENDS:
+                    continue
+                tier_id = str(tier.get("id", ""))
+                kind = CONSISTENCY if head in CONSISTENCY_BACKENDS else ACCURACY
+                # Accuracy wins a mixed tier; see the docstring.
+                if found.get(tier_id) != ACCURACY:
+                    found[tier_id] = kind
+    return MappingProxyType(found), None
 
 
 def _verdict(
-    row: Mapping[str, Any], actives: frozenset[str], structural: frozenset[str] = frozenset()
+    row: Mapping[str, Any],
+    actives: frozenset[str],
+    measures: Mapping[str, str] = MappingProxyType({}),
 ) -> TierVerdict:
     lost = tuple(str(name) for name in row.get("lost", ()))
     tier_id = str(row.get("tier_id", ""))
@@ -907,7 +999,8 @@ def _verdict(
         lost_actives=tuple(name for name in lost if name in actives),
         lost_inactives=tuple(name for name in lost if name not in actives),
         unavailable=row.get("unavailable"),
-        structural=tier_id in structural,
+        structural=tier_id in measures,
+        measures=measures.get(tier_id),
     )
 
 
@@ -1060,14 +1153,14 @@ def calibrate(
 
     try:
         report = screen.recall(result.run_id, panel_size=len(panel))
-        structural, why_not = structural_tiers(screen, result)
+        measures, why_not = pose_tiers(screen, result)
         if why_not is not None:
             # Judging by name is what this replaced, and it is still better than judging by
             # nothing. The note is withheld unless a tier actually deleted an active, because
             # which remedy a refusal would offer is only worth reporting when one is offered.
-            structural = LEGACY_STRUCTURAL_TIERS
-        tiers = tuple(_verdict(row, actives, structural) for row in report["tiers"])
-        finalize = tuple(_verdict(row, actives, structural) for row in report["finalize"])
+            measures = LEGACY_TIER_MEASURES
+        tiers = tuple(_verdict(row, actives, measures) for row in report["tiers"])
+        finalize = tuple(_verdict(row, actives, measures) for row in report["finalize"])
         if why_not is not None and any(t.deletes_actives for t in (*tiers, *finalize)):
             notes.append(
                 f"which tiers judge the pose could not be read from the run's revision "

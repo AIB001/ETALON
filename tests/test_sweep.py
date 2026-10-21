@@ -5127,3 +5127,201 @@ def test_an_unreadable_revision_says_so_rather_than_answering_no(tmp_path) -> No
     found, why_not = structural_tiers(object(), ScreenResult("p", "x", "SUCCEEDED", ()))
     assert found == frozenset()
     assert why_not is not None and "could not be read" in why_not
+
+
+def test_a_consistency_check_is_not_an_accuracy_check(tmp_path) -> None:
+    """The redock tier's refusal named the one cause its own evidence denies.
+
+    `docking.redock_consistency` opens its module docstring with "Independent re-search and
+    fixed-frame pose consistency, never pose accuracy", calls the 2 Angstrom cutoff "an
+    engineering default here, not a validation", and stamps
+    `"interpretation": "prediction_consistency_not_crystal_pose_accuracy"` into every row it
+    emits.  ETALON read that metric, classified its tier as pose-judging -- which it is -- and
+    then told the operator the docking had placed the molecule badly.
+
+    Measured on SND1 pocket_A_w401 with two co-crystal ligands in the panel: C26A2_QOY scored
+    4.04 and C26A6_QOV 4.47 on this metric and were both deleted, while their docked poses sat
+    1.09 and 1.02 Angstrom from their crystal poses -- correct by the conventional criterion.
+    The best score on the panel, 0.25, belonged to a decoy whose pose is 2.6 Angstrom off the
+    pocket centre.  The metric was anti-correlated with pose correctness, and the refusal sent
+    the operator to inspect two poses that were right.
+    """
+
+    from etalon.campaign.calibrate import (
+        ACCURACY,
+        CONSISTENCY,
+        CONSISTENCY_BACKENDS,
+        pose_tiers,
+    )
+
+    assert set(CONSISTENCY_BACKENDS) == {"docking.redock_consistency"}
+    # Pose strain and the normalized score judge the coordinates themselves, not search agreement.
+    assert "derived.pose_strain" not in CONSISTENCY_BACKENDS
+    assert "derived.normalized_docking_score" not in CONSISTENCY_BACKENDS
+
+    revision = "rev-measures"
+    _revision_file(
+        tmp_path, revision,
+        tiers=[
+            {"id": "renamed_redock", "title": "redock", "mode": "all",
+             "criteria": ["my_redock"]},
+            {"id": "renamed_metrics", "title": "metrics", "mode": "all",
+             "criteria": ["my_strain", "my_le"]},
+            {"id": "mixed_tier", "title": "both", "mode": "all",
+             "criteria": ["my_redock2", "my_strain2"]},
+            # Same tier with the criteria the other way round. One order alone lets an
+            # unconditional "last one wins" pass by accident, which is how this test first
+            # failed to catch its own reversion.
+            {"id": "mixed_reversed", "title": "both", "mode": "all",
+             "criteria": ["my_strain2", "my_redock2"]},
+            {"id": "ordinary", "title": "properties", "mode": "all", "criteria": ["window"]},
+        ],
+        stages=[
+            {"id": "my_redock", "plugin": "docking.redock_consistency@0.1.0"},
+            {"id": "my_strain", "plugin": "derived.pose_strain@0.1.0"},
+            {"id": "my_le", "plugin": "derived.normalized_docking_score@0.1.0"},
+            {"id": "my_redock2", "plugin": "docking.redock_consistency@0.1.0"},
+            {"id": "my_strain2", "plugin": "derived.pose_strain@0.1.0"},
+            {"id": "window", "plugin": "chemistry.rdkit_property_range_gate@0.1.0"},
+        ],
+    )
+
+    measures, why_not = pose_tiers(
+        SimpleNamespace(workspace=tmp_path), ScreenResult("panel", revision, "SUCCEEDED", ())
+    )
+
+    assert why_not is None
+    assert measures["renamed_redock"] == CONSISTENCY
+    assert measures["renamed_metrics"] == ACCURACY
+    # A tier holding both kinds reports accuracy: offering "revisit the threshold" on a tier that
+    # carries a real pose check is the costlier of the two mistakes.
+    assert measures["mixed_tier"] == ACCURACY
+    assert measures["mixed_reversed"] == ACCURACY, "accuracy must win regardless of order"
+    assert "ordinary" not in measures
+
+
+def test_the_consistency_refusal_names_the_search_and_not_the_pose() -> None:
+    """Three refusals, not two, and the middle one is the one SND1 and CRBN both needed."""
+
+    from etalon.campaign.calibrate import ACCURACY, CONSISTENCY, Calibration, TierVerdict
+
+    def refusal(measures: str | None, structural: bool) -> str:
+        tier = TierVerdict(
+            tier_id="t9", title="redock", entering=8, surviving=3,
+            lost_actives=("QOY", "QOV"), lost_inactives=(),
+            structural=structural, measures=measures,
+        )
+        reasons = Calibration(
+            revision_id="r", run_id="p", outcome="SUCCEEDED", panel_size=8, actives=2,
+            registered=8, tiers=(tier,), finalize=(), separation=(),
+        ).refusals()
+        return next(r for r in reasons if "t9" in r)
+
+    consistency = refusal(CONSISTENCY, True)
+    accuracy = refusal(ACCURACY, True)
+    molecular = refusal(None, False)
+
+    # The consistency refusal must name the search, decline the false diagnosis, and say which
+    # measurement settles it -- the co-crystal comparison, which is the only discriminating one.
+    assert "SEARCH" in consistency
+    assert "does not mean the pose is wrong" in consistency
+    assert "co-crystal" in consistency and "crystal pose" in consistency
+    assert "exhaustiveness" in consistency and "box" in consistency
+    assert "placed that molecule badly" not in consistency
+
+    # The accuracy refusal keeps the old diagnosis, which is correct for a real pose check.
+    assert "placed that molecule badly" in accuracy
+    assert "do NOT drop it" in accuracy
+
+    # Neither pose refusal may offer the molecular remedy.
+    for text in (consistency, accuracy):
+        assert "widen it or drop the tier" not in text
+    assert "widen it or drop the tier" in molecular
+
+    # The three are distinct: a single branch collapsing two of them is the defect.
+    assert len({consistency, accuracy, molecular}) == 3
+
+
+def test_a_stored_calibration_says_which_kind_of_pose_check_refused_it() -> None:
+    """Without the field a re-read of a stored verdict cannot tell the two refusals apart."""
+
+    from etalon.campaign.calibrate import CONSISTENCY, TierVerdict
+
+    plain = TierVerdict("d2", "physchem", 8, 8, (), ())
+    pose = TierVerdict("t9", "redock", 8, 3, ("QOY",), (), structural=True, measures=CONSISTENCY)
+
+    assert plain.as_dict()["measures"] is None
+    assert plain.as_dict()["structural"] is False
+    assert pose.as_dict()["measures"] == CONSISTENCY
+    assert pose.as_dict()["structural"] is True
+
+
+def test_the_shipped_fallback_knows_which_of_its_two_pose_tiers_is_which(tmp_path) -> None:
+    """An unreadable revision still has to distinguish the two shipped pose tiers.
+
+    The fallback is reached when the revision cannot be read, which is a real state -- a run
+    whose workspace moved.  Falling back to "both are accuracy checks" would restore exactly
+    the wrong refusal for `t9_redock`, which is the shipped name of the consistency tier.
+    """
+
+    from etalon.campaign.calibrate import (
+        ACCURACY,
+        CONSISTENCY,
+        LEGACY_STRUCTURAL_TIERS,
+        LEGACY_TIER_MEASURES,
+    )
+
+    assert set(LEGACY_TIER_MEASURES) == set(LEGACY_STRUCTURAL_TIERS)
+    assert LEGACY_TIER_MEASURES["t9_redock"] == CONSISTENCY
+    assert LEGACY_TIER_MEASURES["t10_docking_metrics"] == ACCURACY
+
+
+def test_calibrate_carries_the_pose_measure_all_the_way_to_the_refusal(tmp_path) -> None:
+    """End to end: the classification is useless if `calibrate` does not wire it through.
+
+    `pose_tiers` can be right and `refusals` can be right while `_verdict` drops the field
+    between them, and every unit test on either end still passes.  That is what happened: the
+    reversion that stops `_verdict` passing `measures` broke nothing.
+    """
+
+    from etalon.campaign.calibrate import CONSISTENCY, calibrate
+
+    revision = "rev-wired"
+    _revision_file(
+        tmp_path, revision,
+        tiers=[{"id": "whatever_we_call_it", "title": "redock", "mode": "all",
+                "criteria": ["redock_consistency"]}],
+        stages=[{"id": "redock_consistency", "plugin": "docking.redock_consistency@0.1.0"}],
+    )
+
+    class PoseScreen(ScoredScreen):
+        workspace = tmp_path
+
+        def recall(self, run_id: str, *, panel_size: int | None = None) -> dict[str, object]:
+            return {
+                "registered": len(ALK2_PANEL),
+                "tiers": [{
+                    "tier_id": "whatever_we_call_it", "title": "redock",
+                    "entering": 8, "surviving": 3,
+                    "lost": [ALK2_PANEL[0].parent_id],
+                }],
+                "finalize": [],
+                "notes": [],
+            }
+
+    measured = calibrate(
+        PoseScreen(),
+        ScreenResult("panel", revision, "SUCCEEDED",
+                     (stage("docking_score_2", "SUCCEEDED", artifact="artifact:sha256:aa"),)),
+        ALK2_PANEL,
+    )
+
+    tier = measured.tiers[0]
+    assert tier.structural is True
+    assert tier.measures == CONSISTENCY, "the measure was dropped between pose_tiers and refusals"
+    assert measured.as_dict()["tiers"][0]["measures"] == CONSISTENCY
+
+    refusal = next(r for r in measured.refusals() if "whatever_we_call_it" in r)
+    assert "SEARCH" in refusal
+    assert "placed that molecule badly" not in refusal
+    assert "widen it or drop the tier" not in refusal
