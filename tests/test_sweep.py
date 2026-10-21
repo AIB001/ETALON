@@ -5325,3 +5325,180 @@ def test_calibrate_carries_the_pose_measure_all_the_way_to_the_refusal(tmp_path)
     assert "SEARCH" in refusal
     assert "placed that molecule badly" not in refusal
     assert "widen it or drop the tier" not in refusal
+
+
+def test_two_cuda_laned_runs_in_one_process_are_refused() -> None:
+    """A thread per card in one process silently destroys both runs.
+
+    MolCascade pins a shard's device with two pieces of process-global state:
+    `shards._WORKER_DEVICE`, a module variable, and `CUDA_VISIBLE_DEVICES` via
+    `devices.pinned_device`, whose own docstring says it restores the previous value "so an
+    in-process single-lane run does not leak its pinning into the rest of the program". One run
+    at a time is the contract and nothing said so where a caller of `Screen.run` would read it.
+
+    The damage is not that a batch lands on the wrong card. `shards._execute_shard` re-stamps a
+    task whose device disagrees with the global, and `shards._replace_device` rebuilds the
+    ShardTask field by field while omitting `side_inputs`, which carries
+    `field(default_factory=dict)` -- so the rebuilt task gets an empty one and the shard dies
+    with "was given no files for side input 'conformers'": a message about geometry that is
+    really about a device.
+
+    Measured on the SND1 v2 sweep. Four batches ran as four threads of one process, each
+    `screen.run(..., workers=4, devices=(d,))` for d in cuda:0..3. All four reached
+    docking_score and all four failed there, each after hours: shard 0 docked 20,000 molecules
+    while shard 1 died in seconds, and the error surfaced only when the pool drained. Eight
+    GPU-hours on four cards for four runs that could not have succeeded. The same batch resumed
+    afterwards as the only run in its own process went straight through docking to stage 16.
+    """
+
+    from etalon.boundary.screen import (
+        _IN_FLIGHT_LANES,
+        ConcurrentLanesRefused,
+        _claim_lanes,
+        _release_lanes,
+    )
+
+    _IN_FLIGHT_LANES.clear()
+    try:
+        _claim_lanes("batch_0001", ("cuda:0",))
+        with pytest.raises(ConcurrentLanesRefused) as refused:
+            _claim_lanes("batch_0002", ("cuda:1",))
+
+        message = str(refused.value)
+        # The refusal has to name the real cause, because the symptom names the wrong subsystem.
+        assert "process-global" in message
+        assert "_WORKER_DEVICE" in message and "CUDA_VISIBLE_DEVICES" in message
+        assert "side input" in message
+        # And the remedy, which is not something the caller can guess from the symptom.
+        assert "one batch per OS process" in message
+        # Both runs are named, so a log line identifies which pair collided.
+        assert "batch_0001" in message and "batch_0002" in message
+
+        _release_lanes("batch_0001", ("cuda:0",))
+        _claim_lanes("batch_0002", ("cuda:1",))
+        _release_lanes("batch_0002", ("cuda:1",))
+        assert not _IN_FLIGHT_LANES
+    finally:
+        _IN_FLIGHT_LANES.clear()
+
+
+def test_concurrent_cpu_runs_are_left_alone() -> None:
+    """The refusal is about CUDA pinning, and refusing CPU runs would be collateral.
+
+    `pinned_device` returns immediately for a non-CUDA device and every CPU task's device equals
+    the global, so the re-stamp path that loses side inputs is never taken. Two CPU runs in one
+    process collide over nothing.
+    """
+
+    from etalon.boundary.screen import _IN_FLIGHT_LANES, _claim_lanes, _release_lanes
+
+    _IN_FLIGHT_LANES.clear()
+    try:
+        _claim_lanes("one", ("cpu",))
+        _claim_lanes("two", ("cpu",))
+        # Nothing is tracked, so nothing can be refused.
+        assert not _IN_FLIGHT_LANES
+        _release_lanes("one", ("cpu",))
+        _release_lanes("two", ("cpu",))
+
+        # A run naming no lanes at all is likewise untracked.
+        _claim_lanes("three", ())
+        assert not _IN_FLIGHT_LANES
+    finally:
+        _IN_FLIGHT_LANES.clear()
+
+
+def test_a_failing_run_releases_its_lanes() -> None:
+    """A run that raises must not wedge the process against every later run.
+
+    The claim is taken before the runner and released in a `finally`, because the alternative --
+    releasing after a successful return -- turns one crashed batch into a campaign that can never
+    screen again in that process, and the supervisor's own retry is the first thing it breaks.
+    """
+
+    from etalon.boundary.screen import _IN_FLIGHT_LANES, _claim_lanes, _release_lanes
+
+    _IN_FLIGHT_LANES.clear()
+    try:
+        def failing_run() -> None:
+            _claim_lanes("boom", ("cuda:0",))
+            try:
+                raise RuntimeError("the stage blew up")
+            finally:
+                _release_lanes("boom", ("cuda:0",))
+
+        with pytest.raises(RuntimeError, match="blew up"):
+            failing_run()
+        assert not _IN_FLIGHT_LANES, "a crashed run left its lane claimed"
+
+        # The next run gets the card.
+        _claim_lanes("after", ("cuda:0",))
+        _release_lanes("after", ("cuda:0",))
+    finally:
+        _IN_FLIGHT_LANES.clear()
+
+
+def test_screen_run_claims_lanes_around_the_runner() -> None:
+    """End to end: the guard is useless if `Screen.run` does not take it.
+
+    Asserted against the real method rather than the helpers, because the helpers can both be
+    right while `run` never calls them -- which is the only way this defect could come back.
+    """
+
+    import threading
+
+    from etalon.boundary.screen import _IN_FLIGHT_LANES, ConcurrentLanesRefused, Screen
+
+    entered = threading.Event()
+    release = threading.Event()
+    observed: list[BaseException | None] = []
+
+    class SlowRunner:
+        def __init__(self, workspace, *, plugins, resources) -> None:  # noqa: ANN001, ARG002
+            pass
+
+        def run(self, pipeline, *, run_id, resume):  # noqa: ANN001, ARG002
+            entered.set()
+            release.wait(timeout=10)
+            return SimpleNamespace(run_id=run_id or "generated")
+
+        def load_run(self, run_id):  # noqa: ANN001
+            return SimpleNamespace(status="SUCCEEDED", stages=())
+
+    plan = SimpleNamespace(
+        revision_id="rev",
+        _internal={"registry": object(), "pipeline": object()},
+    )
+
+    _IN_FLIGHT_LANES.clear()
+    import molcascade.runtime as runtime
+
+    real_runner = runtime.LocalRunner
+    runtime.LocalRunner = SlowRunner
+    try:
+        screen = Screen.__new__(Screen)
+        object.__setattr__(screen, "workspace", Path("/tmp/does-not-matter"))
+
+        def first() -> None:
+            try:
+                screen.run(plan, run_id="first", workers=1, devices=("cuda:0",))
+                observed.append(None)
+            except BaseException as error:  # noqa: BLE001
+                observed.append(error)
+
+        thread = threading.Thread(target=first, daemon=True)
+        thread.start()
+        assert entered.wait(timeout=10), "the first run never reached the runner"
+
+        # While the first is inside the runner, the lane is claimed.
+        assert _IN_FLIGHT_LANES, "Screen.run did not claim its lane"
+        with pytest.raises(ConcurrentLanesRefused):
+            screen.run(plan, run_id="second", workers=1, devices=("cuda:1",))
+
+        release.set()
+        thread.join(timeout=10)
+        assert observed == [None], f"the first run did not finish cleanly: {observed}"
+        assert not _IN_FLIGHT_LANES, "Screen.run did not release its lane"
+    finally:
+        runtime.LocalRunner = real_runner
+        _IN_FLIGHT_LANES.clear()
