@@ -1,6 +1,6 @@
 ---
 name: etalon-research
-description: Use ETALON research SDK methods to retrieve and reuse published evidence, fit and calibrate group-separated policies, inspect released validation and feedback, pose and preparation evidence, or fixed-pool visible-query execution. Use campaign references for factorial or finite diagnostic basics.
+description: Use ETALON research SDK methods to retrieve and reuse published evidence, archive completed work and resume checkpoint publication, fit and calibrate group-separated policies, inspect released validation and feedback, pose and preparation evidence, or fixed-pool visible-query execution. Use campaign references for factorial or finite diagnostic basics.
 ---
 
 # Research methods on demand
@@ -12,6 +12,7 @@ registration, policy fitting, or the historical R3/R4/R4b scripts.
 | Current question | Read only this reference |
 | --- | --- |
 | Find published results or counterevidence, read a known reference, or reuse another source | [Evidence reuse](references/evidence-reuse.md) |
+| Archive completed outputs, publish a checkpoint and entry, or recover interrupted publication | [Progress publication](references/progress-publication.md) |
 | Fit/calibrate a finite policy, inspect `next_action`, or compare frozen controls | [Transfer and calibration](references/transfer.md) |
 | Attach a released comparison or interpret transfer/baseline feedback | [Validation and feedback](references/validation-feedback.md) |
 | Inspect pose selection, a preparation receipt, or native resource lineage | [Pose and preparation](references/pose-preparation.md) |

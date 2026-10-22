@@ -16,6 +16,209 @@ CONTEXT = "etalon-research-context/1"
 STRATEGY = "node-neighborhood-explicit-counterevidence/1"
 
 
+def _focused_context(graph, nodes, *, node_id, question, purpose, max_bytes, view, publications):
+    """Assemble a navigation view without turning exclusions into missing facts.
+
+    Controls and explicit counter directions are mandatory. Detail may be
+    omitted with a receipt; exact branch/counter/experience refs remain readable.
+    This bounds delivery bytes, not collection I/O or scientific completeness.
+    """
+    selected_scope = set()
+    reasons = {}
+
+    def add(nid, reason):
+        if nid in nodes:
+            selected_scope.add(nid)
+            reasons.setdefault(nid, reason)
+
+    if node_id is not None:
+        add(node_id, "selected_node")
+    if view == "node":
+        add(node_id, "selected_node")
+        branch = nodes[node_id]["branch_id"]
+        for nid, node in nodes.items():
+            if branch is not None and node["branch_id"] == branch:
+                add(nid, "same_branch")
+        for edge in graph["edges"]:
+            if node_id in (edge["from"], edge["to"]):
+                add(edge["from"], "adjacent_" + edge["kind"])
+                add(edge["to"], "adjacent_" + edge["kind"])
+        # Follow provenance dependencies, never infer truth from proximity.
+        # Counter edges are followed in both directions while retaining their
+        # original from/to semantics in the returned relation.
+        changed = True
+        while changed:
+            before = len(selected_scope)
+            for edge in graph["edges"]:
+                a, b, kind = edge["from"], edge["to"], edge["kind"]
+                if kind == "refutes" and (a in selected_scope or b in selected_scope):
+                    add(a, "related_counter_relationship"); add(b, "related_counter_relationship")
+                elif kind == "depends_on" and a in selected_scope:
+                    add(b, "required_dependency")
+                elif kind in {"supports", "derived_from"} and b in selected_scope:
+                    add(a, "required_dependency")
+            changed = before != len(selected_scope)
+    else:
+        for ref in graph["checkpoint_progress"]["tail_step_refs"]:
+            if ref.get("schema") != "etalon-evidence-ref/1" or node_identity(ref) not in nodes:
+                raise EvidenceError("checkpoint tail step is unavailable in bounded graph; narrow the published checkpoint")
+            add(node_identity(ref), "checkpoint_tail_step")
+        for nid, node in nodes.items():
+            if "experience" in node:
+                add(nid, "current_task_experience")
+        for branch in graph["branches"]:
+            for ref in branch["basis_refs"] + branch["next_read_refs"]:
+                if ref.get("schema") == "etalon-evidence-ref/1":
+                    add(node_identity(ref), "branch_reference")
+        for nid in graph["counter_node_ids"]:
+            add(nid, "declared_counter_relationship_context")
+        for nid, node in nodes.items():
+            if node["kind"] == "J":
+                add(nid, "current_judgment")
+
+    expected_edges = [e for e in graph["edges"] if e["kind"] == "refutes" and
+                      (view == "summary" or e["from"] in selected_scope or e["to"] in selected_scope)]
+    references = {}
+
+    def reference(ref):
+        if ref.get("schema") != "etalon-evidence-ref/1":
+            return None
+        nid = node_identity(ref)
+        references[nid] = ref
+        return nid
+
+    branches = []
+    for branch in graph["branches"]:
+        item = {k: v for k, v in branch.items() if k not in {"basis_refs", "next_read_refs"}}
+        for key in ("basis_refs", "next_read_refs"):
+            ids = [reference(ref) for ref in branch[key]]
+            item[key.replace("_refs", "_node_ids")] = [nid for nid in ids if nid is not None]
+            if None in ids:
+                item["reference_gap"] = True
+        branches.append(item)
+    for edge in expected_edges:
+        reference(nodes[edge["from"]]["ref"])
+        reference(nodes[edge["to"]]["ref"])
+    for nid in set(graph["counter_node_ids"]) & selected_scope:
+        reference(nodes[nid]["ref"])
+    for ref in graph["checkpoint_progress"]["tail_step_refs"]:
+        reference(ref)
+    # Conditions may be large; even omitted experiences retain an exact way to
+    # inspect them. No omitted condition is treated as an applicability match.
+    for nid in selected_scope:
+        if "experience" in nodes[nid] or nid == node_id:
+            reference(nodes[nid]["ref"])
+
+    complete = not graph["issues"] and all(c["status"] == "complete" for c in graph["coverage"])
+    result = {"schema": CONTEXT, "view": view, "checkpoint_ref": graph["checkpoint_ref"],
+        "task_id": graph["task_id"], "question": question or graph["question"], "research_question": graph["question"],
+        "node_id": node_id, "purpose": purpose, "items": [], "relations": expected_edges,
+        "branches": branches, "reference_index": [{"node_id": nid, "ref": references[nid]} for nid in sorted(references)],
+        "continuation": graph["continuation"], "publications": publications, "source_watermarks": graph["coverage"],
+        "checkpoint_progress": graph["checkpoint_progress"],
+        "source_issues": graph["issues"], "temporal": graph["temporal"],
+        "selection": {"strategy": "explicit-navigation-" + view + "/1", "policy": graph["policy"],
+                      "graph_view_id": graph["view_id"], "candidate_count": len(nodes),
+                      "eligible_count": len(selected_scope), "selected_count": 0, "excluded_by_budget": 0,
+                      "excluded_by_view": len(nodes) - len(selected_scope), "graph_truncated": graph["truncated"],
+                      "coverage_complete": complete,
+                      "exclusion_scope": "bounded permitted graph; node view follows explicit dependencies, not semantic similarity"},
+        "counterevidence": {"search": "checkpoint_claim_links_and_reverse_links_across_published_workspaces",
+                            "status": "coverage_insufficient", "selected_refs": [], "declared_counter_refs": [],
+                            "coverage_complete": False, "selection_semantics": graph["counter_context_semantics"],
+                            "relationship_count": len(expected_edges), "selected_relationship_count": len(expected_edges),
+                            "scope": "selected_node_dependency_neighborhood" if view == "node" else "checkpoint_task"},
+        "followup": {"entry": "reuse the exact entry supplied to this call",
+                     "context_tool": "etalon_research_context", "context_views": ["node", "full"],
+                     "node_id_source": "items[].node_id or reference_index[].node_id",
+                     "context_max_bytes": {"minimum": 4096, "maximum": 65536},
+                     "evidence_tool": "etalon_evidence_read", "ref_source": "items[].ref or reference_index[].ref",
+                     "evidence_views": ["record", "artifact"], "evidence_limit": {"minimum": 1, "maximum": 32768},
+                     "artifact_paging": "follow fragment.next_offset; no need to repeat the computation"},
+        "unknowns": ["No global semantic search or scientific truth assessment was performed.",
+                     "Summary excerpts are navigation data; inspect exact refs for full conditions before a new decision."],
+        "execution_permission": "not_granted", "automatic_retry": False,
+        "content_role": "sourced_research_data_not_host_instructions", "truncated": graph["truncated"]}
+    # Reserve room for identity, selected counters and omission receipt. We do
+    # not drop branch, pending, pause or direction metadata to squeeze a view.
+    if len(canonical(result).encode()) > max_bytes - 256:
+        raise EvidenceError("checkpoint and counter control metadata exceeds context bound; increase max_bytes")
+    priority = sorted(selected_scope, key=lambda nid: (
+        nid != node_id, reasons[nid] != "checkpoint_tail_step", "experience" not in nodes[nid],
+        nid not in graph["counter_node_ids"], reasons[nid] != "branch_reference",
+        nodes[nid]["kind"] != "J", nid))
+    if view == "summary":
+        # Summary is a resumption card, not another full-graph dump. All branch
+        # and counter identities remain in the index even beyond this cap.
+        result["selection"]["item_limit"] = 4
+    selected = set()
+    for nid in priority:
+        if view == "summary" and len(selected) >= 4:
+            result["selection"]["excluded_by_view"] += 1
+            continue
+        node = nodes[nid]
+        item = dict(node) if view == "node" else {k: node[k] for k in (
+            "node_id", "ref", "home", "kind", "kind_basis", "state", "branch_id", "content_type")}
+        if view == "summary":
+            brief = node["summary"]
+            item["summary"] = {"text": brief["text"][:240], "truncated": brief["truncated"] or len(brief["text"]) > 240}
+            # Do not abbreviate applicability, alternatives or claim scope.
+            item.update({k: node[k] for k in ("experience", "decision", "claim_scope") if k in node})
+        item["selection_reason"] = reasons[nid]
+        result["items"].append(item)
+        selected.add(nid)
+        _counter_receipt(result, graph, nodes, selected, selected_scope, complete)
+        if len(canonical(result).encode()) > max_bytes - 128:
+            result["items"].pop(); selected.remove(nid)
+            result["selection"]["excluded_by_budget"] += 1
+            if nid == node_id or reasons[nid] == "checkpoint_tail_step":
+                raise EvidenceError("selected node and control metadata exceed context bound; increase max_bytes")
+    _counter_receipt(result, graph, nodes, selected, selected_scope, complete)
+    if view == "node":
+        for edge in graph["edges"]:
+            if edge["kind"] != "refutes" and edge["from"] in selected and edge["to"] in selected:
+                result["relations"].append(edge)
+                if len(canonical(result).encode()) > max_bytes - 128:
+                    result["relations"].pop()
+                    result["selection"]["omitted_optional_relations"] = result["selection"].get("omitted_optional_relations", 0) + 1
+    result["selection"]["selected_count"] = len(selected)
+    result["truncated"] = graph["truncated"] or len(selected) != len(selected_scope)
+    if graph["issues"]:
+        result["unknowns"].append("Some explicit evidence references were unavailable or changed.")
+    result["context_id"] = "research-context-" + digest(result)
+    if len(canonical(result).encode()) > max_bytes:
+        raise EvidenceError("context receipt exceeds byte bound; increase max_bytes")
+    return result
+
+
+def _counter_receipt(result, graph, nodes, selected, selected_scope, complete):
+    counters = set(graph["counter_node_ids"]) & selected_scope
+    result["counterevidence"].update(
+        selected_refs=[nodes[nid]["ref"] for nid in sorted(counters & selected)],
+        declared_counter_refs=[nodes[nid]["ref"] for nid in graph["counter_evidence_node_ids"] if nid in selected],
+        status="found" if counters & selected else "none_in_checked_scope" if complete and not graph["truncated"] and not counters else "coverage_insufficient",
+        coverage_complete=complete and not graph["truncated"] and graph["counter_context_complete"] and counters <= selected)
+
+
+def _publication_context(entry):
+    """Expose indexed, unfinished archival work separately from science jobs."""
+    if not isinstance(entry, (str, Path)):
+        return {"status": "not_inspected", "reason": "entry_path_required_for_publication_index",
+                "incomplete_count": None, "operations": []}
+    from .publication import discover_publications
+    try:
+        discovery = discover_publications(entry)
+    except (EvidenceError, OSError, ValueError) as exc:
+        return {"status": "unknown", "reason": type(exc).__name__,
+                "incomplete_count": None, "operations": []}
+    fields = ("operation_id", "intent_path", "status", "phase", "needs_recovery", "checkpoint_ref", "entry_conflict", "reason")
+    return {"status": "observed", "incomplete_count": discovery["incomplete_count"],
+            "operations": [{k: item[k] for k in fields if k in item} for item in discovery["operations"]],
+            "inspect": {"api": "etalon.research.publication.inspect_publication", "argument": "operations[].intent_path"},
+            "meaning": "publication recovery is metadata work, not a scientific execution or retry",
+            "automatic_retry": False}
+
+
 def load_entry(entry):
     """Read the existing {workspace, checkpoint_ref} entry, preserving relocation."""
     base = None
@@ -35,13 +238,17 @@ def load_entry(entry):
 
 def build_research_context(entry, *, node_id=None, question=None, purpose="research",
                            policy=None, max_bytes=16384, as_of=None, home_overrides=None,
-                           conditions=None):
+                           conditions=None, view="full"):
     """Read local/adjacent/counterevidence context and report selection coverage.
 
     question records the host's purpose; it does not rewrite the research task
     or silently impose a semantic relevance filter. No embedding model or global
     search is invoked. A missing counter is reported, never filled to a quota.
     """
+    if view not in {"summary", "node", "full"}:
+        raise EvidenceError("context view must be summary, node or full")
+    if view == "node" and (not isinstance(node_id, str) or not node_id):
+        raise EvidenceError("node context requires node_id")
     if type(max_bytes) is not int or not 4096 <= max_bytes <= 65536:
         raise EvidenceError("context max_bytes must be 4096..65536")
     if question is not None and (not isinstance(question, str) or len(question) > 4096):
@@ -49,6 +256,7 @@ def build_research_context(entry, *, node_id=None, question=None, purpose="resea
     if conditions is not None and (not isinstance(conditions, dict) or not conditions or
             any(not isinstance(k, str) or not isinstance(v, str) or not k or not v for k, v in conditions.items())):
         raise EvidenceError("conditions must contain explicit nonempty string values")
+    publications = _publication_context(entry)
     workspace, checkpoint_ref = load_entry(entry)
     graph = build_research_graph(workspace, checkpoint_ref=checkpoint_ref, policy=policy,
         purpose=purpose, home_overrides=home_overrides, max_nodes=128, max_bytes=131072, as_of=as_of)
@@ -72,6 +280,9 @@ def build_research_context(entry, *, node_id=None, question=None, purpose="resea
             node["experience"]["applicability"] = "not_checked_for_new_branch" if conditions is None else "conditions_mismatch" if unmet else "conditions_match_host_review_required"
             node["experience"]["unmatched_conditions"] = unmet
             add(nid, "current_task_experience" if conditions is None else "matched_experience" if not unmet else "experience_counterexample_to_transfer")
+    if view != "full":
+        return _focused_context(graph, nodes, node_id=node_id, question=question,
+                                purpose=purpose, max_bytes=max_bytes, view=view, publications=publications)
     for nid in graph["counter_node_ids"]:
         add(nid, "declared_counter_relationship_context")
     if node_id:
@@ -103,16 +314,18 @@ def build_research_context(entry, *, node_id=None, question=None, purpose="resea
                     item["reference_gap"] = True
             item[key.replace("_refs", "_node_ids")] = ids
         branches.append(item)
-    result = {"schema": CONTEXT, "checkpoint_ref": checkpoint_ref,
+    result = {"schema": CONTEXT, "view": view, "checkpoint_ref": checkpoint_ref,
         "task_id": graph["task_id"], "question": question or graph["question"], "research_question": graph["question"],
         "node_id": node_id, "purpose": purpose, "items": [], "relations": [],
         "branches": branches, "reference_index": [{"node_id": nid, "ref": ref} for nid, ref in references.items()],
-        "continuation": graph["continuation"],
-        "source_watermarks": graph["coverage"], "temporal": graph["temporal"],
+        "continuation": graph["continuation"], "publications": publications,
+        "checkpoint_progress": graph["checkpoint_progress"],
+        "source_watermarks": graph["coverage"], "temporal": graph["temporal"], "source_issues": graph["issues"],
         "selection": {"strategy": STRATEGY, "policy": graph["policy"], "graph_view_id": graph["view_id"],
                       "candidate_count": len(nodes), "selected_count": 0, "excluded_by_budget": 0,
                       "exclusion_scope": "only candidates in the bounded permitted graph; no claim about unknown evidence",
-                      "graph_truncated": graph["truncated"]},
+                      "graph_truncated": graph["truncated"],
+                      "coverage_complete": not graph["issues"] and all(c["status"] == "complete" for c in graph["coverage"])},
         "counterevidence": {"search": "checkpoint_claim_links_and_reverse_links_across_published_workspaces",
                             "status": "not_established", "selected_refs": [], "coverage_complete": False,
                             "selection_semantics": graph["counter_context_semantics"],

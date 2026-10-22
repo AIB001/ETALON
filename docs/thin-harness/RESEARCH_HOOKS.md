@@ -16,7 +16,7 @@ result = handle_event(
     {"hook_event_name": "SessionStart", "session_id": "my-session",
      "event_id": "delivery-1", "source": "startup"},
     host="codex", state_dir="host-delivery-trace",
-    policy=None, max_bytes=16384,
+    policy=None, max_bytes=16384, conditions=None,
 )
 ```
 
@@ -24,6 +24,10 @@ The entry is the existing JSON entry file, or a dictionary containing `workspace
 and `checkpoint_ref`. `policy` uses the same explicit visibility and purpose
 rules as the context reader. A host without lifecycle hooks may call this API
 explicitly. No separate MCP hook server is required.
+`conditions` is an optional explicit string-to-string applicability mapping;
+it is never inferred from a scientific tool's arbitrary arguments. The command
+adapter also accepts `--conditions CONDITIONS.json`. Configuration drift starts
+a fresh baseline, and conflicts with a replay of an already used strong event ID.
 
 The command adapter reads one JSON event from stdin:
 
@@ -97,11 +101,11 @@ definitions require the host's review again.
 
 | Event | Behavior | Persistence |
 | --- | --- | --- |
-| SessionStart (startup/resume/compact/clear/fork) | Read the entry and return a bounded evidence package | Exact prepared context, selection policy, source watermarks, reference inventory and output hash/bytes |
-| PreToolUse for ETALON MCP tools | Return current entry context, including existing/pending work and authority status | The same injection receipt plus a host-observed request fingerprint |
+| SessionStart (startup/resume/compact/clear/fork) | Read the entry and return a self-contained summary baseline | Exact prepared context, selection policy, source watermarks, reference inventory and output hash/bytes |
+| PreToolUse for ETALON MCP tools | Read current summary and return baseline, delta, or unchanged notice | Same injection receipt, exact base identity, recovery request and host-observed request fingerprint |
 | PostToolUse | Record the observed return; explicit MCP errors remain failures | Tool identity, input/output fingerprints; no scientific admission |
 | PostToolUseFailure (Claude) | Record host-observed failure | Failure observation, without pretending to know a scientific endpoint |
-| PreCompact / Stop | Read and acknowledge the existing entry/checkpoint pointer | Checkpoint acknowledgment; no newly invented scientific checkpoint |
+| PreCompact / Stop | Read and acknowledge the existing published entry/checkpoint; retain unfinished publication status | Checkpoint acknowledgment and publication attention flag; PreCompact invalidates the prior delivery baseline |
 
 The tool matcher targets ETALON MCP names, including a single plugin prefix.
 Unrelated tools and the optional `research_hook` tool itself are ignored. No
@@ -115,6 +119,48 @@ not automatically a successful execution, a validated artifact or an admitted
 scientific result. Producer-side receipts remain authoritative for those
 claims, runtime costs and pending state. Original journals remain read-only.
 
+## Incremental context delivery
+
+The bridge uses `build_research_context(view="summary")`. The first read in a
+session and every SessionStart deliver a complete summary; the model can use
+the context reader's exact follow-up references to request node or full detail.
+This is a bounded summary, not a claim to have read all research evidence.
+
+For later PreToolUse events with the same entry, policy, conditions, byte bound
+and handler version, the output has one of three `delivery.mode` values:
+
+- `baseline`: a self-contained `context`, also used after reset, source-read
+  failure, configuration drift, or when a patch would be larger than the baseline.
+  `replaces_previous_context: true` means replace the earlier snapshot rather
+  than merge it, including after visibility-policy changes.
+- `delta`: `context_delta.set` replaces complete top-level values and
+  `context_delta.remove` deletes keys. Lists are replacements, never append-only
+  merges. `reference_removals` explicitly identifies references absent from the
+  current summary; absence means no longer selected, not scientific retraction.
+- `unchanged`: current context and source fingerprints match the earlier prepared
+  snapshot. This describes the checked, permitted context only.
+
+Delta and unchanged outputs retain current checkpoint, continuation, branch,
+pending/authority, source and publication controls. They name the exact base
+context hash and receipt and always include the entry and parameters for a fresh
+`etalon_research_context` summary read. A host with a missing or uncertain base
+must re-read that entry; it must not infer that omitted evidence was consumed.
+Every delivery states `consumption_verified: false`.
+
+Changed source watermarks cause an update even if scientific text is identical.
+An unavailable source or publication manifest cannot yield an unchanged notice.
+An incomplete source snapshot is delivered as an explicitly incomplete baseline
+and cannot become the basis of a later delta. A thrown read failure is persisted
+as a failure, emits no success context, and invalidates the old baseline.
+
+Publication discovery follows the entry's explicit publication index, without
+scanning unrelated directories. Prepared/in-progress/conflicting publications
+remain visible even before a new entry is published. Their recovery refers to
+finishing memory publication; it does not grant permission to rerun research.
+Stop/PreCompact record `publication_attention_required` in the receipt without
+blocking the host or automatically publishing. The next SessionStart also reads
+these operations, so termination is not the only recovery opportunity.
+
 ## Delivery identity and recovery
 
 Receipts are isolated by host, session and research entry. Host `event_id`, or
@@ -122,6 +168,15 @@ tool `tool_use_id`, gives a stable event identity (also separated by event type)
 Repeating an identity reuses its saved output; changing its payload or handler
 configuration is rejected. Locking and atomic rename prevent two concurrent
 writers from independently committing the same event.
+
+Each session/entry receipt directory has a `delivery-cursor` and, during a commit,
+a `delivery-pending` intent. Under the existing OS lock the bridge writes the
+intent, immutable receipt, then cursor using the existing atomic writer. On
+restart an intent with a committed, hash-matching receipt finishes the cursor
+update; one without a receipt is discarded. No cursor advances ahead of a
+durable output. Replaying an older event returns its exact saved output without
+rewinding the current cursor. These files track prepared delivery only, contain
+no global state, and never update a scientific Journal.
 
 Some native lifecycle payloads have no unique delivery ID. The fallback uses
 the event payload and current context fingerprints. Equal observations are
@@ -158,6 +213,11 @@ native JSON shapes, opt-in exports and quoted export paths. These are protocol
 and SDK tests. A real native host session must be separately observed before
 claiming lifecycle discovery or model consumption; producer admission, expensive
 science and cross-project RSI benefit are outside this test scope.
+`tests/test_research_hook_delta.py` additionally covers source changes, removed
+references, controls retained in compact notices, condition/policy/version drift,
+clear/compaction resets, unavailable sources/publications, strong and weak event
+identities, and interruption before/after receipt persistence. These fixtures
+verify recoverability, not actual host consumption or token-efficiency benefit.
 
 Protocol references checked during implementation:
 

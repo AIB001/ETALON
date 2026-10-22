@@ -175,7 +175,11 @@ def _project_node(ref, row, *, task_id, home_overrides):
     override = home_overrides.get(node_identity(ref), home_overrides.get(detail.get("node_id")))
     if override is not None:
         home = override
-    kind = "J" if home == "Judge" else "R" if operation == "result" or row["record_type"] == "observation" else "X" if operation in {"node", "plan"} or row["record_type"] == "experiment" else "E"
+    # Work area is not epistemic type. Moving an observation into Judge must
+    # not turn a measured result into an interpretation (or vice versa).
+    judgment = claim or experience or operation in {"judgment", "decision", "evaluation", "evaluation_plan"} or schema in {
+        "etalon-method-contract/1", "etalon-method-comparability/1"}
+    kind = "R" if operation == "result" or row["record_type"] == "observation" else "J" if judgment else "X" if operation in {"node", "plan"} or row["record_type"] == "experiment" else "E"
     if trace:
         kind = "R" if content["phase"] in {"execution", "admission"} else "X"
     elif schema == "etalon-screen-compilation/1":
@@ -183,6 +187,7 @@ def _project_node(ref, row, *, task_id, home_overrides):
     summary_text = next((content[k] for k in ("statement", "lesson", "reason", "question", "name") if k in content), row["record_type"])
     node = {"node_id": node_identity(ref), "ref": ref, "home": home, "kind": kind,
         "home_basis": "explicit_projection_override" if override else "explicit_trace_workspace" if trace else "legacy_record_projection",
+        "kind_basis": "explicit_trace_phase" if trace else "legacy_record_semantics_inferred",
         "task_id": content.get("task_id"), "branch_id": content.get("branch_id"),
         "logical_node_id": content.get("node_id", detail.get("node_id")), "operation": operation,
         "state": detail.get("state", content.get("status", content.get("state", "recorded"))),
@@ -247,6 +252,11 @@ def build_research_graph(workspace, *, checkpoint_ref, policy=None, purpose="res
     # Explicit counterevidence is prioritized before the node bound.
     for ref in checkpoint["counter_refs"]:
         counter_ids.add(node_identity(ref)); counter_context_ids.add(node_identity(ref)); enqueue(ref)
+    # Preserve the newest declared checkpoint progress before older steps can
+    # consume the bounded projection. This is list order, not an execution
+    # chronology inference; explicit counters still take priority.
+    for ref in checkpoint["step_refs"][-1:]:
+        enqueue(ref)
     for ref in checkpoint["claim_refs"] + checkpoint["step_refs"] + checkpoint["method_refs"]:
         enqueue(ref)
     for branch in checkpoint["branches"]:
@@ -353,6 +363,9 @@ def build_research_graph(workspace, *, checkpoint_ref, policy=None, purpose="res
         "task_id": task_id, "question": checkpoint["question"], "nodes": safe_metadata(list(selected.values())),
         "edges": [e for e in edges if e["from"] in selected and e["to"] in selected],
         "branches": safe_metadata(checkpoint["branches"]),
+        "checkpoint_progress": {"step_count": len(checkpoint["step_refs"]),
+            "tail_step_refs": safe_metadata(checkpoint["step_refs"][-1:]),
+            "order_semantics": "checkpoint_list_order_not_execution_order"},
         "counter_node_ids": sorted(counter_context_ids & selected.keys()),
         "counter_evidence_node_ids": sorted(counter_ids & selected.keys()),
         "counter_context_semantics": "both_endpoints_of_declared_counter_relations; refutes_edge_direction_is_authoritative",

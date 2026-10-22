@@ -18,7 +18,10 @@ Each node has one `home`: Search, Judge, Quick or Deep. E/J/X/R are small `kind`
 metadata fields, not four additional graphs. Content type, identity verification,
 task scope, conditions and limitations are separate fields. `home_overrides`
 annotate an immutable record or a workflow logical node for a particular view.
-They do not rewrite history. Older computational records default to Quick with
+They do not rewrite history or change E/J/X/R: an observation in Judge remains
+R, and a claim displayed in Search remains J. `kind_basis` identifies explicit
+trace phase or `legacy_record_semantics_inferred`; it never infers scientific
+status from the work area. Older computational records default to Quick with
 `home_basis=legacy_record_projection`; no resource cost is inferred from a PRISM
 or MolCascade name. Deep attribution must be explicit when history lacks it.
 
@@ -42,6 +45,7 @@ from etalon.research.research_context import build_research_context
 
 context = build_research_context(
     "path/to/existing/entry.json",
+    view="summary",  # default remains "full" for existing callers
     node_id=None,
     purpose="research",
     max_bytes=16384,
@@ -52,6 +56,38 @@ The entry remains the existing `{workspace, checkpoint_ref}` object. A JSON
 entry path may use a workspace path relative to itself. A dictionary may also
 contain an already validated EvidenceWorkspace. No migration of old SND1
 Journals is required.
+
+Three views use the same verified identities and access policy:
+
+| View | Delivered context | Expansion |
+| --- | --- | --- |
+| `summary` | Pause, pending, branches, source coverage, publication status and up to four navigation cards. The checkpoint's last declared step, conditional experience and counter-context have priority. | Exact item/index refs; `followup` names the existing context/evidence tools and their limits. |
+| `node` | Requires a stable or unambiguous logical `node_id`; follows same-branch records, direct neighbors, provenance dependencies and related counter edges. | Full node metadata in the selected neighborhood; excluded unrelated records are counted. |
+| `full` | Existing bounded task/checkpoint selection, preserving previous default behavior. | Increase the bound or read exact references. |
+
+Every view preserves control metadata, `checkpoint_ref`, `context_id`,
+`continuation`, `source_watermarks`, `reference_index`, and selection/coverage
+receipts. `checkpoint_progress.tail_step_refs` exposes the last entry in the
+published checkpoint's step list, with its exact reference. This is declared
+list order, not an inferred execution chronology. In summary view its card must
+fit or the call explicitly fails, so newly archived progress cannot be silently
+hidden behind old branch references. Full checkpoint content is still available
+through `etalon_evidence_read`.
+
+Focused views keep directional counter edges and readable endpoint refs even
+when detailed cards are omitted. `coverage_complete=false` distinguishes a
+reference-only conflict from fully delivered counter-context. Missing or
+restricted evidence is never invented. A small budget may fail explicitly when
+mandatory branch/pause/pending/counter metadata cannot fit; larger requested
+budgets do not authorize a broader workspace.
+
+`max_bytes` is 4096..65536 for contexts; graph bounds are 1..128 nodes and
+4096..262144 bytes. MCP schemas expose these constraints and evidence query
+limits of 1..50 and read limits of 1..32768. Artifact paging uses byte offsets and
+`fragment.next_offset`; an oversized request is rejected, not silently clamped.
+Summary/node outputs never inline base64 originals. Retrieval still collects a
+bounded permitted graph before delivery selection; this change does not claim
+reduced backend I/O or semantic question ranking.
 
 The selection strategy is versioned. It considers the requested node, explicit
 counterevidence, its neighborhood, the same branch, current judgments and other
@@ -135,6 +171,21 @@ retries, reconciles, updates branch state or grants execution. Pause is retained
 even when a small byte budget forces evidence omissions. If mandatory control
 metadata alone exceeds the response bound, the call fails explicitly.
 
+Path-based entries also inspect the exact `<entry>.publications.json` index
+through `discover_publications`. The `publications` control field separates
+unfinished archival/checkpoint publication from scientific pending handles. An
+empty scientific `pending` list does not mean all new progress was published.
+Cards retain operation/intent identity and recovery state; `inspect_publication`
+is the read-only expansion, while resumption remains an explicit host action.
+Unreadable/corrupt indexes return `status=unknown, incomplete_count=null`, never
+an empty success. Dictionary entries have no sidecar locator and explicitly
+report `not_inspected`. No directory scan or automatic publication occurs.
+
+`source_issues` and non-complete `source_watermarks[*].status` report source
+coverage failures separately from deliberate view omissions. Hooks must not
+treat an unavailable source or unknown publication index as an unchanged,
+successfully inspected context.
+
 Default mode observes the currently published view. `as_of` accepts only
 `{"source_snapshots": {source_id: sha256, ...}}` matching a fully frozen supplied
 workspace. It does not reconstruct old versions of a live journal. A frozen
@@ -152,7 +203,8 @@ contract. Native hook injection receipts can reference these outputs separately.
 
 ## Acceptance scope
 
-`tests/test_research_graph_memory.py` and `tests/test_research_context.py` use
+`tests/test_research_graph_memory.py`, `tests/test_research_context.py` and
+`tests/test_context_views.py` use
 explicit synthetic fixtures to exercise cross-home counterevidence, shared
 references, skip/reopen records, graph validation, workflow projection, policy
 filtering, changed hashes, bounded selection, absent counterevidence, pause and

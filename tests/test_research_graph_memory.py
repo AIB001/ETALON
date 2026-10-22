@@ -162,3 +162,15 @@ def test_counterevidence_from_other_published_source_and_scope_denial(graph_case
     assert next(n for n in graph["nodes"] if n["ref"] == external)["home"] == "Deep"
     with pytest.raises(EvidenceError, match="checkpoint unavailable"):
         build_research_graph(ws, checkpoint_ref=cp, policy={"source_ids": ["science"]})
+
+
+def test_work_area_override_does_not_change_record_kind(graph_case):
+    c = graph_case
+    graph = build_research_graph(c["workspace"], checkpoint_ref=c["checkpoint"],
+        home_overrides={node_identity(c["counter"]): "Judge", node_identity(c["claim"]): "Search"})
+    nodes = {n["node_id"]: n for n in graph["nodes"]}
+    assert nodes[node_identity(c["counter"])]["home"] == "Judge"
+    assert nodes[node_identity(c["counter"])]["kind"] == "E"
+    assert nodes[node_identity(c["claim"])]["home"] == "Search"
+    assert nodes[node_identity(c["claim"])]["kind"] == "J"
+    assert nodes[node_identity(c["counter"])]["kind_basis"] == "legacy_record_semantics_inferred"
