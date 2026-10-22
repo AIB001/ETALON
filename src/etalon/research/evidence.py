@@ -60,8 +60,18 @@ def _references(body):
                     if key in keys or (value.get("schema") == "etalon-method-evaluation/1"
                                        and key in {"subjects", "comparators"}):
                         for ref in item if isinstance(item, list) else [item]:
-                            if isinstance(ref, (str, dict)):
+                            if isinstance(ref, str):
                                 result.append(ref)
+                            elif isinstance(ref, dict):
+                                # Compiled programs also have `inputs` and `parents`.
+                                # Their port/configuration objects are not evidence IDs.
+                                # Still surface malformed explicit refs for validation.
+                                if ((isinstance(ref.get("schema"), str) and ref["schema"].startswith("etalon-evidence-ref/"))
+                                        or {"source_id", "record_id"} & ref.keys()
+                                        or key.endswith(("_ref", "_refs"))):
+                                    result.append(ref)
+                                else:
+                                    walk(ref)
                     elif isinstance(item, (list, dict)):
                         walk(item)
         elif isinstance(value, list):

@@ -21,9 +21,15 @@ Optional references, each readable on its own:
 - [Method modification and attribution](host-guides/method-improvement.md)
 - [Engineering and installation](host-guides/engineering.md)
 - [Short project entry for a new chat](host-guides/project-entry.md)
+- [Research graph, selective memory and lifecycle hooks](host-guides/research-graph.md)
 - [Host setup and compatibility details](HOST_SETUP.md)
 
 If the project supplies `etalon-workspace.json`, it locates published evidence
 and status references. Use it when helpful, or read a known reference directly.
 It is not a router, task plan or authorization registry. Load only the material
 needed for the current question; a new chat need not inherit the whole history.
+
+Optional skill groups are discoverable at `etalon://skill-libraries`: memory,
+execution and RSI. They are an index, not a required sequence. A research entry
+can be read with `etalon_research_context`; expand the exact references needed
+for the decision. Hooks prepare source data, not new instructions or authority.

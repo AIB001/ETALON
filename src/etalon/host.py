@@ -9,6 +9,8 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import base64
+import shlex
 from contextlib import contextmanager
 import sys
 from pathlib import Path, PurePosixPath
@@ -27,7 +29,50 @@ def _source() -> dict:
             "pythonpath": str(Path(__file__).resolve().parent.parent)}
 
 
-def _payload(host: str) -> tuple[dict, dict[str, bytes]]:
+def _research_hook_files(host: str, source: dict, config: dict) -> dict[str, bytes]:
+    """Emit opt-in project hooks; never edit the active host's configuration."""
+    from etalon.research_hooks import TOOL_PATTERN
+    if set(config) != {"entry", "state_dir", "launcher"}:
+        raise ValueError("unexpected research hook export configuration")
+    for value in config.values():
+        if not isinstance(value, str) or not Path(value).is_absolute():
+            raise ValueError("research hook export paths must be absolute")
+    launcher = ("# Generated from the active ETALON installation.\n"
+                "import sys\n"
+                f"sys.path.insert(0, {source['pythonpath']!r})\n"
+                "from etalon.research_hooks import main\n"
+                f"raise SystemExit(main({['--host', host, '--entry', config['entry'], '--state-dir', config['state_dir']]!r}))\n")
+    if host == "claude":
+        # Current Claude command hooks support direct exec form, without a shell.
+        command = {"type": "command", "command": source["python"], "args": [config["launcher"]]}
+    else:
+        posix = shlex.join([source["python"], config["launcher"]])
+        def ps_quote(value):
+            return "'" + value.replace("'", "''") + "'"
+        powershell = "& " + " ".join(ps_quote(v) for v in (source["python"], config["launcher"])) + "; exit $LASTEXITCODE"
+        # Encode only the fixed invocation, not data from tool event stdin.
+        encoded = base64.b64encode(powershell.encode("utf-16-le")).decode("ascii")
+        command = {"type": "command", "command": posix,
+                   "commandWindows": f"powershell.exe -NoProfile -NonInteractive -EncodedCommand {encoded}"}
+    hooks = {}
+    for event in ("SessionStart", "PreToolUse", "PostToolUse", "PreCompact", "Stop"):
+        handler = dict(command)
+        # This bridge only reads local evidence. Do not inherit a host's
+        # multi-minute default timeout when a source or filesystem is stuck.
+        handler["timeout"] = 30
+        if host == "codex" and event in {"SessionStart", "PreToolUse"}:
+            handler["additionalContextLimit"] = 6000
+        group = {"hooks": [handler]}
+        if event in {"PreToolUse", "PostToolUse"}:
+            group["matcher"] = TOOL_PATTERN
+        hooks[event] = [group]
+    if host == "claude":
+        hooks["PostToolUseFailure"] = [{"matcher": TOOL_PATTERN, "hooks": [{**command, "timeout": 30}]}]
+    config_name = ".codex/hooks.json" if host == "codex" else ".claude/settings.json"
+    return {".etalon/research-hook.py": launcher.encode("utf-8"), config_name: _json({"hooks": hooks})}
+
+
+def _payload(host: str, research_hooks: dict | None = None) -> tuple[dict, dict[str, bytes]]:
     if host not in {"codex", "claude"}:
         raise ValueError("host must be codex or claude")
     source = _source()
@@ -65,6 +110,8 @@ def _payload(host: str) -> tuple[dict, dict[str, bytes]]:
         ).encode()
     else:
         files[".mcp.json"] = _json({"mcpServers": {"etalon": {"type": "stdio", **launch}}})
+    if research_hooks is not None:
+        files.update(_research_hook_files(host, source, research_hooks))
     manifest = {
         "schema": "etalon-host-export/1", "host": host, "source": source,
         "skills": versions,
@@ -74,6 +121,8 @@ def _payload(host: str) -> tuple[dict, dict[str, bytes]]:
                   for name, data in sorted(files.items())},
         "host_validation": "not performed; export is not evidence of native host discovery",
     }
+    if research_hooks is not None:
+        manifest["research_hooks"] = research_hooks
     return manifest, files
 
 
@@ -84,10 +133,17 @@ def _root(target: str | Path) -> Path:
     return root
 
 
-def export(target: str | Path, host: str = "codex") -> dict:
+def export(target: str | Path, host: str = "codex", *, research_entry: str | Path | None = None) -> dict:
     """Create an export without modifying existing projects or host settings."""
     root = _root(target)
-    manifest, files = _payload(host)
+    config = None
+    if research_entry is not None:
+        entry = _root(research_entry)
+        if not entry.is_file():
+            raise ValueError("research entry must be an existing local JSON file")
+        config = {"entry": str(entry), "state_dir": str(root / ".etalon" / "research-hook-receipts"),
+                  "launcher": str(root / ".etalon" / "research-hook.py")}
+    manifest, files = _payload(host, config)
     # Fail even for an existing empty directory. No existing role or config is replaced.
     root.mkdir(parents=True, exist_ok=False)
     for name, data in files.items():
@@ -122,7 +178,7 @@ def verify(target: str | Path) -> dict:
     saved = json.loads(manifest_path.read_text(encoding="utf-8"))
     if saved.get("schema") != "etalon-host-export/1":
         raise ValueError("unsupported host export schema")
-    current, current_files = _payload(saved["host"])
+    current, current_files = _payload(saved["host"], saved.get("research_hooks"))
     files = saved.get("files")
     if not isinstance(files, dict) or not files or len(files) > 2000:
         raise ValueError("host manifest needs a bounded file inventory")
@@ -293,6 +349,8 @@ def main() -> int:
     create = sub.add_parser("export", help="export to a new project directory")
     create.add_argument("--target", type=Path, required=True)
     create.add_argument("--host", choices=("codex", "claude"), default="codex")
+    create.add_argument("--research-entry", type=Path,
+                        help="opt in to project-local research lifecycle hooks for this JSON entry")
     check = sub.add_parser("verify", help="check an export for changed, missing or added files")
     check.add_argument("--target", type=Path, required=True)
     args = parser.parse_args()
@@ -300,7 +358,7 @@ def main() -> int:
         if args.command == "catalog":
             report = {**skills.catalog(detail=args.detail, skills=args.skills), "source": _source()}
         elif args.command == "export":
-            report = export(args.target, args.host)
+            report = export(args.target, args.host, research_entry=args.research_entry)
         else:
             report = verify(args.target)
         good = args.command != "verify" or all(report[key] for key in

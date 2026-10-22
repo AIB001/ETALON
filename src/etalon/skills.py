@@ -20,6 +20,8 @@ WORKFLOWS = {
     "install": "etalon-install",
     "data-design": "etalon-data-design",
     "research": "etalon-research",
+    "research-context": "etalon-research-context",
+    "method-configuration": "etalon-method-configuration",
     "skill-improvement": "etalon-skill-improvement",
     "molquarry-analogue-search": "molquarry-analogue-search",
     "molquarry-assay-literature": "molquarry-assay-literature",
@@ -33,6 +35,18 @@ MAX_FILE_BYTES = 256 * 1024
 MAX_BUNDLE_BYTES = 4 * 1024 * 1024
 MAX_MEMBERS = 512
 SNAPSHOT_MANIFEST = "etalon-bundle-manifest.json"
+
+
+def library_catalog() -> dict:
+    """Optional discovery groups; they do not constrain selection or duplicate bundles."""
+    memory = ["research-context", "research"]
+    rsi = ["skill-improvement"]
+    return {"schema": "etalon-skill-libraries/1", "libraries": {
+        "memory": memory,
+        "execution": [slug for slug in WORKFLOWS if slug not in memory + rsi],
+        "rsi": rsi,
+    }, "entrypoints": {slug: f"etalon://skills/{slug}" for slug in WORKFLOWS},
+        "selection": "host chooses, combines, modifies, skips or stops; groups are discovery only"}
 
 
 def sha256(content: bytes) -> str:

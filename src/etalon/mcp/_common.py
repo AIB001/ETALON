@@ -27,11 +27,13 @@ choosing, rather than discovering it from an error.
 
 from __future__ import annotations
 
+import io
 import json
 import logging
 import sys
 import threading
 from collections.abc import Callable
+from contextlib import contextmanager
 from enum import StrEnum
 from functools import partial, wraps
 from pathlib import Path
@@ -40,6 +42,126 @@ from typing import Any
 from etalon.active.store import StateError
 
 logger = logging.getLogger("etalon.mcp")
+
+
+class _WindowsPipeReader(io.RawIOBase):
+    """Read only bytes already available on a borrowed Windows pipe handle.
+
+    In the tested Windows/Conda environment, a pending synchronous stdin read can
+    stall the first NumPy DLL import, even on another thread. Waiting with
+    PeekNamedPipe avoids that blocking read without eagerly loading scientific
+    dependencies. The MCP SDK still owns decoding, messages and worker lifetime.
+    There must be exactly one reader of the handle, as with ordinary MCP stdio.
+    """
+
+    def __init__(self, fd: int, handle: int, kernel: Any, ctypes: Any) -> None:
+        super().__init__()
+        self._fd, self._handle = fd, handle
+        self._kernel, self._ctypes = kernel, ctypes
+        self._stop = threading.Event()
+
+    def stop(self) -> None:
+        self._stop.set()
+
+    def readable(self) -> bool:
+        return True
+
+    def fileno(self) -> int:
+        return self._fd
+
+    def readinto(self, target: Any) -> int:
+        if self.closed:
+            raise ValueError("read of closed Windows pipe wrapper")
+        if not len(target):
+            return 0
+        # The SDK reads in an AnyIO worker. Honor cancellation of that reader,
+        # so transport shutdown need not wait for a client to close its pipe.
+        # Direct ordinary-thread use has no AnyIO cancellation scope.
+        try:
+            from anyio.from_thread import check_cancelled
+            check_cancelled()
+        except (ImportError, RuntimeError):
+            check_cancelled = None
+        ctypes = self._ctypes
+        available = ctypes.c_ulong()
+        while not self._stop.is_set():
+            if check_cancelled is not None:
+                check_cancelled()
+            if not self._kernel.PeekNamedPipe(
+                self._handle, None, 0, None, ctypes.byref(available), None
+            ):
+                error = ctypes.get_last_error()
+                if error in {109, 232, 233}:  # Broken, closing or disconnected pipe.
+                    return 0
+                raise ctypes.WinError(error)
+            if available.value:
+                size = min(len(target), available.value)
+                buffer = ctypes.create_string_buffer(size)
+                received = ctypes.c_ulong()
+                success = self._kernel.ReadFile(
+                    self._handle, buffer, size, ctypes.byref(received), None
+                )
+                if not success:
+                    error = ctypes.get_last_error()
+                    if error in {109, 232, 233}:
+                        return 0
+                    if error != 234:  # A message pipe may have more data after this chunk.
+                        raise ctypes.WinError(error)
+                target[: received.value] = buffer.raw[: received.value]
+                return received.value
+            self._stop.wait(0.01)
+        return 0
+
+
+def _windows_pipe_input(stream: Any) -> Any | None:
+    if sys.platform != "win32":
+        return None
+    import ctypes
+    import msvcrt
+
+    try:
+        fd = stream.fileno()
+        handle = msvcrt.get_osfhandle(fd)
+    except (AttributeError, OSError, ValueError):
+        return None
+    kernel = ctypes.WinDLL("kernel32", use_last_error=True)
+    kernel.GetFileType.argtypes = (ctypes.c_void_p,)
+    kernel.GetFileType.restype = ctypes.c_ulong
+    if kernel.GetFileType(handle) != 3:  # FILE_TYPE_PIPE; consoles and files stay unchanged.
+        return None
+    kernel.PeekNamedPipe.argtypes = (
+        ctypes.c_void_p, ctypes.c_void_p, ctypes.c_ulong, ctypes.c_void_p,
+        ctypes.POINTER(ctypes.c_ulong), ctypes.c_void_p,
+    )
+    kernel.PeekNamedPipe.restype = ctypes.c_int
+    kernel.ReadFile.argtypes = (
+        ctypes.c_void_p, ctypes.c_void_p, ctypes.c_ulong,
+        ctypes.POINTER(ctypes.c_ulong), ctypes.c_void_p,
+    )
+    kernel.ReadFile.restype = ctypes.c_int
+    # Closing this RawIOBase never closes the borrowed OS handle or original stdin.
+    return io.TextIOWrapper(io.BufferedReader(_WindowsPipeReader(fd, handle, kernel, ctypes)),
+                            encoding="utf-8", errors="replace")
+
+
+@contextmanager
+def stdio_input():
+    """Keep lazy native imports safe on Windows pipes; leave other inputs intact."""
+    original = sys.stdin
+    replacement = _windows_pipe_input(original)
+    if replacement is None:
+        yield
+        return
+    try:
+        sys.stdin = replacement
+        yield
+    finally:
+        sys.stdin = original
+        # Signal before BufferedReader.close() acquires its lock: a reader may
+        # still be waiting for input during an exception or cancellation.
+        if not replacement.closed:
+            replacement.buffer.raw.stop()
+        replacement.close()
 
 
 class Cost(StrEnum):

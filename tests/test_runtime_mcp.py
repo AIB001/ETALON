@@ -13,6 +13,7 @@ import os
 import subprocess
 import sys
 import time
+from datetime import timedelta
 from pathlib import Path
 
 import pytest
@@ -41,6 +42,8 @@ def acquisition(fixture):
         "min_records": 3}, "resources": {"http_requests": 0, "http_bytes": 1_000_000}}
 
 
+@pytest.mark.skipif(os.name != "posix" or not hasattr(os, "O_NOFOLLOW"),
+                    reason="durable workflow execution requires POSIX file locks")
 def test_stdio_external_workflow_and_registered_active_cpu_execution(tmp_path):
     pytest.importorskip("mcp")
     from mcp import ClientSession, StdioServerParameters
@@ -54,7 +57,8 @@ def test_stdio_external_workflow_and_registered_active_cpu_execution(tmp_path):
     async def run():
         server = StdioServerParameters(command=sys.executable, args=["-m", "etalon.mcp"],
                                        env={"PYTHONPATH": str(ROOT / "src")})
-        async with (stdio_client(server) as (read, write), ClientSession(read, write) as session):
+        async with (stdio_client(server) as (read, write),
+                    ClientSession(read, write, read_timeout_seconds=timedelta(seconds=20)) as session):
             await session.initialize()
             names = {item.name for item in (await session.list_tools()).tools}
             assert RUNTIME_RESOURCE in {str(item.uri) for item in (await session.list_resources()).resources}
@@ -190,7 +194,7 @@ def test_stdio_external_workflow_and_registered_active_cpu_execution(tmp_path):
                 "reason": "Inspect without authorizing any resumed work"})
             assert reconciled["job"]["state"] != "succeeded"
 
-    asyncio.run(run())
+    asyncio.run(asyncio.wait_for(run(), timeout=180))
 
 
 def cli(*arguments):

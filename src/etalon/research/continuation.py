@@ -74,6 +74,13 @@ def validate_content(payload):
     if len(canonical(payload).encode()) > MAX_CONTENT_BYTES:
         raise EvidenceError("research content exceeds 16 KiB; link separate artifacts")
     schema = payload.get("schema")
+    from .method_contract import SCHEMAS as CONTRACT_SCHEMAS
+    if schema in CONTRACT_SCHEMAS:
+        from .method_contract import validate_content as validate_contract_content
+        return validate_contract_content(payload)
+    if schema == "etalon-research-trace/1":
+        from .research_trace import validate_content as validate_trace
+        return validate_trace(payload)
     from .improvement import SCHEMAS as IMPROVEMENT_SCHEMAS
     if schema in IMPROVEMENT_SCHEMAS:
         from .improvement import validate_content as validate_improvement
@@ -232,6 +239,9 @@ def record_content(journal, payload, directory, *, source_id, source_kind, role=
     if content["schema"] in IMPROVEMENT_SCHEMAS:
         from .improvement import validate_local_links as validate_improvement_links
         validate_improvement_links(journal, content, source_id)
+    if content["schema"] == "etalon-research-trace/1":
+        from .research_trace import validate_local_links as validate_trace_links
+        validate_trace_links(journal, content, source_id)
     if content["schema"] == CHECKPOINT:
         typed_refs.extend((r, STEP) for r in content["step_refs"])
         typed_refs.extend((r, "etalon-research-claim/1") for r in content["claim_refs"])

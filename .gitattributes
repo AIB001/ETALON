@@ -5,3 +5,4 @@
 # Evidence fixtures and imported contracts carry byte-exact SHA-256 references.
 /tests/fixtures/** -text
 /src/etalon/data/contracts/** -text
+/src/etalon/research/contracts/** -text

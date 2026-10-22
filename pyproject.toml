@@ -96,6 +96,8 @@ packages = ["src/etalon"]
 ".claude/skills/etalon-install" = "etalon/mcp/skills/bundles/install"
 ".claude/skills/etalon-data-design" = "etalon/mcp/skills/bundles/data-design"
 ".claude/skills/etalon-research" = "etalon/mcp/skills/bundles/research"
+".claude/skills/etalon-research-context" = "etalon/mcp/skills/bundles/research-context"
+".claude/skills/etalon-method-configuration" = "etalon/mcp/skills/bundles/method-configuration"
 ".claude/skills/etalon-skill-improvement" = "etalon/mcp/skills/bundles/skill-improvement"
 # MolQuarry bundles stay at their original asset path in both source and wheel;
 # skills.bundle_root and the legacy resource URIs resolve these same bytes.

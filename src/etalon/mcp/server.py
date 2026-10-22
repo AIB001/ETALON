@@ -11,7 +11,7 @@ import inspect
 from pathlib import Path
 from typing import Any
 
-from etalon.mcp._common import Cost, require_mcp
+from etalon.mcp._common import Cost, require_mcp, stdio_input
 from etalon.skills import ROLE_PATH, bundle_root, catalog, read_member
 from etalon.skills import WORKFLOWS as WORKFLOWS  # Preserve the public catalog import.
 
@@ -91,6 +91,12 @@ def build() -> Any:
             {"uri": f"etalon://skills/{row['slug']}", "skill": row["name"],
              "regime": row["description"]} for row in report["skills"]]
         return json.dumps(report, ensure_ascii=False)
+
+    @mcp.resource("etalon://skill-libraries")
+    def skill_libraries() -> str:
+        """Discover memory, execution and RSI skills without loading their bodies."""
+        from etalon.skills import library_catalog
+        return json.dumps(library_catalog(), ensure_ascii=False)
 
     @mcp.resource("etalon://skills/{slug}")
     def workflow(slug: str) -> str:
@@ -186,7 +192,8 @@ def costs() -> dict[str, str]:
 
 
 def main() -> None:
-    build().run()
+    with stdio_input():
+        build().run()
 
 
 if __name__ == "__main__":
