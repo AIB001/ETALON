@@ -119,6 +119,14 @@ descriptions. These guards are conservative context checks, not an authorization
 mechanism. The helper always returns `execution_permission="not_granted"` and
 `automatic_retry=false`.
 
+For cross-machine relocation, keep the checkpoint and guard's original location
+unchanged. An explicit `location_map` entry under the checkpoint's source ID may
+bind that location to a confined local copy with the exact guard hash and byte
+count. Mappings from another source are not authority. Changed mapped bytes or
+conflicting identities require review. Relocation does not refresh an old pause
+decision or infer that the original authority remains current; deployment must
+explicitly verify the applicable authority before publishing the relocated view.
+
 Pending handles are deduplicated and read through read_action_result. Missing
 jobs stay unresolved. No submit/reconcile/retry/cancel, cost write, status update,
 resource allocation, or background polling is performed. Snapshots are per-source

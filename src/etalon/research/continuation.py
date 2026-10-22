@@ -328,7 +328,7 @@ def _content_result(result):
     return validate_content(json.loads(base64.b64decode(fragment["content"]).decode("utf-8-sig")))
 
 
-def _status(ws, guards):
+def _status(ws, guards, *, source_id):
     """Never infer an executable status from prose or a stale checkpoint."""
     results = []
     authority = ws.manifest.get("status_refs", [])
@@ -345,7 +345,14 @@ def _status(ws, guards):
         guard = guarded.get(location)
         row = {"location": location, "state": "unknown", "status": "review_required"}
         try:
-            path = _local(ws.base, location)
+            mapped = any(entry["source_id"] == source_id and entry["original"] == location
+                         for entry in ws.manifest.get("location_map", []))
+            if mapped and guard:
+                path = EvidenceResolver(ws, source_id).resolve(
+                    location, sha256=guard["sha256"], bytes=guard["bytes"])
+                row["resolved_location"] = str(path)
+            else:
+                path = _local(ws.base, location)
             identity = file_identity(path)
             row["observed_identity"] = identity
             if location in locations and guard and identity == {k: guard[k] for k in ("sha256", "bytes")}:
@@ -545,7 +552,7 @@ def resume_research(workspace, checkpoint_ref, *, read_mode="fresh"):
             _check_frozen_view(ws, records, coverage)
         except (OSError, ValueError):
             issues.append({"reason": "frozen_view_changed_during_read"})
-    status = _status(ws, content["status_guards"])
+    status = _status(ws, content["status_guards"], source_id=checkpoint_ref["source_id"])
     review = bool(issues or warnings or any(c["status"] != "complete" for c in coverage)
                   or any(c["status"] != "unchanged" for c in changes) or status["state"] != "active_at_read")
     return {"schema": "etalon-research-resume/1", "checkpoint_ref": checkpoint_ref,
