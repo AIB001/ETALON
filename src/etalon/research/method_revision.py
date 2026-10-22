@@ -154,3 +154,76 @@ def record_method_revision(journal, payload: dict, directory: str | Path, *,
     if file_identity(path) != {"sha256": item.sha256, "bytes": item.bytes}:
         raise ValueError("published revision changed")
     return journal.record(item)
+
+
+def resolve_method_revision(journal, revision_ref, evaluation_ref, *, outcome, task_id, question,
+                            scope, reason, directory, source_id, source_kind,
+                            candidate_ref=None, prior_use_ref=None, counterevidence_refs=()):
+    """Record scoped adoption/retention/rollback using MethodUse and a decision step.
+
+    The host supplies the conclusion after examining the evaluation. This helper
+    validates attribution, not scientific truth; it changes no shared default and
+    executes no candidate. A subsequent caller explicitly uses the chosen version.
+    """
+    from .schema import MethodUse
+    from .continuation import STEP, record_content
+    if outcome not in {"adopt", "retain", "rollback"}:
+        raise ValueError("outcome must be adopt, retain or rollback")
+    for value in (task_id, question, scope, reason):
+        nonempty(value)
+
+    def local(ref, schema=None):
+        validate_ref(ref)
+        if ref["source_id"] != source_id:
+            raise ValueError("resolution needs exact local records")
+        body = journal.get(ref["record_id"])
+        if digest(body) != ref["record_digest"] or (schema and body.get("schema") != schema):
+            raise ValueError("resolution reference identity or type mismatch")
+        if ref["record_id"].startswith("artifact-"):
+            journal.artifact_path(Artifact(**body))
+        return body
+
+    artifact = local(revision_ref)
+    revision = json.loads(journal.artifact_path(Artifact(**artifact)).read_text("utf-8"))
+    if revision.get("schema") != "etalon-method-revision/1":
+        raise ValueError("resolution requires a MethodRevision")
+    revision = build_method_revision(**{k: v for k,v in revision.items() if k != "schema"})
+    evaluation = local(evaluation_ref, "etalon-method-evaluation/1")
+    base = revision["base_method_ref"]
+    local(base, "etalon-method-version/1")
+    candidates = {canonical(r) for r in revision["candidate_version_refs"]}
+    candidate_ids = {r["record_id"] for r in revision["candidate_version_refs"]}
+    if evaluation["comparators"] != [base["record_id"]] or not set(evaluation["subjects"]) <= candidate_ids:
+        raise ValueError("evaluation does not compare this revision with its base")
+    for ref in counterevidence_refs:
+        local(ref)
+    prior = local(prior_use_ref, "etalon-method-use/1") if prior_use_ref else None
+    if outcome == "adopt":
+        if candidate_ref is None or canonical(candidate_ref) not in candidates:
+            raise ValueError("adoption requires an exact revision candidate")
+        local(candidate_ref, "etalon-method-version/1")
+        if candidate_ref["record_id"] not in evaluation["subjects"] or not evaluation["result_refs"] or not evaluation["accounting_refs"]:
+            raise ValueError("adoption needs measured results and accounting for the chosen candidate")
+        selected = candidate_ref
+    else:
+        selected = base
+    if outcome == "rollback" and (prior is None or not counterevidence_refs or not
+            any(m["method_version_ref"] in candidate_ids for m in prior["selected_methods"])):
+        raise ValueError("rollback needs prior candidate use and explicit counterevidence")
+    refs = [revision_ref, evaluation_ref, *counterevidence_refs]
+    use_id = journal.record(MethodUse(
+        ({"kind": "task", "id": task_id, "scope": str(journal.store.path)},),
+        ({"method_version_ref": selected["record_id"], "scope": scope},),
+        visible_evidence_refs=tuple(r["record_id"] for r in refs),
+        reason=reason, parents=(prior_use_ref["record_id"],) if prior_use_ref else ()))
+    use_ref = journal_ref(journal, use_id, source_id=source_id)
+    step = dict(schema=STEP, task_id=task_id, question=question, branch_id="revision-resolution",
+        operation="decision", reason=reason, input_refs=refs, output_refs=[use_ref],
+        method_refs=[selected], accounting_refs=[], source_watermarks=[], supersedes=[],
+        detail={"choice": {"adopt": "proceed", "retain": "reuse", "rollback": "reconsider"}[outcome],
+            "alternatives": [{"branch_id": "candidate", "disposition": outcome, "reason": reason}],
+            "basis_refs": refs, "reconsider_when": "New counterevidence or a change outside the evaluated scope"})
+    rid = record_content(journal, step, directory, source_id=source_id, source_kind=source_kind)
+    return {"outcome": outcome, "selected_method_ref": selected, "use_ref": use_ref,
+            "step_ref": journal_ref(journal, rid, source_id=source_id), "scope": scope,
+            "default_changed": False, "execution": "not_performed"}

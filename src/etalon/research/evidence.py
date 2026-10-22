@@ -13,11 +13,13 @@ from .evidence_refs import (
     load_workspace, make_ref, validate_claim, validate_ref,
 )
 
-FILTERS = {"source_ids", "record_types", "task_ids", "entity_ids", "method_refs", "statuses", "roles"}
+FILTERS = {"source_ids", "record_types", "task_ids", "entity_ids", "method_refs", "statuses", "roles",
+           "branch_ids", "node_ids", "capability_ids", "workflow_refs", "evaluation_targets"}
 MAX_SOURCE_BYTES = 32 * 1024 * 1024
 MAX_RECORDS = 100000
 MAX_QUERY_BYTES = 32768
 MAX_READ_BYTES = 65536
+MAX_DEPENDENCY_SOURCES = 64
 
 
 class StaleCursorError(EvidenceError):
@@ -46,7 +48,8 @@ def _references(body):
             "method_refs", "supersedes", "experiment_id", "contrast_ids", "method_ref",
             "method_version_ref", "usage_method_ref", "evaluation_refs", "use_refs",
             "action_ids", "accounting_refs", "trial_refs", "producer_method_ref", "producer_use_ref",
-            "base_method_ref", "candidate_version_refs", "problem_refs", "visible_evidence_refs"}
+            "base_method_ref", "candidate_version_refs", "problem_refs", "visible_evidence_refs",
+            "protocol_ref", "task_split_ref", "initial_conditions_ref", "result_refs"}
     result = []
     def walk(value):
         if isinstance(value, dict):
@@ -54,7 +57,8 @@ def _references(body):
                 result.append(value)
             else:
                 for key, item in value.items():
-                    if key in keys:
+                    if key in keys or (value.get("schema") == "etalon-method-evaluation/1"
+                                       and key in {"subjects", "comparators"}):
                         for ref in item if isinstance(item, list) else [item]:
                             if isinstance(ref, (str, dict)):
                                 result.append(ref)
@@ -103,9 +107,12 @@ def _project_contents(ws, source, indexed):
                 raise EvidenceError("projection content schema mismatch")
             if schema == "etalon-research-claim/1":
                 validate_claim(payload)
-            else:
+            elif schema == "etalon-method-revision/1":
                 from .method_revision import build_method_revision
                 build_method_revision(**{k: v for k, v in payload.items() if k != "schema"})
+            else:
+                from .continuation import validate_content
+                validate_content(payload)
             if not _visible(payload):
                 raise EvidenceError("projection content is not published")
             row["projected_content"] = payload
@@ -226,30 +233,52 @@ def _source(ws, source):
 
 
 def _collect(ws, source_ids=None):
+    """Read requested sources plus explicit evidence dependencies, never unrelated ones.
+
+    Dependency reads preserve the existing transitive visibility rule. A source
+    filter limits result candidates, not the checks required by their references.
+    All visited sources are reported; unknown/hidden dependencies suppress derived
+    records just as in the original full-workspace read.
+    """
     records, coverage, warnings = {}, [], []
-    known = {s["source_id"] for s in ws.manifest["sources"]}
+    sources = {s["source_id"]: s for s in ws.manifest["sources"]}
+    known = set(sources)
     if source_ids is not None and set(source_ids) - known:
         raise EvidenceError("unknown source_ids filter")
-    for source in ws.manifest["sources"]:
-        sid = source["source_id"]
-        if source_ids is not None and sid not in source_ids:
-            continue
+    requested = known if source_ids is None else set(source_ids)
+    pending = [sid for sid in sources if sid in requested]
+    scheduled = set(pending)
+    for sid in pending:
+        source = sources[sid]
         if source.get("visibility", "released") != "released":
             coverage.append({"source_id": sid, "status": "unavailable", "read_watermark": None,
-                             "index_watermark": None, "reason": "source_not_published"})
+                             "index_watermark": None, "reason": "source_not_published",
+                             "scope": "requested" if sid in requested else "dependency"})
             continue
         try:
             rows, cov = _source(ws, source)
             records[sid] = rows
+            cov["scope"] = "requested" if sid in requested else "dependency"
             coverage.append(cov)
             if cov["projection_failures"]:
                 warnings.append({"source_id": sid, "code": "content_projection_unavailable",
                                  "count": len(cov["projection_failures"])})
+            dependencies = {ref["source_id"] for row in rows.values() for ref in _relationships(row)
+                            if isinstance(ref, dict) and ref.get("schema") == "etalon-evidence-ref/1"
+                            and ref.get("source_id") in known}
+            for dependency in sorted(dependencies - scheduled):
+                if len(scheduled - requested) >= MAX_DEPENDENCY_SOURCES:
+                    raise EvidenceError("dependency source bound exceeded; publish a smaller workspace")
+                scheduled.add(dependency)
+                pending.append(dependency)
         except (OSError, ValueError, sqlite3.Error, KeyError, TypeError) as exc:
             # No filenames or source content in errors: unpublished data stays out.
             reason = str(exc) if isinstance(exc, EvidenceError) else type(exc).__name__
             coverage.append({"source_id": sid, "status": "unavailable", "read_watermark": None,
-                             "index_watermark": None, "reason": reason})
+                             "index_watermark": None, "reason": reason,
+                             "scope": "requested" if sid in requested else "dependency"})
+            records.pop(sid, None)
+            coverage[:] = [c for c in coverage if c["source_id"] != sid] + [coverage[-1]]
             warnings.append({"source_id": sid, "code": "source_unavailable", "reason": reason})
     # Cross-source explicit refs to unpublished/unavailable records suppress derivatives too.
     while True:
@@ -264,7 +293,19 @@ def _collect(ws, source_ids=None):
             break
         for sid, rid in removed:
             del records[sid][rid]
+    for cov in coverage:
+        if cov["source_id"] in records:
+            cov["visible_records"] = len(records[cov["source_id"]])
     return records, coverage, warnings
+
+
+def _scope_identity(ws, coverage):
+    """Unrelated manifest edits must not invalidate a scoped pagination cursor."""
+    visited = {c["source_id"] for c in coverage}
+    manifest = ws.manifest
+    return {"workspace_id": manifest["workspace_id"],
+            "sources": [s for s in manifest["sources"] if s["source_id"] in visited],
+            "location_map": [m for m in manifest.get("location_map", []) if m["source_id"] in visited]}
 
 
 def _strings(value):
@@ -279,9 +320,18 @@ def _strings(value):
 
 def _matches(row, filters):
     bodies = [row["record"], row.get("projected_content", {})]
+    content = row.get("projected_content", {})
+    if content.get("schema") == "etalon-research-step/1":
+        bodies.append(content["detail"])
+    if row["record"].get("schema") == "etalon-method-evaluation/1":
+        bodies.append({"method_refs": row["record"]["subjects"] + row["record"]["comparators"]})
+    if content.get("operation") == "evaluation_plan":
+        bodies.append({"method_refs": content["detail"]["subjects"] + content["detail"]["comparators"]})
     fields = {"task_ids": ("task_id", "task_ids"), "entity_ids": ("entity_id", "entity_ids", "subjects", "bindings"),
               "method_refs": ("method_ref", "method_refs", "method_id", "method_version_ref", "usage_method_ref", "selections", "selected_methods", "base_method_ref", "producer_method_ref", "candidate_version_refs"),
-              "statuses": ("status", "epistemic_status"), "roles": ("role", "roles")}
+              "statuses": ("status", "state", "epistemic_status"), "roles": ("role", "roles"),
+              "branch_ids": ("branch_id",), "node_ids": ("node_id",), "capability_ids": ("capability_id",),
+              "workflow_refs": ("workflow_ref",), "evaluation_targets": ("target",)}
     if "record_types" in filters and row["record_type"] not in filters["record_types"]:
         return False
     for name, keys in fields.items():
@@ -332,12 +382,12 @@ def query_evidence(workspace, *, query="", filters=None, limit=10, cursor=None):
     for values in filters.values():
         if not isinstance(values, (list, tuple)) or any(not isinstance(x, str) for x in values):
             raise EvidenceError("filter values must be lists of strings")
-    records, coverage, warnings = _collect(ws)
+    records, coverage, warnings = _collect(ws, filters.get("source_ids"))
     if "source_ids" in filters:
         known = {s["source_id"] for s in ws.manifest["sources"]}
         if set(filters["source_ids"]) - known:
             raise EvidenceError("unknown source_ids filter")
-    stamp = digest({"workspace": ws.manifest, "query": query, "filters": filters, "coverage": coverage})
+    stamp = digest({"workspace": _scope_identity(ws, coverage), "query": query, "filters": filters, "coverage": coverage})
     start = 0
     if cursor is not None:
         try:
@@ -382,6 +432,12 @@ def _slice_text(text, offset, limit):
 
 
 def read_evidence(workspace, ref, *, view="record", member=None, selector=None, offset=0, limit=100):
+    return _read_evidence(workspace, ref, view=view, member=member, selector=selector, offset=offset, limit=limit)
+
+
+def _read_evidence(workspace, ref, *, view="record", member=None, selector=None, offset=0, limit=100,
+                   collection=None):
+    """Internal single-call reuse; callers must validate the collected view's lifetime."""
     ws, ref = load_workspace(workspace), validate_ref(ref)
     _bounded_int(offset, 0, 2**63 - 1, "offset")
     _bounded_int(limit, 1, 32768, "limit")
@@ -395,7 +451,7 @@ def read_evidence(workspace, ref, *, view="record", member=None, selector=None, 
     if view != "artifact" and (member is not None or selector is not None):
         raise EvidenceError("member/selector only apply to artifact view")
     ws.source(ref["source_id"])
-    records, coverage, warnings = _collect(ws)
+    records, coverage, warnings = collection if collection is not None else _collect(ws, [ref["source_id"]])
     row = records.get(ref["source_id"], {}).get(ref["record_id"])
     if row is None:
         result = {"ref": ref, "availability": "unavailable", "verification": "not_checked",

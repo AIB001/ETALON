@@ -40,3 +40,6 @@ A shared trajectory is not an independent repeat. Reading released validation
 makes it seen evidence for the new task. Missing counterfactuals remain unknown.
 Consult the project's authoritative status reference when action depends on a
 pause; a manifest or an old successful result cannot authorize restarting work.
+
+For optional component receipts, small-method attribution, workflow-node memory
+and comparison plans, see [Component memory and composition](component-memory.md).

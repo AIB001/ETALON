@@ -1,3 +1,7 @@
 # Capability identities are byte-based across checkout, wheel and host exports.
 /.claude/skills/etalon-*/** text=auto eol=lf
 /src/etalon/HOST.md text eol=lf
+
+# Evidence fixtures and imported contracts carry byte-exact SHA-256 references.
+/tests/fixtures/** -text
+/src/etalon/data/contracts/** -text

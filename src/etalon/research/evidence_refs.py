@@ -14,7 +14,11 @@ from etalon.active.schema import canonical, digest
 
 WORKSPACE_SCHEMA = "etalon-evidence-workspace/1"
 REF_SCHEMA = "etalon-evidence-ref/1"
-CONTENT_SCHEMAS = {"etalon-method-revision/1", "etalon-research-claim/1"}
+CONTENT_SCHEMAS = {"etalon-method-revision/1", "etalon-research-claim/1",
+                   "etalon-research-step/1", "etalon-research-checkpoint/1",
+                   "etalon-research-workflow/1", "etalon-revision-context/1",
+                   "etalon-revision-opportunity/1", "etalon-method-patch/1",
+                   "etalon-revision-assessment/1", "etalon-method-experience/1"}
 
 
 class EvidenceError(ValueError):

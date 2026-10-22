@@ -38,3 +38,50 @@ The `research` skill's `references/evidence-reuse.md` gives SDK calls and
 provenance rules. This reference is optional and is not automatically loaded
 into a new chat. A short entry can reduce provided context, but measured host
 quality, token use and benefit require separate observations.
+
+## Optional recorded continuation
+
+For a research checkpoint already published as an ordinary Artifact, a short
+entry may contain only `workspace` and `checkpoint_ref`. With the installed SDK:
+
+```python
+import json
+from etalon.research.continuation import resume_research, read_content
+
+entry = json.load(open("entry.json", encoding="utf-8"))
+context = resume_research(entry["workspace"], entry["checkpoint_ref"])
+# Read a relevant claim or step only when useful:
+# claim = read_content(entry["workspace"], context["claim_refs"][0])
+```
+
+`resume_research` only reads. It verifies referenced evidence, checks captured
+source watermarks and current status-file bytes, and re-reads existing pending
+action handles through `read_action_result`. It never submits, retries,
+reconciles, changes a branch, or grants execution. A resolved/stopped branch
+does not become runnable because a new chat reads it. Existing direct files,
+SDK calls and optional skills remain valid entry paths without a checkpoint.
+
+Inspect `authority`, `source_changes`, `issues`, and `pending` before choosing
+the next step. Status guards bind a host's interpretation to exact authority
+bytes; they do not parse arbitrary prose. Changed, missing, newly declared, or
+unreviewed authority requires review. A current paused/stopped guard takes
+precedence over the checkpoint's branch description. Never treat
+`execution_permission="not_granted"` as permission to execute.
+
+Step/checkpoint content is searchable and readable through the existing
+evidence query/read SDK and MCP tools. The combined continuation helper is a
+Python SDK convenience, not a new MCP execution tool. The content contract,
+publication example, stale-state and evidence boundaries are documented in
+`docs/thin-harness/CONTINUATION.md` in the source distribution; installed users
+can use `etalon.research.continuation` directly.
+
+`read_content` accepts typed claim/step/checkpoint/workflow content. Use
+`read_evidence(workspace, ref, view="artifact", limit=...)` for ordinary result
+JSON or component receipts; decode the returned base64 fragment and check its
+verification and `next_offset`. A schema rejection is not a reason to rerun the
+producer. Optional component/node and comparison interfaces are described in
+[Component memory and composition](component-memory.md).
+
+For improvement context, method/workflow patches, observations from normal use,
+and scoped experience retrieval, see [Normal-use improvement](normal-use-improvement.md).
+An existing improvement checkpoint is read first; it does not trigger another revision.
