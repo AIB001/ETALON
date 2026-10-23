@@ -209,7 +209,7 @@ def _exact_refs(value):
             yield from _exact_refs(item)
 
 
-def record_content(journal, payload, directory, *, source_id, source_kind, role="diagnostic"):
+def record_content(journal, payload, directory, *, source_id, source_kind, role="diagnostic", external_workspace=None):
     """Save claim/step/checkpoint through ResearchJournal.record(Artifact).
 
     Local references and original files are verified; external references retain
@@ -256,7 +256,7 @@ def record_content(journal, payload, directory, *, source_id, source_kind, role=
     if content["schema"] == "etalon-research-workflow/1" or (
             content["schema"] == STEP and content["operation"] in {"node", "evaluation_plan", "evaluation"}):
         from .composition import validate_local_links
-        validate_local_links(journal, content, source_id, local_records)
+        validate_local_links(journal, content, source_id, local_records, external_workspace=external_workspace)
     if content["schema"] == STEP and content["operation"] == "result":
         detail = content["detail"]
         experiments = {r["record_id"] for r in detail["experiment_refs"] if r["source_id"] == source_id}
@@ -499,6 +499,12 @@ def resume_research(workspace, checkpoint_ref, *, read_mode="fresh"):
                 pending_refs.append(validate_ref(target))
             elif isinstance(target, str):
                 linked = records.get(ref["source_id"], {}).get(target)
+                if (linked is None and row["record"].get("schema") == "etalon-method-evaluation/1"
+                        and target in row["record"].get("accounting_refs", [])):
+                    encoded = "budget:execution:" + target
+                    resource = records.get(ref["source_id"], {}).get(encoded)
+                    if resource is not None and resource["record"].get("execution_id") == target:
+                        linked, target = resource, encoded
                 if linked:
                     pending_refs.append(make_ref(ref["source_id"], target, linked["record"]))
                 else:

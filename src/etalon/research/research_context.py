@@ -11,12 +11,13 @@ from pathlib import Path
 from etalon.active.schema import canonical, digest
 from .evidence_refs import EvidenceError, validate_ref
 from .graph_memory import build_research_graph, node_identity
+from .entry import resolve_entry, make_read_context, continuation_status, workspace_from_context
 
 CONTEXT = "etalon-research-context/1"
 STRATEGY = "node-neighborhood-explicit-counterevidence/1"
 
 
-def _focused_context(graph, nodes, *, node_id, question, purpose, max_bytes, view, publications):
+def _focused_context(graph, nodes, *, node_id, question, purpose, max_bytes, view, publications, handoff):
     """Assemble a navigation view without turning exclusions into missing facts.
 
     Controls and explicit counter directions are mandatory. Detail may be
@@ -55,6 +56,12 @@ def _focused_context(graph, nodes, *, node_id, question, purpose, max_bytes, vie
                     add(a, "related_counter_relationship"); add(b, "related_counter_relationship")
                 elif kind == "depends_on" and a in selected_scope:
                     add(b, "required_dependency")
+                # Follow explicit outcome/choice attribution back from an applied
+                # use. Do not expand every task sharing a method or input file.
+                elif kind == "depends_on" and b in selected_scope and edge.get("relation") in {
+                        "applied_use", "evaluated_use", "evaluated_node", "evaluation_plan", "evaluation_result",
+                        "selection_basis", "selection_output"}:
+                    add(a, "attributed_" + edge["relation"])
                 elif kind in {"supports", "derived_from"} and b in selected_scope:
                     add(a, "required_dependency")
             changed = before != len(selected_scope)
@@ -110,7 +117,7 @@ def _focused_context(graph, nodes, *, node_id, question, purpose, max_bytes, vie
             reference(nodes[nid]["ref"])
 
     complete = not graph["issues"] and all(c["status"] == "complete" for c in graph["coverage"])
-    result = {"schema": CONTEXT, "view": view, "checkpoint_ref": graph["checkpoint_ref"],
+    result = {"schema": CONTEXT, "view": view, "checkpoint_ref": graph["checkpoint_ref"], **handoff,
         "task_id": graph["task_id"], "question": question or graph["question"], "research_question": graph["question"],
         "node_id": node_id, "purpose": purpose, "items": [], "relations": expected_edges,
         "branches": branches, "reference_index": [{"node_id": nid, "ref": references[nid]} for nid in sorted(references)],
@@ -128,11 +135,12 @@ def _focused_context(graph, nodes, *, node_id, question, purpose, max_bytes, vie
                             "coverage_complete": False, "selection_semantics": graph["counter_context_semantics"],
                             "relationship_count": len(expected_edges), "selected_relationship_count": len(expected_edges),
                             "scope": "selected_node_dependency_neighborhood" if view == "node" else "checkpoint_task"},
-        "followup": {"entry": "reuse the exact entry supplied to this call",
+        "followup": {"entry": "pass read_context as entry for a pinned context view",
                      "context_tool": "etalon_research_context", "context_views": ["node", "full"],
                      "node_id_source": "items[].node_id or reference_index[].node_id",
                      "context_max_bytes": {"minimum": 4096, "maximum": 65536},
                      "evidence_tool": "etalon_evidence_read", "ref_source": "items[].ref or reference_index[].ref",
+                     "evidence_scope": "pass read_context; do not infer workspace paths",
                      "evidence_views": ["record", "artifact"], "evidence_limit": {"minimum": 1, "maximum": 32768},
                      "artifact_paging": "follow fragment.next_offset; no need to repeat the computation"},
         "unknowns": ["No global semantic search or scientific truth assessment was performed.",
@@ -221,19 +229,7 @@ def _publication_context(entry):
 
 def load_entry(entry):
     """Read the existing {workspace, checkpoint_ref} entry, preserving relocation."""
-    base = None
-    if isinstance(entry, (str, Path)):
-        path = Path(entry).resolve(strict=True)
-        if path.stat().st_size > 65536:
-            raise EvidenceError("research entry exceeds 64 KiB")
-        entry = json.loads(path.read_text(encoding="utf-8-sig"))
-        base = path.parent
-    if not isinstance(entry, dict) or "workspace" not in entry or "checkpoint_ref" not in entry:
-        raise EvidenceError("research entry requires workspace and checkpoint_ref")
-    workspace = entry["workspace"]
-    if isinstance(workspace, str) and base is not None and not Path(workspace).is_absolute():
-        workspace = base / workspace
-    return workspace, validate_ref(entry["checkpoint_ref"])
+    return resolve_entry(entry)[:2]
 
 
 def build_research_context(entry, *, node_id=None, question=None, purpose="research",
@@ -256,8 +252,19 @@ def build_research_context(entry, *, node_id=None, question=None, purpose="resea
     if conditions is not None and (not isinstance(conditions, dict) or not conditions or
             any(not isinstance(k, str) or not isinstance(v, str) or not k or not v for k, v in conditions.items())):
         raise EvidenceError("conditions must contain explicit nonempty string values")
-    publications = _publication_context(entry)
-    workspace, checkpoint_ref = load_entry(entry)
+    workspace, checkpoint_ref, entry_path, pinned = resolve_entry(entry)
+    if pinned is not None:
+        if policy is not None and policy != pinned["policy"]:
+            raise EvidenceError("pinned context policy cannot change; resolve the entry explicitly")
+        policy, purpose = pinned["policy"], pinned["purpose"]
+    read_context = pinned or make_read_context(workspace, checkpoint_ref,
+        entry_path=entry_path, policy=policy, purpose=purpose)
+    handoff = {"read_context": read_context, "entry_status": continuation_status(read_context)}
+    publications = _publication_context(entry_path or entry)
+    if read_context is not None:
+        # Use the exact verified definition for this assembly, even if a publisher
+        # atomically advances a path while source records are being collected.
+        workspace = workspace_from_context(read_context, apply_policy=False)
     graph = build_research_graph(workspace, checkpoint_ref=checkpoint_ref, policy=policy,
         purpose=purpose, home_overrides=home_overrides, max_nodes=128, max_bytes=131072, as_of=as_of)
     nodes = {n["node_id"]: n for n in graph["nodes"]}
@@ -282,7 +289,7 @@ def build_research_context(entry, *, node_id=None, question=None, purpose="resea
             add(nid, "current_task_experience" if conditions is None else "matched_experience" if not unmet else "experience_counterexample_to_transfer")
     if view != "full":
         return _focused_context(graph, nodes, node_id=node_id, question=question,
-                                purpose=purpose, max_bytes=max_bytes, view=view, publications=publications)
+                                purpose=purpose, max_bytes=max_bytes, view=view, publications=publications, handoff=handoff)
     for nid in graph["counter_node_ids"]:
         add(nid, "declared_counter_relationship_context")
     if node_id:
@@ -314,7 +321,7 @@ def build_research_context(entry, *, node_id=None, question=None, purpose="resea
                     item["reference_gap"] = True
             item[key.replace("_refs", "_node_ids")] = ids
         branches.append(item)
-    result = {"schema": CONTEXT, "view": view, "checkpoint_ref": checkpoint_ref,
+    result = {"schema": CONTEXT, "view": view, "checkpoint_ref": checkpoint_ref, **handoff,
         "task_id": graph["task_id"], "question": question or graph["question"], "research_question": graph["question"],
         "node_id": node_id, "purpose": purpose, "items": [], "relations": [],
         "branches": branches, "reference_index": [{"node_id": nid, "ref": ref} for nid, ref in references.items()],

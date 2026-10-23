@@ -109,27 +109,41 @@ def validate_step_extension(payload):
         if payload["output_refs"]:
             raise EvidenceError("evaluation plan does not contain measured results")
     elif payload["operation"] == "evaluation":
-        _fields(detail, ("plan_ref", "evaluation_ref"))
+        _fields(detail, ("plan_ref", "evaluation_ref"), ("use_refs", "node_refs"))
         validate_ref(detail["plan_ref"])
         validate_ref(detail["evaluation_ref"])
+        _refs(detail.get("use_refs", []))
+        _refs(detail.get("node_refs", []))
+        if bool(detail.get("use_refs")) != bool(detail.get("node_refs")):
+            raise EvidenceError("evaluated use attribution needs both use_refs and node_refs")
     else:
         raise EvidenceError("unknown composition step")
 
 
-def validate_local_links(journal, content, source_id, local_records):
+def validate_local_links(journal, content, source_id, local_records, *, external_workspace=None):
     """Check local typed references and node/method bindings before publication."""
     from .continuation import validate_content
     from .schema import Artifact
 
     def body(ref, schema=None):
         if ref["source_id"] != source_id:
-            raise EvidenceError("composition bindings require local records; import a provenance envelope first")
-        value = local_records[ref["record_id"]]
+            if external_workspace is None:
+                raise EvidenceError("composition bindings require local records or an explicit published external workspace")
+            from .evidence import read_evidence
+            result = read_evidence(external_workspace, ref)
+            value = result.get("record")
+            if value is None or result.get("availability") != "available":
+                raise EvidenceError("external composition reference unavailable")
+        else:
+            value = local_records[ref["record_id"]]
         if schema and value.get("schema", value.get("bindings", {}).get("schema")) != schema:
             raise EvidenceError("composition reference has wrong record type")
         return value
 
     def content_body(ref):
+        if ref["source_id"] != source_id and external_workspace is not None:
+            from .continuation import read_content
+            return read_content(external_workspace, ref)
         value = body(ref)
         path = journal.artifact_path(Artifact(**value))
         return validate_content(json.loads(path.read_text("utf-8-sig")))
@@ -170,7 +184,12 @@ def validate_local_links(journal, content, source_id, local_records):
                 else "domain_skill" if detail["target"] == "method" else None)
         methods(detail["subjects"] + detail["comparators"], role)
         for ref in detail["use_refs"]:
-            body(ref, "etalon-method-use/1")
+            use = body(ref, "etalon-method-use/1")
+            if not any(s["kind"] == "task" and s["id"] == content["task_id"] for s in use["subject_refs"]):
+                raise EvidenceError("evaluation use must include the same task subject")
+            compared = {r["record_id"] for r in detail["subjects"] + detail["comparators"]}
+            if not {m["method_version_ref"] for m in use["selected_methods"]} <= compared:
+                raise EvidenceError("evaluation use selects a method outside its comparison")
         for key in ("protocol_ref", "initial_conditions_ref"):
             value = body(detail[key])
             if "sha256" not in value or "path" not in value:
@@ -190,6 +209,24 @@ def validate_local_links(journal, content, source_id, local_records):
         for key in ("protocol_ref", "task_split_ref", "initial_conditions_ref"):
             if evaluation[key] != d[key]["record_id"]:
                 raise EvidenceError("evaluation conditions differ from plan")
+        attributed = {canonical(r) for r in detail.get("use_refs", [])}
+        node_uses = set()
+        for ref in detail.get("node_refs", []):
+            node = content_body(ref)
+            if node.get("operation") != "node" or node["task_id"] != content["task_id"]:
+                raise EvidenceError("evaluation requires executed nodes of the same task")
+            if node["detail"]["state"] in {"planned", "skipped"}:
+                raise EvidenceError("unexecuted node cannot prove evaluated use")
+            node_uses.update(canonical(r) for r in node["detail"]["use_refs"])
+        if attributed != node_uses:
+            raise EvidenceError("evaluated uses must exactly match the attributed nodes")
+        compared = set(evaluation["subjects"] + evaluation["comparators"])
+        for ref in detail.get("use_refs", []):
+            use = body(ref, "etalon-method-use/1")
+            if not any(s["kind"] == "task" and s["id"] == content["task_id"] for s in use["subject_refs"]):
+                raise EvidenceError("evaluated use must include the same task subject")
+            if not {m["method_version_ref"] for m in use["selected_methods"]} <= compared:
+                raise EvidenceError("evaluated use selects a method outside its comparison")
 
 
 def node_step(*, task_id, question, branch_id, node_id, capability_id=None, workflow_ref=None,
@@ -205,7 +242,8 @@ def node_step(*, task_id, question, branch_id, node_id, capability_id=None, work
 
 
 def record_evaluation(journal, plan_ref, *, directory, source_id, source_kind, result_refs=(),
-                      accounting_refs=(), assessment_role="diagnostic", conclusion, scope):
+                      accounting_refs=(), assessment_role="diagnostic", conclusion, scope,
+                      use_refs=(), node_refs=()):
     """Reuse MethodEvaluation's existing diagnostic/independent validation checks.
 
     No auto-promotion or optimizer is called. A failed step append leaves the
@@ -236,6 +274,8 @@ def record_evaluation(journal, plan_ref, *, directory, source_id, source_kind, r
     step = {**plan, "operation": "evaluation", "reason": conclusion, "input_refs": [plan_ref],
             "output_refs": [ref], "accounting_refs": [], "supersedes": [],
             "detail": {"plan_ref": plan_ref, "evaluation_ref": ref}}
+    if use_refs or node_refs:
+        step["detail"].update(use_refs=list(use_refs), node_refs=list(node_refs))
     step_id = record_content(journal, step, directory, source_id=source_id, source_kind=source_kind)
     return {"evaluation_ref": ref, "step_ref": journal_ref(journal, step_id, source_id=source_id),
             "promotion": "not_performed", "optimization": "not_triggered"}

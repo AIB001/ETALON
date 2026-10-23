@@ -49,6 +49,30 @@ subjects, and nodes reference uses through `detail.use_refs`. Available,
 selected, read and actually applied methods are different facts. Host-reported
 attribution does not prove native model use or scientific efficacy.
 
+For partial adoption, a `MethodUse.selected_methods` item may declare
+`adoption: "partial"`, `used_parts: ["identity-check"]` and
+`omitted_parts: ["new-query"]`. Partial adoption requires explicit used parts.
+Legacy uses remain readable with unknown adoption detail; never backfill them
+as observed full use. Keep `basis=host_reported` unless a tool actually observed
+that attribution. A selection/decision use is not proof that a method ran.
+Evaluation plans may predate execution. At evaluation time, pass actual
+`use_refs` and `node_refs` to `record_evaluation`; their tasks, selected methods
+and node-use sets are checked. For historical attribution, append an evaluation
+step referencing the existing evaluation and plan, with both lists, a reason
+and a supersedes link. This is a new attribution, not a rerun or a new measured
+evaluation. `record_content(external_workspace=...)` and publication can verify
+these typed bindings against an explicit published source without modifying it.
+
+Graph nodes expose `usage`, `method_use` and `evaluation` where recorded.
+Existing `depends_on` edges carry a `relation` label for applied use, selected
+method, execution receipt, evaluated use, comparison result and later selection
+basis. These links reuse immutable records, not a second trace store. Bare
+Journal IDs resolve only within their own published source; unresolved links
+are reported as gaps. Evaluation-plan uses must belong to the same task and
+compare the selected methods. Include the actual use in `detail.use_refs`, the
+node in the checkpoint, and the measured evaluation in the subsequent decision's
+`basis_refs`; merely sharing a task/method name does not establish the chain.
+
 Existing query/read SDK and MCP interfaces read these ordinary artifacts.
 Besides source/task/method filters, `query_evidence` supports `branch_ids`,
 `node_ids`, `capability_ids`, `workflow_refs`, `evaluation_targets` and node

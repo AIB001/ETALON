@@ -395,7 +395,7 @@ def resume_publication(intent_path):
             content = _resolve_aliases(item["content"], refs)
             _verify_external(content, intent["source_id"], ws)
             identifier = record_content(journal, content, root / "content", source_id=intent["source_id"],
-                                        source_kind="existing_real_artifact")
+                                        source_kind="existing_real_artifact", external_workspace=ws)
             ref = make_ref(intent["source_id"], identifier, journal.get(identifier))
             refs[item["name"]] = ref
             step_refs.append(ref)

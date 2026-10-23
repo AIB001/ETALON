@@ -248,6 +248,14 @@ class MethodUse(Record):
             if not isinstance(ref, dict):
                 raise ValueError('selected method must include method_version_ref')
             nonempty(ref.get('method_version_ref'))
+            if 'adoption' in ref and ref['adoption'] not in {'full', 'partial'}:
+                raise ValueError('method adoption must be full or partial; no selection uses an empty list')
+            for field_name in ('used_parts', 'omitted_parts'):
+                if field_name in ref and (not isinstance(ref[field_name], (list, tuple)) or
+                        any(not isinstance(p, str) or not p.strip() for p in ref[field_name])):
+                    raise ValueError('method parts must be explicit nonempty strings')
+            if ref.get('adoption') == 'partial' and not ref.get('used_parts'):
+                raise ValueError('partial adoption requires explicit used_parts')
         _references(self.visible_evidence_refs, 'visible_evidence_refs')
         _references(self.parents, 'parents')
         if self.usage_method_ref is not None:

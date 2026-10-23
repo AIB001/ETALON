@@ -28,8 +28,10 @@ def test_entry_only_resume_carries_counter_scope_and_pause(graph_case):
 
 def test_small_context_reports_omission_and_keeps_authority(graph_case):
     c = graph_case
-    result = build_research_context(c["entry"], max_bytes=4096)
-    assert len(canonical(result).encode()) <= 4096
+    # The mandatory remote handoff receipt is now part of the bounded payload.
+    # The separate minimum-bound tests also exercise explicit fail-closed paths.
+    result = build_research_context(c["entry"], max_bytes=5120)
+    assert len(canonical(result).encode()) <= 5120
     assert result["truncated"] and result["selection"]["excluded_by_budget"]
     assert result["continuation"]["authority_state"] == "paused"
     assert "unknowns" in result

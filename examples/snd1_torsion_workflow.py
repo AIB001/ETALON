@@ -125,20 +125,54 @@ def geometry_invariants(mol,initial,xyz,g,angles):
     return {'valid':bool(valid),'fixed_max_A':fixed_error,'bond_max_error_A':float(bond_error),'angle_max_error_deg':angle_error,'ring_distance_max_error_A':ring_error,'hard_bounds_pass':bool(bounds)}
 
 
-def refine(mol,parameters,method):
+def cartesian_chain_gradient(initial, geometry, q, cartesian_gradient, *, directional=False, epsilon=1e-6):
+    """Pull back native Cartesian gradients through the bounded rotation map.
+
+    Only inexpensive coordinates/directional proxies are differenced. MMFF and
+    pocket energies are not reevaluated per torsion. Boundary differences stay
+    inside the declared bounds; this is a hybrid, not fully analytic, gradient.
+    """
+    result=[]
+    for k,row in enumerate(geometry['dofs']):
+        lo,hi=np.deg2rad(row['bounds_degrees']);a=np.array(q,copy=True);b=a.copy()
+        a[k]=min(hi,q[k]+epsilon);b[k]=max(lo,q[k]-epsilon)
+        width=a[k]-b[k]
+        if width<=0:raise ValueError('gradient requires nonzero mobility range')
+        xa=rotate(initial,geometry['dofs'],a);xb=rotate(initial,geometry['dofs'],b)
+        value=float(np.sum(cartesian_gradient*(xa-xb))/width)
+        if directional:
+            value+=(sum(r['energy'] for r in direction_terms(xa,geometry))-
+                    sum(r['energy'] for r in direction_terms(xb,geometry)))/width
+        result.append(value)
+    return np.array(result)
+
+
+def refine(mol,parameters,method,*,gradient_mode='finite_difference'):
+    if gradient_mode not in {'finite_difference','cartesian_chain'}:raise ValueError('unknown gradient mode')
     mol=Chem.Mol(mol);initial=mol.GetConformer().GetPositions().copy();g,feature=compile_geometry(parameters['geometry'],mol)
     params=legacy_parameters(parameters);numbers=[a.GetAtomicNum() for a in mol.GetAtoms()]
     props=AllChem.MMFFGetMoleculeProperties(mol,mmffVariant='MMFF94s')
     if props is None:raise ValueError('missing MMFF parameters')
     ff=AllChem.MMFFGetMoleculeForceField(mol,props);ff.Initialize()
     directional=method=='torsion_directional'
+    counts={'mmff_energy_calls':0,'mmff_gradient_calls':0,'pocket_calls':0}
     def terms(q):
-        xyz=rotate(initial,g['dofs'],q);mmff=ff.CalcEnergy(tuple(xyz.ravel()))
+        xyz=rotate(initial,g['dofs'],q);mmff=ff.CalcEnergy(tuple(xyz.ravel()));counts['mmff_energy_calls']+=1
         external,_=legacy.external_terms(xyz,numbers,params);ds=direction_terms(xyz,g)
+        counts['pocket_calls']+=1
         return {'mmff':mmff,**external,'directional':sum(r['energy'] for r in ds) if directional else 0.}
     def objective(q):return sum(terms(q).values())
+    def objective_gradient(q):
+        xyz=rotate(initial,g['dofs'],q);flat=tuple(xyz.ravel())
+        energy=ff.CalcEnergy(flat);gradient=np.array(ff.CalcGrad(flat)).reshape(-1,3)
+        counts['mmff_energy_calls']+=1;counts['mmff_gradient_calls']+=1
+        external,grad=legacy.external_terms(xyz,numbers,params);counts['pocket_calls']+=1
+        directional_energy=sum(r['energy'] for r in direction_terms(xyz,g)) if directional else 0.
+        return energy+sum(external.values())+directional_energy,cartesian_chain_gradient(
+            initial,g,q,gradient+grad,directional=directional)
     trace=[np.zeros(len(g['dofs']))]
-    result=minimize(objective,trace[0],method='L-BFGS-B',jac='3-point',bounds=[np.deg2rad(r['bounds_degrees']) for r in g['dofs']],
+    result=minimize(objective_gradient if gradient_mode=='cartesian_chain' else objective,trace[0],method='L-BFGS-B',
+        jac=True if gradient_mode=='cartesian_chain' else '3-point',bounds=[np.deg2rad(r['bounds_degrees']) for r in g['dofs']],
         callback=lambda q:trace.append(q.copy()),options=parameters['optimizer'])
     xyz=rotate(initial,g['dofs'],result.x)
     check=geometry_invariants(mol,initial,xyz,g,result.x)
@@ -160,7 +194,8 @@ def refine(mol,parameters,method):
         'iterations':int(result.nit),'nfev':int(result.nfev),'initial_terms':terms(q0),'final_terms':terms(result.x),
         'torsion_delta_degrees':np.rad2deg(result.x).tolist(),'active_hard_bounds':active,
         'directional_applied':directional,'initial_direction':direction_terms(initial,g),'final_direction':direction_terms(xyz,g),
-        'directional_sensitivity':sensitivity,'hard_invariants':check,'typing_source':feature},np.array(trace),xyz
+        'directional_sensitivity':sensitivity,'hard_invariants':check,'typing_source':feature,
+        'gradient_mode':gradient_mode,'work_counts':dict(counts)},np.array(trace),xyz
 
 
 def virtual_hydrogen(donor,parent,plane,acceptor):

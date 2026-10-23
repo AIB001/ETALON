@@ -209,6 +209,18 @@ def _project_node(ref, row, *, task_id, home_overrides):
         node["experience"]["lesson"] = _brief(content["lesson"], 1200)
     if trace:
         node["trace"] = {key: content[key] for key in ("phase", "origin", "sequence", "attempt_id", "state")}
+    if schema == "etalon-method-use/1":
+        node["method_use"] = {key: content[key] for key in (
+            "selected_methods", "subject_refs", "basis", "reason", "host_conditions")}
+        node["method_use"]["meaning"] = "attribution_only; actual execution requires linked node receipts"
+    if schema == "etalon-method-evaluation/1":
+        node["evaluation"] = {key: content[key] for key in (
+            "subjects", "comparators", "assessment_role", "conclusion", "scope")}
+    if operation == "node":
+        node["usage"] = {key: detail[key] for key in ("use_refs", "receipt_refs", "workflow_ref", "capability_id")}
+        node["usage"]["input_refs"] = content["input_refs"]
+        node["usage"]["output_refs"] = content["output_refs"]
+        node["usage"]["attribution_status"] = "linked" if detail["use_refs"] else "not_recorded"
     return node
 
 
@@ -242,6 +254,9 @@ def build_research_graph(workspace, *, checkpoint_ref, policy=None, purpose="res
     resumed = resume_research(ws, checkpoint_ref, read_mode="frozen_view")
     task_id = checkpoint["task_id"]
     universe = {(sid, rid): row for sid, rows in records.items() for rid, row in rows.items()}
+    from .method_links import method_links
+    attribution = {key: method_links(row.get("projected_content", row["record"]), key[0], universe)
+                   for key, row in universe.items()}
     selected, queue, issues = {}, [], []
     counter_ids, counter_context_ids = set(), set()
     def enqueue(ref):
@@ -269,8 +284,10 @@ def build_research_graph(workspace, *, checkpoint_ref, policy=None, purpose="res
         if content.get("schema") in {STEP, "etalon-method-experience/1", "etalon-research-trace/1"} and content.get("task_id") == task_id:
             enqueue(make_ref(sid, rid, row["record"]))
     edges = []
-    def edge(a, b, kind, basis):
+    def edge(a, b, kind, basis, relation=None):
         value = {"from": a, "to": b, "kind": kind, "basis_ref": basis}
+        if relation is not None:
+            value["relation"] = relation
         if kind == "refutes":
             # Both ends are required context. Only the `from` end is declared
             # counterevidence; following a reverse link never reverses its claim.
@@ -305,6 +322,12 @@ def build_research_graph(workspace, *, checkpoint_ref, policy=None, purpose="res
                 pass  # Binary artifacts remain exact references, not guessed text.
         content = row.get("projected_content", row["record"])
         detail = content.get("detail", {})
+        for target, relation in attribution[(ref["source_id"], ref["record_id"])]:
+            if target is None:
+                issues.append({"reason": "method_link_unavailable_in_source", "node_id": nid, "relation": relation})
+            else:
+                enqueue(target)
+                edge(nid, node_identity(target), "depends_on", ref, relation)
         for key, kind in (("input_refs", "depends_on"), ("output_refs", "derived_from"),
                           ("support_refs", "supports"), ("counter_refs", "refutes"), ("supersedes", "supersedes")):
             for target in content.get(key, []):

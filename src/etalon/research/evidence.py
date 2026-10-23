@@ -20,6 +20,9 @@ MAX_RECORDS = 100000
 MAX_QUERY_BYTES = 32768
 MAX_READ_BYTES = 65536
 MAX_DEPENDENCY_SOURCES = 64
+# Normal execution checkpoints and their immutable predecessors can exceed 64
+# typed records. Match the graph's 128-node ceiling; retain both byte limits.
+MAX_PROJECTED_CONTENTS = 128
 
 
 class StaleCursorError(EvidenceError):
@@ -104,7 +107,7 @@ def _project_contents(ws, source, indexed):
                 raise EvidenceError("projection schema conflicts with Artifact declaration")
             attempted += 1
             total += body["bytes"]
-            if attempted > 64 or body["bytes"] > 1024 * 1024 or total > 8 * 1024 * 1024:
+            if attempted > MAX_PROJECTED_CONTENTS or body["bytes"] > 1024 * 1024 or total > 8 * 1024 * 1024:
                 raise EvidenceError("projection read budget exceeded")
             path = EvidenceResolver(ws, source["source_id"]).resolve(
                 body["path"], sha256=body["sha256"], bytes=body["bytes"])
@@ -335,6 +338,8 @@ def _matches(row, filters):
         bodies.append(content["detail"])
     if row["record"].get("schema") == "etalon-method-evaluation/1":
         bodies.append({"method_refs": row["record"]["subjects"] + row["record"]["comparators"]})
+    if row["record"].get("schema") == "etalon-method-use/1":
+        bodies.append({"task_ids": [s["id"] for s in row["record"]["subject_refs"] if s["kind"] == "task"]})
     if content.get("operation") == "evaluation_plan":
         bodies.append({"method_refs": content["detail"]["subjects"] + content["detail"]["comparators"]})
     fields = {"task_ids": ("task_id", "task_ids"), "entity_ids": ("entity_id", "entity_ids", "subjects", "bindings"),
@@ -381,8 +386,10 @@ def _bounded_int(value, low, high, name):
         raise EvidenceError(f"{name} must be {low}..{high}")
 
 
-def query_evidence(workspace, *, query="", filters=None, limit=10, cursor=None):
-    ws = load_workspace(workspace)
+def query_evidence(workspace=None, *, query="", filters=None, limit=10, cursor=None,
+                   entry=None, read_context=None):
+    from .entry import resolve_read_workspace
+    ws = load_workspace(resolve_read_workspace(workspace, entry=entry, read_context=read_context))
     _bounded_int(limit, 1, 50, "limit")
     if not isinstance(query, str) or len(query) > 4096:
         raise EvidenceError("query must be text of at most 4096 characters")
@@ -441,8 +448,11 @@ def _slice_text(text, offset, limit):
             "offset": offset, "next_offset": end if end < len(data) else None, "total_bytes": len(data)}
 
 
-def read_evidence(workspace, ref, *, view="record", member=None, selector=None, offset=0, limit=100):
-    return _read_evidence(workspace, ref, view=view, member=member, selector=selector, offset=offset, limit=limit)
+def read_evidence(workspace=None, ref=None, *, view="record", member=None, selector=None, offset=0, limit=100,
+                  entry=None, read_context=None):
+    from .entry import resolve_read_workspace
+    return _read_evidence(resolve_read_workspace(workspace, entry=entry, read_context=read_context),
+                          ref, view=view, member=member, selector=selector, offset=offset, limit=limit)
 
 
 def _read_evidence(workspace, ref, *, view="record", member=None, selector=None, offset=0, limit=100,
