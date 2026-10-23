@@ -18,6 +18,13 @@ Summary is a navigation view, not a substitute for evidence verification. Use
 its follow-up references to expand the relevant node, then
 `etalon_evidence_read(view="artifact", limit=32768)` for original bytes (continue
 with offsets if needed). `view="full"` is the backward-compatible default.
+The supported artifact selector is `"bytes"`; do not invent a JSON-path selector.
+Track the artifact's total bytes, each returned offset and `fragment.next_offset`.
+If a source is too large for one read, obtain the enclosing method/branch label
+before assigning metrics in a later fragment. Integrity verification and complete
+semantic reading are separate claims. If the native host additionally shortens
+the tool result, its persisted-output pointer must be expanded or the affected
+details must remain unverified.
 Question text records the intended decision; it does not perform semantic
 ranking. Preserve selection exclusions and the reported counterevidence scope.
 
@@ -47,3 +54,9 @@ or an unchanged notice. A delta uses top-level replacements/removals; it is not
 an independent full context. If the named baseline is absent after compaction
 or a host restart, read a fresh summary through the entry. A hook receipt proves
 output preparation, not model consumption or scientific admission.
+
+Some hosts deliver long additionalContext as a verified file plus a preview.
+This is a transport difference, not evidence that the full baseline was inlined.
+Use the existing entry read or the host's file-reading capability for recovery;
+do not treat a truncated JSON preview as a usable patch base. Keep source checks,
+counterevidence coverage and current task/workset guards from the complete read.

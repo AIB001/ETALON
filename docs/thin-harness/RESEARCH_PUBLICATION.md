@@ -42,6 +42,10 @@ For a subsequent operation against an existing entry, omit `parent_entry` and su
 
 The bounded input is at most 32 existing result files and 1–16 explicit steps. Results require all six fields shown above. Supported provenance and roles are the existing `Artifact` values. Metadata is limited to 4 MiB; normal step/checkpoint size and reference limits still apply. Large scientific results remain referenced files, not checkpoint text.
 
+Before registering an intent or copying a result, `prepare_publication` resolves result and step aliases in order and reuses the existing content, evidence and composition validators. It validates every step's fields and enum values, the exact existing references, local typed links, and the final combined checkpoint's limits. Unknown, self or forward aliases fail. A result cannot masquerade as a claim, Experiment or Observation, and a sealed result cannot enter visible step context. Deterministic future Artifact identities are computed in memory; there is no temporary CampaignStore, scientific execution or persisted simulated journal. The actual writer and its digest algorithm remain unchanged. Runtime availability and file identities are checked again on resume.
+
+Validation failures may leave the per-entry lock file/directory, but do not create a publication index entry, intent, copied result or new journal. Exact replay of an existing intent retains the older API's behavior; old unfinished malformed requests remain inspectable and can be explicitly closed.
+
 ## What the checkpoint retains
 
 The publisher copies the selected checkpoint, appends the new step references, and sets `supersedes` to the parent checkpoint. It retains the task and question, all earlier steps, claims, counterevidence, methods, branches, pending handles, authority guards and source watermarks. Optional `checkpoint_additions` can append explicit `claim_refs`, `counter_refs`, or `method_refs`; it cannot replace those lists. Reference identities and typed step/claim links are checked before the entry changes.
@@ -85,6 +89,32 @@ status = inspect_publication(frontier["operations"][0]["intent_path"])
 `prepared`, `in_progress`, `conflict` and `unavailable` require attention. `published` means the current pointer equals the saved candidate. `superseded` means a completed publication's pointer has subsequently changed; inspection does not endorse that later pointer. The inspection API is metadata-only. Calling `resume_publication` for an already completed operation verifies saved journal, snapshot, workspace, result bytes and content references before returning idempotent success.
 
 Missing or unreadable indexed intents remain visible as `unavailable`. A malformed overall index raises an error; context readers must show unknown state rather than assume no pending work. Read-only discovery and inspection create no lock, directory, journal event or receipt. Hooks may expose these statuses and exact intent references; they must not invoke recovery automatically.
+
+## Close an unsuccessful publication or explicitly correct it
+
+An unsuccessful intent is not deleted or silently retried. `close_publication` writes one immutable `disposition.json`, using the same per-entry process lock as prepare/resume:
+
+```python
+from etalon.research.publication import close_publication, inspect_publication
+
+state = inspect_publication(intent_path)
+closed = close_publication(
+    intent_path,
+    disposition="withdrawn",
+    reason="The protocol reference was wrong; retain this attempt for audit.",
+    expected_intent_identity=state["intent_identity"],
+)
+```
+
+The exact intent identity binds the decision to the reviewed request. Existing intent, journal, results, stage receipts and entry bytes are preserved. The same close request is idempotent; a changed reason, disposition or replacement conflicts with the immutable terminal decision. `withdrawn` has `terminal=true` and `needs_recovery=false`. It is an archival decision, not a statement that the underlying scientific experiment failed. `resume_publication` refuses a terminal operation rather than executing or reopening it.
+
+A published operation cannot be reclassified as failed. This includes a successful entry replacement whose process died before recording the completion receipt, and a successful publication whose entry later advanced (`superseded`). Those remain successful history. Missing/corrupt intent metadata must be recovered or reviewed separately; it cannot be hidden by fabricating a terminal decision.
+
+To correct an unfinished request, prepare a **new operation ID** with explicit corrected results/steps and add `corrects_intent=old_intent_path` plus a nonempty `correction_reason`. Preparation captures the old intent identity in `intent.corrects`; it does not mutate or automatically close the old attempt. Once the correction is prepared, close the old intent with `disposition="replaced"` and `replacement_intent=new_intent_path`. This requires a same-entry, same-task correction that points to that exact old intent. The replacement is still prepared work until explicitly resumed; `replaced` does not assert that it succeeded.
+
+The terminal record carries the reason, replacement identity, phase and entry identity at close. Inspection/discovery expose `intent_identity`, `terminal` and `disposition`; `withdrawn` and `replaced` no longer count as incomplete work. If a host needs the full reason or replacement reference, read `disposition.request`. The disposition is append-only and never confers retry or execution permission.
+
+This version does not invent correction links for historical operations or infer that matching task names prove cross-entry ancestry. A historical failed operation whose valid successor lives in another destination can be explicitly withdrawn with an accurate reason and successor locator. No old intent is rewritten to pretend it had declared `corrects`.
 
 The index is bounded to 256 operations. Explicit archival/compaction of long histories is not implemented in this batch. No extra MCP write surface is required: a host can use the SDK while ordinary MCP context/evidence reads consume the published entry.
 

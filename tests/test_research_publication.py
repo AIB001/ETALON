@@ -11,7 +11,7 @@ from etalon.research import Artifact, ResearchJournal
 from etalon.research.continuation import CHECKPOINT, STEP, read_content, record_content, resume_research
 from etalon.research.evidence_refs import EvidenceError, file_identity, make_ref
 from etalon.research.publication import (
-    STAGES, discover_publications, inspect_publication, prepare_publication, resume_publication,
+    STAGES, close_publication, discover_publications, inspect_publication, prepare_publication, resume_publication,
 )
 
 
@@ -254,10 +254,10 @@ def test_published_output_damage_does_not_return_idempotent_success(case):
 def test_external_artifact_cannot_masquerade_as_claim(case):
     request = case["request"]
     request["checkpoint_additions"] = {"claim_refs": request["steps"][0]["content"]["input_refs"]}
-    prepared = prepare_publication(**request)
     with pytest.raises((EvidenceError, json.JSONDecodeError)):
-        resume_publication(prepared["intent_path"])
+        prepare_publication(**request)
     assert not case["entry"].exists()
+    assert not Path(str(case["entry"]) + ".publications.json").exists()
     assert_old_unchanged(case)
 
 
@@ -272,10 +272,10 @@ def test_new_entry_fork_detects_parent_entry_changed_after_prepare(case):
 
 def test_sealed_result_cannot_enter_published_step_context(case):
     case["request"]["results"][0]["role"] = "sealed_holdout"
-    prepared = prepare_publication(**case["request"])
     with pytest.raises(EvidenceError):
-        resume_publication(prepared["intent_path"])
+        prepare_publication(**case["request"])
     assert not case["entry"].exists()
+    assert not Path(str(case["entry"]) + ".publications.json").exists()
     assert_old_unchanged(case)
 
 
@@ -323,3 +323,234 @@ def test_completed_fork_replay_allows_parent_pointer_to_advance(case):
         handle.write("\n")
     assert resume_publication(prepared["intent_path"])["status"] == "published"
     assert file_identity(case["entry"]) == identity
+
+
+@pytest.mark.parametrize("problem", ["operation", "choice", "missing_field", "extra_field", "unknown_alias",
+    "forward_alias", "self_alias", "malformed_alias", "bad_ref", "bad_digest", "oversized_step", "result_type"])
+def test_static_invalid_publication_is_rejected_before_any_archival_write(case, problem):
+    request = case["request"]
+    content = request["steps"][0]["content"]
+    if problem == "operation":
+        content["operation"] = "pretend_execute"
+    elif problem == "choice":
+        content["detail"]["choice"] = "approve_without_evidence"
+    elif problem == "missing_field":
+        del content["reason"]
+    elif problem == "extra_field":
+        content["execute_now"] = True
+    elif problem == "unknown_alias":
+        content["output_refs"] = [{"publication_ref": "missing"}]
+    elif problem == "forward_alias":
+        request["steps"].append({"name": "later", "content": json.loads(json.dumps(content))})
+        content["output_refs"] = [{"publication_ref": "later"}]
+    elif problem == "self_alias":
+        content["output_refs"] = [{"publication_ref": "reuse"}]
+    elif problem == "malformed_alias":
+        content["output_refs"] = [{"publication_ref": "result", "extra": 1}]
+    elif problem == "bad_ref":
+        content["input_refs"] = [{"schema": "not-an-evidence-ref"}]
+    elif problem == "bad_digest":
+        content["input_refs"][0]["record_digest"] = "0" * 64
+    elif problem == "oversized_step":
+        content["reason"] = "x" * 16384
+    elif problem == "result_type":
+        content["operation"] = "result"
+        content["detail"] = {"experiment_refs": content["input_refs"],
+                             "observation_refs": content["input_refs"], "action_handles": []}
+    with pytest.raises(EvidenceError):
+        prepare_publication(**request)
+    assert not case["entry"].exists()
+    assert not (case["entry"].parent / ".etalon").exists()
+    assert not Path(str(case["entry"]) + ".publications.json").exists()
+    assert_old_unchanged(case)
+
+
+def test_preflight_catches_checkpoint_overflow_not_only_individual_steps(case):
+    from etalon.active.schema import canonical
+    from etalon.research.continuation import MAX_CONTENT_BYTES
+    old = case["old"]
+    journal = ResearchJournal(CampaignStore(old / "research.sqlite"))
+    content = json.loads(json.dumps(case["checkpoint"]))
+    content["question"] += "x" * (MAX_CONTENT_BYTES - len(canonical(content).encode()) - 1)
+    rid = record_content(journal, content, old / "content", source_id="prior", source_kind="fixture")
+    parent = json.loads(case["parent"].read_text())
+    parent["checkpoint_ref"] = make_ref("prior", rid, journal.get(rid))
+    case["parent"].write_text(json.dumps(parent))
+    workspace = Path(parent["workspace"])
+    manifest = json.loads(workspace.read_text())
+    manifest["sources"][0]["identity"]["value"] = file_identity(journal.store.path)["sha256"]
+    workspace.write_text(json.dumps(manifest))
+    case["old_identities"] = {str(p): file_identity(p) for p in old.rglob("*") if p.is_file()}
+    with pytest.raises(EvidenceError, match="exceeds 16 KiB"):
+        prepare_publication(**case["request"])
+    assert not Path(str(case["entry"]) + ".publications.json").exists()
+    assert_old_unchanged(case)
+
+
+def test_preflight_allows_ordered_aliases_without_changing_real_record_identity(case):
+    import etalon.research.publication as p
+    first = case["request"]["steps"][0]
+    second = json.loads(json.dumps(first))
+    second["name"] = "later"
+    second["content"]["input_refs"] = [{"publication_ref": "reuse"}]
+    second["content"]["reason"] = "Explicit later archival decision"
+    case["request"]["steps"].append(second)
+    prepared = prepare_publication(**case["request"])
+    assert not (Path(prepared["intent_path"]).parent / "research.sqlite").exists()
+    resumed = resume_publication(prepared["intent_path"])
+    assert resumed["status"] == "published"
+    refs = json.loads((Path(prepared["intent_path"]).parent / "stages" / "03-steps_recorded.json").read_text())["refs"]
+    entry = json.loads(case["entry"].read_text())
+    later = read_content(entry["workspace"], refs["later"])
+    assert later["input_refs"] == [refs["reuse"]]
+
+
+def test_withdraw_keeps_partial_data_and_is_exactly_idempotent(case, monkeypatch):
+    import etalon.research.publication as p
+    prepared = prepare_publication(**case["request"])
+    original = p._stage
+    def interrupt(root, phase, payload):
+        result = original(root, phase, payload)
+        if phase == "results_recorded":
+            raise RuntimeError("fixture interruption")
+        return result
+    monkeypatch.setattr(p, "_stage", interrupt)
+    with pytest.raises(RuntimeError, match="fixture interruption"):
+        resume_publication(prepared["intent_path"])
+    root = Path(prepared["intent_path"]).parent
+    before = {str(path): file_identity(path) for path in root.rglob("*") if path.is_file()}
+    arguments = {"disposition": "withdrawn", "reason": "Input protocol needs explicit correction",
+                 "expected_intent_identity": prepared["intent_identity"]}
+    closed = close_publication(prepared["intent_path"], **arguments)
+    assert closed["status"] == "withdrawn" and closed["terminal"] and not closed["needs_recovery"]
+    assert closed["phase"] == "results_recorded"
+    assert discover_publications(case["entry"])["incomplete_count"] == 0
+    assert all(file_identity(path) == identity for path, identity in before.items())
+    identity = file_identity(root / "disposition.json")
+    assert close_publication(prepared["intent_path"], **arguments) == closed
+    assert file_identity(root / "disposition.json") == identity
+    with pytest.raises(EvidenceError, match="terminal publication"):
+        resume_publication(prepared["intent_path"])
+    with pytest.raises(EvidenceError, match="immutable"):
+        close_publication(prepared["intent_path"], **{**arguments, "reason": "A new rationale"})
+    assert_old_unchanged(case)
+
+
+def test_corrected_operation_explicitly_replaces_failed_intent(case):
+    old = prepare_publication(**case["request"])
+    correction = json.loads(json.dumps(case["request"]))
+    correction.update(operation_id="corrected", corrects_intent=old["intent_path"],
+                      correction_reason="Use the exact existing evidence reference")
+    correction["steps"][0]["content"]["reason"] = "Reviewed corrected archival meaning"
+    new = prepare_publication(**correction)
+    arguments = {"disposition": "replaced", "reason": "Explicit correction ready for archival",
+        "expected_intent_identity": old["intent_identity"], "replacement_intent": new["intent_path"]}
+    closed = close_publication(old["intent_path"], **arguments)
+    assert closed["status"] == "replaced" and not closed["needs_recovery"]
+    assert closed["disposition"]["request"]["replacement"]["operation_id"] == "corrected"
+    assert discover_publications(case["entry"])["incomplete_count"] == 1
+    assert resume_publication(new["intent_path"])["status"] == "published"
+    assert prepare_publication(**correction)["status"] == "published"
+    assert close_publication(old["intent_path"], **arguments)["status"] == "replaced"
+    assert discover_publications(case["entry"])["incomplete_count"] == 0
+    assert_old_unchanged(case)
+
+
+def test_unrelated_operation_cannot_be_claimed_as_replacement(case):
+    old = prepare_publication(**case["request"])
+    unrelated = prepare_publication(**{**case["request"], "operation_id": "unrelated"})
+    with pytest.raises(EvidenceError, match="explicitly correct"):
+        close_publication(old["intent_path"], disposition="replaced", reason="Not linked",
+            expected_intent_identity=old["intent_identity"], replacement_intent=unrelated["intent_path"])
+    assert not (Path(old["intent_path"]).parent / "disposition.json").exists()
+
+
+@pytest.mark.parametrize("successful_state", ["published", "superseded", "before_receipt"])
+def test_successful_publication_cannot_be_marked_failed(case, monkeypatch, successful_state):
+    import etalon.research.publication as p
+    old = prepare_publication(**case["request"])
+    if successful_state == "before_receipt":
+        original = p._stage
+        def interrupt(root, phase, payload):
+            if phase == "entry_replaced":
+                raise RuntimeError("pointer committed")
+            return original(root, phase, payload)
+        monkeypatch.setattr(p, "_stage", interrupt)
+        with pytest.raises(RuntimeError, match="pointer committed"):
+            resume_publication(old["intent_path"])
+    else:
+        resume_publication(old["intent_path"])
+    if successful_state == "superseded":
+        with case["entry"].open("a") as handle:
+            handle.write("\n")
+    before = file_identity(case["entry"])
+    with pytest.raises(EvidenceError, match="successful publication"):
+        close_publication(old["intent_path"], disposition="withdrawn", reason="Cannot recast success",
+                          expected_intent_identity=old["intent_identity"])
+    assert file_identity(case["entry"]) == before
+    assert not (Path(old["intent_path"]).parent / "disposition.json").exists()
+
+
+def test_stale_intent_identity_cannot_close_or_hide_failed_progress(case):
+    prepared = prepare_publication(**case["request"])
+    with pytest.raises(EvidenceError, match="identity mismatch"):
+        close_publication(prepared["intent_path"], disposition="withdrawn", reason="Review old request",
+            expected_intent_identity={"sha256": "0" * 64, "bytes": prepared["intent_identity"]["bytes"]})
+    assert discover_publications(case["entry"])["incomplete_count"] == 1
+
+
+def test_terminal_disposition_process_death_is_replayable(case):
+    prepared = prepare_publication(**case["request"])
+    script = """
+import os,sys
+from pathlib import Path
+from etalon.research import publication as p
+original=p._save
+def save(path,value,**kwargs):
+    result=original(path,value,**kwargs)
+    if Path(path).name=='disposition.json': os._exit(73)
+    return result
+p._save=save
+state=p.inspect_publication(sys.argv[1])
+p.close_publication(sys.argv[1],disposition='withdrawn',reason='Explicit archival withdrawal',expected_intent_identity=state['intent_identity'])
+"""
+    process = subprocess.run([sys.executable, "-c", script, prepared["intent_path"]], capture_output=True, text=True)
+    assert process.returncode == 73, process.stderr
+    closed = close_publication(prepared["intent_path"], disposition="withdrawn", reason="Explicit archival withdrawal",
+                               expected_intent_identity=prepared["intent_identity"])
+    assert closed["status"] == "withdrawn" and discover_publications(case["entry"])["incomplete_count"] == 0
+
+
+def test_close_and_publisher_share_the_same_cross_process_lock(case):
+    from etalon.host import _consumer_lock
+    prepared = prepare_publication(**case["request"])
+    script = """
+import sys
+from etalon.research.publication import close_publication,inspect_publication
+state=inspect_publication(sys.argv[1])
+try:
+    close_publication(sys.argv[1],disposition='withdrawn',reason='Explicit withdrawal',expected_intent_identity=state['intent_identity'])
+except OSError:
+    sys.exit(75)
+sys.exit(0)
+"""
+    with _consumer_lock(case["entry"].parent / (case["entry"].name + ".publication")):
+        process = subprocess.run([sys.executable, "-c", script, prepared["intent_path"]], capture_output=True, text=True)
+    assert process.returncode == 75, process.stderr
+    assert inspect_publication(prepared["intent_path"])["status"] == "prepared"
+    assert not (Path(prepared["intent_path"]).parent / "disposition.json").exists()
+    assert close_publication(prepared["intent_path"], disposition="withdrawn", reason="Explicit withdrawal",
+        expected_intent_identity=prepared["intent_identity"])["status"] == "withdrawn"
+
+
+def test_correction_does_not_cross_destination_or_rewrite_closed_request(case, tmp_path):
+    old = prepare_publication(**case["request"])
+    with pytest.raises(EvidenceError, match="same destination"):
+        prepare_publication(**{**case["request"], "entry": str(tmp_path / "different" / "entry.json"),
+            "operation_id": "cross-entry", "corrects_intent": old["intent_path"], "correction_reason": "Not proven ancestry"})
+    close_publication(old["intent_path"], disposition="withdrawn", reason="Explicit abandonment",
+                      expected_intent_identity=old["intent_identity"])
+    with pytest.raises(EvidenceError, match="unfinished publication"):
+        prepare_publication(**{**case["request"], "operation_id": "too-late", "corrects_intent": old["intent_path"],
+                               "correction_reason": "Do not rewrite a terminal operation"})
+    assert prepare_publication(**case["request"])["status"] == "withdrawn"

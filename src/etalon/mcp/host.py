@@ -10,6 +10,38 @@ from etalon.mcp._common import Cost, ok, tool
 
 
 def register(mcp: Any) -> None:
+    def etalon_research_hook(event: dict) -> Any:
+        """FREE. Native lifecycle adapter; prepares research context and delivery receipts.
+
+        Uses the server's installed ETALON_RESEARCH_HOOK_BINDING, never caller-supplied
+        entry or state paths. Writes host delivery metadata only; no scientific write,
+        computation, checkpoint creation or RSI. An event is a supplied observation;
+        native provenance is verified separately against the host trace.
+        """
+        import json
+        from mcp.types import CallToolResult, TextContent
+        from etalon.mcp._common import StdoutToStderr
+        from etalon.research_hooks import handle_bound_event
+        try:
+            with StdoutToStderr():
+                result = handle_bound_event(event)
+            failed = not result["ok"]
+            output = result["host_output"] if not failed else {
+                "ok": False, "error": result["receipt"]["error"],
+                "receipt_path": result["receipt_path"], "automatic_retry": False}
+        except (ValueError, KeyError, OSError) as exc:
+            failed = True
+            output = {"ok": False, "error": {"type": type(exc).__name__, "message": str(exc)},
+                      "automatic_retry": False}
+        # Native hook consumers parse the text as the hook output itself. The
+        # ordinary ETALON ok envelope would hide hookSpecificOutput. Protocol
+        # isError, unlike an ok:false text alone, is recognized by both hosts.
+        return CallToolResult(content=[TextContent(type="text", text=json.dumps(
+            output, ensure_ascii=False, separators=(",", ":")))], isError=failed)
+
+    etalon_research_hook.etalon_cost = Cost.FREE
+    mcp.tool()(etalon_research_hook)
+
     @mcp.tool()
     @tool(Cost.FREE)
     def etalon_capabilities(detail: str = "full", skills: list[str] | None = None,

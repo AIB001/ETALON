@@ -21,6 +21,19 @@ engine, model weight or simulation package.
   checks a previously exported directory. Configuration is not proof of host access.
 - Check actual host discovery and a read-only MCP call. Report an SDK handshake
   separately from a native Codex or Claude Code invocation.
+- For portable research hooks, use `python -m etalon.host install --target NEW_DIRECTORY
+  --host codex --research-entry /absolute/CURRENT.json` (or `--host claude`).
+  This creates native MCP hook definitions and an explicit server-side binding.
+  After moving an unchanged owned export, repeat install with the destination
+  runtime and entry. Retry interrupted installation with the same request;
+  preserve its intent and previous bytes. Arbitrary existing projects and modified
+  owned files require reconciliation. `host doctor --target DIRECTORY` checks
+  configuration, while the actual host still owns project/hook review.
+- On first continuation, MCP may not yet be available for SessionStart. Give the
+  chat its entry and verify the first ETALON read's PreToolUse delivery. For
+  compaction, require a real host compaction event plus subsequent entry reading;
+  a constructed event or saved hook receipt alone is insufficient. Hook bindings
+  do not copy remote originals or authorize paused computation.
 - Durable workers require Linux `/proc` and POSIX locks; use Linux/WSL for them.
   Windows can serve read-only tools but does not establish worker compatibility.
 - Preserve vendored source identity and inspect `etalon doctor` and asset

@@ -141,6 +141,24 @@ def test_experience_reads_negative_conditions_and_supersession_without_promotion
         imp.record_experience(p['j'],**{**kwargs,'outcome':'adopt'})
 
 
+def test_related_experience_is_explicit_hypothesis_not_an_applicable_match(case,prepared):
+    p=prepared
+    exp=imp.record_experience(p['j'],patch_ref=p['patch'],outcome='unresolved',lesson='Fixture hypothesis only',
+        invalid_when='different protocol',capability_id='etalon.evidence',support_refs=[case[1]],
+        directory=p['root']/'content',source_id='research',source_kind='fixture')
+    conditions={**p['conditions'],'endpoint':'different-endpoint'}
+    exact=imp.retrieve_experience(publish(case),source_ids=['research'],capability_id='etalon.evidence',conditions=conditions)
+    assert exact['matches']==[] and exact['related']==[]
+    related=imp.retrieve_experience(publish(case),source_ids=['research'],capability_id='etalon.evidence',conditions=conditions,
+                                    related_condition_keys=['problem_kind'])
+    assert related['matches']==[] and related['related'][0]['ref']==exp
+    assert related['related'][0]['unmatched_conditions']==['endpoint']
+    assert 'hypothesis_only' in related['related'][0]['applicability']
+    with pytest.raises(EvidenceError,match='query conditions'):
+        imp.retrieve_experience(publish(case),source_ids=['research'],capability_id='etalon.evidence',conditions=conditions,
+                                related_condition_keys=['undeclared'])
+
+
 def test_changed_method_bytes_are_not_accepted_as_a_patch(case,prepared):
     p=prepared
     patch=imp._local(p['j'],p['patch'],'research',imp.PATCH)

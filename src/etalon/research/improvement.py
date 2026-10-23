@@ -325,7 +325,8 @@ def record_experience(journal, *, patch_ref, outcome, lesson, invalid_when, capa
     return journal_ref(journal, rid, source_id=source_id)
 
 
-def retrieve_experience(workspace, *, source_ids, capability_id, conditions, limit=10, cursor=None):
+def retrieve_experience(workspace, *, source_ids, capability_id, conditions, limit=10, cursor=None,
+                        related_condition_keys=()):
     """Bounded exact-condition retrieval; retain negative/conflicting entries for host review."""
     from .evidence import query_evidence
     _conditions(conditions)
@@ -333,7 +334,10 @@ def retrieve_experience(workspace, *, source_ids, capability_id, conditions, lim
         raise EvidenceError('explicit source scope required')
     page = query_evidence(workspace, query=EXPERIENCE,
         filters={'source_ids':source_ids, 'capability_ids':[capability_id]}, limit=limit, cursor=cursor)
-    matches, excluded = [], []
+    if not isinstance(related_condition_keys, (list, tuple)) or any(
+            not isinstance(k, str) or k not in conditions for k in related_condition_keys):
+        raise EvidenceError('related keys must explicitly name query conditions')
+    matches, excluded, related = [], [], []
     for item in page['items']:
         content = read_material(workspace, item['ref'])['content']
         if not isinstance(content, dict) or content.get('schema') != EXPERIENCE:
@@ -342,9 +346,12 @@ def retrieve_experience(workspace, *, source_ids, capability_id, conditions, lim
         unmet = [k for k,v in content['conditions'].items() if conditions.get(k) != v]
         if unmet:
             excluded.append({'ref':item['ref'], 'unmatched_conditions':unmet})
+            if related_condition_keys and all(content['conditions'].get(k) == conditions[k] for k in related_condition_keys):
+                related.append({'ref':item['ref'], 'experience':content, 'unmatched_conditions':unmet,
+                                'applicability':'hypothesis_only; requires new evaluation'})
         else:
             matches.append({'ref':item['ref'], 'experience':content})
-    return {'matches':matches, 'excluded':excluded, 'coverage':page['coverage'],
+    return {'matches':matches, 'excluded':excluded, 'related':related, 'coverage':page['coverage'],
             'warnings':page['warnings'], 'next_cursor':page.get('next_cursor'),
             'selection':'host_decides; adoption is not implied; inspect supersedes and counterevidence'}
 

@@ -20,6 +20,27 @@ python -m etalon.host verify --target /absolute/new/project
 The target must be new. For an existing research project, export to a separate
 directory and deliberately integrate the generated files with its existing
 configuration. Export does not modify global settings or overwrite instructions.
+
+For a relocatable research adapter, use the intended environment's Python:
+
+```bash
+python -m etalon.host install --host codex --target /absolute/new/project --research-entry /absolute/CURRENT.json
+python -m etalon.host doctor --target /absolute/new/project
+```
+
+Use `--host claude` for Claude Code. This ships native `mcp_tool` hooks plus a
+portable installation recipe. After moving the unchanged export, repeat install
+with the new target and server-local entry to rebind the runtime and paths.
+Interrupted installs retain their intent and can resume with the same request.
+No dependencies, global configuration or host trust are automatically changed.
+The final host must discover and review its project/hooks. `doctor` checks
+configuration integrity, not actual delivery or model consumption.
+
+MCP may not be ready for the initial SessionStart (Claude skips that startup hook).
+Give the new chat the entry; its first ETALON read can receive the baseline via
+PreToolUse. After compaction, read the current summary and `resume_frontier`, then
+the relevant latest-step/output originals. Preserve workset changes, counterevidence,
+pending tasks and pauses. Hook receipts alone do not prove these were understood.
 The existing repository `.mcp.json` is a historical Linux/conda configuration;
 the exporter generates an interpreter-bound ETALON configuration for this machine.
 
@@ -62,9 +83,9 @@ read a skill or query before doing its actual task.
 ## Runtime binding
 
 The generated server command uses the exporting interpreter and an explicit
-`PYTHONPATH` to its ETALON source. It is a local adapter, not a portable deployment
-or a frozen copy of the executing code. Export again from the destination
-environment after moving machines. Install only the scientific extras needed by
+`PYTHONPATH` to its ETALON source. An adapter does not freeze that source or deploy
+scientific data. Rebind a portable installation at its destination; ordinary
+exports still require re-export. Install only the scientific extras needed by
 the selected task; read-only discovery needs no simulation engine.
 
 Codex's local skill directories and stdio configuration follow the official

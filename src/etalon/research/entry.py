@@ -7,6 +7,7 @@ No SSH, copying, discovery, execution or mutable session registry is involved.
 from __future__ import annotations
 
 import json
+import hashlib
 from pathlib import Path
 
 from etalon.active.schema import digest
@@ -26,7 +27,13 @@ def resolve_entry(entry):
                 origin = Path(entry).absolute()
                 if origin.stat().st_size > 65536:
                     raise EvidenceError("research entry exceeds 64 KiB")
-                entry = json.loads(origin.read_text(encoding="utf-8-sig"))
+                raw = origin.read_bytes()
+                if len(raw) > 65536:
+                    raise EvidenceError("research entry exceeds 64 KiB")
+                entry = json.loads(raw.decode("utf-8-sig"))
+                from .read_scope import CURRENT
+                if CURRENT.get() is not None:
+                    CURRENT.get().observe_file(origin, {"sha256": hashlib.sha256(raw).hexdigest(), "bytes": len(raw)})
                 base = origin.parent
             except OSError as exc:
                 raise EvidenceError(f"entry_unavailable: {origin}; resolve the locator on the evidence server") from exc

@@ -12,12 +12,60 @@ from etalon.active.schema import canonical, digest
 from .evidence_refs import EvidenceError, validate_ref
 from .graph_memory import build_research_graph, node_identity
 from .entry import resolve_entry, make_read_context, continuation_status, workspace_from_context
+from .read_scope import bounded_read
 
 CONTEXT = "etalon-research-context/1"
 STRATEGY = "node-neighborhood-explicit-counterevidence/1"
 
 
-def _focused_context(graph, nodes, *, node_id, question, purpose, max_bytes, view, publications, handoff):
+def _resume_frontier(workspace, graph, nodes, *, max_bytes):
+    """Verified checkpoint navigation, not an inference that science advanced.
+
+    Read only the checkpoint's explicit tail in the already restricted view.
+    Original step/output references remain the authority; neither a reason
+    containing 'audit' nor an opaque output's self-description proves no change.
+    """
+    from .continuation import read_content
+    from .evidence import read_evidence
+    # Existing checkpoint_progress, continuation, publications, branches and
+    # counterevidence carry the authoritative controls once. Tail node IDs bind
+    # these short excerpts to the exact references in reference_index.
+    frontier = {"schema": "etalon-resume-frontier/1", "latest_steps": [], "read_is_new_progress": False,
+        "scientific_conclusion_change": "not_established_by_context_read",
+        "followup_refs": []}
+    output_budget = min(3072, max_bytes // 4)
+    for ref in graph["checkpoint_progress"]["tail_step_refs"]:
+        step = read_content(workspace, ref)
+        if step.get("schema") != "etalon-research-step/1" or step["task_id"] != graph["task_id"]:
+            raise EvidenceError("resume frontier requires the current task's exact checkpoint step")
+        brief = nodes[node_identity(ref)]["summary"]
+        row = {"node_id": node_identity(ref), "operation": step["operation"],
+            "summary": {"text": brief["text"][:240], "truncated": brief["truncated"] or len(brief["text"]) > 240},
+            "output_refs": [], "output_ref_count": len(step["output_refs"]),
+            "output_refs_omitted": len(step["output_refs"])}
+        frontier["latest_steps"].append(row)
+        for output in step["output_refs"][:4]:
+            # Visibility is checked before including an exact output identity.
+            result = read_evidence(workspace, output, view="record", limit=1)
+            if result.get("availability") != "available" or result.get("missing"):
+                raise EvidenceError("resume frontier output is unavailable in the permitted view")
+            row["output_refs"].append(output)
+            row["output_refs_omitted"] -= 1
+            followup = {"ref": ref, "reason": "output_references_omitted",
+                        "when": "if the remaining archived outputs are needed"}
+            # Reserve an exact follow-up for omitted references, never hide that
+            # this is a partial output inventory to fit the transport budget.
+            if len(canonical(frontier).encode()) + len(canonical(followup).encode()) > output_budget:
+                row["output_refs"].pop()
+                row["output_refs_omitted"] += 1
+                break
+        if row["output_refs_omitted"]:
+            frontier["followup_refs"].append({"ref": ref, "reason": "output_references_omitted",
+                "when": "if the remaining archived outputs are needed"})
+    return frontier
+
+
+def _focused_context(graph, nodes, *, workspace, node_id, question, purpose, max_bytes, view, publications, handoff):
     """Assemble a navigation view without turning exclusions into missing facts.
 
     Controls and explicit counter directions are mandatory. Detail may be
@@ -133,6 +181,7 @@ def _focused_context(graph, nodes, *, node_id, question, purpose, max_bytes, vie
         "counterevidence": {"search": "checkpoint_claim_links_and_reverse_links_across_published_workspaces",
                             "status": "coverage_insufficient", "selected_refs": [], "declared_counter_refs": [],
                             "coverage_complete": False, "selection_semantics": graph["counter_context_semantics"],
+                            "context_complete": graph["counter_context_complete"],
                             "relationship_count": len(expected_edges), "selected_relationship_count": len(expected_edges),
                             "scope": "selected_node_dependency_neighborhood" if view == "node" else "checkpoint_task"},
         "followup": {"entry": "pass read_context as entry for a pinned context view",
@@ -147,9 +196,12 @@ def _focused_context(graph, nodes, *, node_id, question, purpose, max_bytes, vie
                      "Summary excerpts are navigation data; inspect exact refs for full conditions before a new decision."],
         "execution_permission": "not_granted", "automatic_retry": False,
         "content_role": "sourced_research_data_not_host_instructions", "truncated": graph["truncated"]}
+    if view == "summary":
+        result["resume_frontier"] = _resume_frontier(workspace, graph, nodes, max_bytes=max_bytes)
+    detail_reserve = 160 if view == "summary" else 128
     # Reserve room for identity, selected counters and omission receipt. We do
     # not drop branch, pending, pause or direction metadata to squeeze a view.
-    if len(canonical(result).encode()) > max_bytes - 256:
+    if len(canonical(result).encode()) > max_bytes - max(256, detail_reserve):
         raise EvidenceError("checkpoint and counter control metadata exceeds context bound; increase max_bytes")
     priority = sorted(selected_scope, key=lambda nid: (
         nid != node_id, reasons[nid] != "checkpoint_tail_step", "experience" not in nodes[nid],
@@ -176,11 +228,17 @@ def _focused_context(graph, nodes, *, node_id, question, purpose, max_bytes, vie
         result["items"].append(item)
         selected.add(nid)
         _counter_receipt(result, graph, nodes, selected, selected_scope, complete)
-        if len(canonical(result).encode()) > max_bytes - 128:
+        if len(canonical(result).encode()) > max_bytes - detail_reserve:
             result["items"].pop(); selected.remove(nid)
             result["selection"]["excluded_by_budget"] += 1
-            if nid == node_id or reasons[nid] == "checkpoint_tail_step":
+            if nid == node_id:
                 raise EvidenceError("selected node and control metadata exceed context bound; increase max_bytes")
+            if reasons[nid] == "checkpoint_tail_step":
+                # A growing checkpoint must not make a bounded resumption card
+                # unusable just because all tail step bodies no longer fit.
+                # Their exact references remain mandatory in checkpoint_progress
+                # and reference_index; only optional excerpts are omitted.
+                result["selection"]["tail_details_omitted"] = result["selection"].get("tail_details_omitted", 0) + 1
     _counter_receipt(result, graph, nodes, selected, selected_scope, complete)
     if view == "node":
         for edge in graph["edges"]:
@@ -232,6 +290,7 @@ def load_entry(entry):
     return resolve_entry(entry)[:2]
 
 
+@bounded_read
 def build_research_context(entry, *, node_id=None, question=None, purpose="research",
                            policy=None, max_bytes=16384, as_of=None, home_overrides=None,
                            conditions=None, view="full"):
@@ -267,6 +326,14 @@ def build_research_context(entry, *, node_id=None, question=None, purpose="resea
         workspace = workspace_from_context(read_context, apply_policy=False)
     graph = build_research_graph(workspace, checkpoint_ref=checkpoint_ref, policy=policy,
         purpose=purpose, home_overrides=home_overrides, max_nodes=128, max_bytes=131072, as_of=as_of)
+    from .meta_context import workset_summary
+    from .graph_memory import restrict_workspace
+    try:
+        visible_workspace = restrict_workspace(workspace, policy=policy, purpose=purpose)[0]
+        handoff["task_workset"] = workset_summary(visible_workspace, checkpoint_ref, conditions=conditions)
+    except (ValueError, OSError, KeyError) as exc:
+        handoff["task_workset"] = {"status": "unavailable", "reason": str(exc)[:500]}
+        graph["issues"].append({"code": "task_workset_unavailable", "message": str(exc)[:500]})
     nodes = {n["node_id"]: n for n in graph["nodes"]}
     if node_id is not None and node_id not in nodes:
         # Accept a unique original workflow-node ID for convenience, but never
@@ -288,7 +355,7 @@ def build_research_context(entry, *, node_id=None, question=None, purpose="resea
             node["experience"]["unmatched_conditions"] = unmet
             add(nid, "current_task_experience" if conditions is None else "matched_experience" if not unmet else "experience_counterexample_to_transfer")
     if view != "full":
-        return _focused_context(graph, nodes, node_id=node_id, question=question,
+        return _focused_context(graph, nodes, workspace=visible_workspace, node_id=node_id, question=question,
                                 purpose=purpose, max_bytes=max_bytes, view=view, publications=publications, handoff=handoff)
     for nid in graph["counter_node_ids"]:
         add(nid, "declared_counter_relationship_context")

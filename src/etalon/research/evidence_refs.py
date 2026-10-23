@@ -5,6 +5,7 @@ No registry, ledger, directory discovery, downloads, or scientific admission.
 from __future__ import annotations
 
 from dataclasses import dataclass
+from functools import cached_property
 import hashlib
 import json
 from pathlib import Path, PurePosixPath, PureWindowsPath
@@ -84,14 +85,40 @@ class EvidenceWorkspace:
         return json.loads(self.payload)
 
     def source(self, source_id):
-        for source in self.manifest["sources"]:
-            if source["source_id"] == source_id:
-                return source
-        raise EvidenceError("unknown source_id")
+        try:
+            return json.loads(self._source_payloads[source_id])
+        except KeyError:
+            raise EvidenceError("unknown source_id") from None
+
+    @cached_property
+    def _source_payloads(self):
+        # Strings retain the public copy-on-read contract; callers cannot mutate
+        # a source or map returned earlier and affect later resolution.
+        return {s["source_id"]: canonical(s) for s in self.manifest["sources"]}
+
+    @cached_property
+    def _mapping_payloads(self):
+        return {(m["source_id"], m["original"]): canonical(m)
+                for m in self.manifest.get("location_map", [])}
+
+    @cached_property
+    def _source_mapping_payloads(self):
+        result = {}
+        for (sid, _), payload in self._mapping_payloads.items():
+            result.setdefault(sid, []).append(payload)
+        return {sid: tuple(sorted(values)) for sid, values in result.items()}
+
+    def _mapping(self, source_id, original):
+        value = self._mapping_payloads.get((source_id, original))
+        return json.loads(value) if value is not None else None
 
 
 def load_workspace(workspace):
+    from .read_scope import CURRENT
+    scope = CURRENT.get()
     if isinstance(workspace, EvidenceWorkspace):
+        if scope is not None and (str(workspace.base), workspace.payload) in scope.workspaces:
+            return scope.workspaces[(str(workspace.base), workspace.payload)]
         base, data = workspace.base, workspace.manifest
         if not isinstance(base, Path) or not base.is_absolute():
             raise EvidenceError("validated workspace requires an absolute base")
@@ -101,7 +128,15 @@ def load_workspace(workspace):
         path = Path(workspace).resolve(strict=True)
         if path.stat().st_size > 4 * 1024 * 1024:
             raise EvidenceError("workspace manifest exceeds 4 MiB")
-        base, data = path.parent, json.loads(path.read_text(encoding="utf-8-sig"))
+        raw = path.read_bytes()
+        if len(raw) > 4 * 1024 * 1024:
+            raise EvidenceError("workspace manifest exceeds 4 MiB")
+        base, data = path.parent, json.loads(raw.decode("utf-8-sig"))
+        if scope is not None:
+            scope.observe_file(path, {"sha256": hashlib.sha256(raw).hexdigest(), "bytes": len(raw)})
+            key = str(base), canonical(data)
+            if key in scope.workspaces:
+                return scope.workspaces[key]
     if data.get("schema") != WORKSPACE_SCHEMA:
         raise EvidenceError("unsupported workspace schema")
     _text(data.get("workspace_id"))
@@ -152,7 +187,10 @@ def load_workspace(workspace):
         keys.add(key)
         _identity(entry)
         _local(base, entry.get("location"), confined=True)
-    return EvidenceWorkspace(base.resolve(), canonical(data))
+    value = EvidenceWorkspace(base.resolve(), canonical(data))
+    if scope is not None:
+        scope.workspaces[(str(value.base), value.payload)] = value
+    return value
 
 
 def validate_ref(ref):
@@ -183,12 +221,24 @@ class EvidenceResolver:
         self.source_id = source_id
         self.workspace.source(source_id)
 
+    @classmethod
+    def _from_validated(cls, workspace, source_id):
+        """Internal reuse within a validated read, never a public trust shortcut.
+
+        Avoid resolving every unrelated mapping again for each artifact. resolve()
+        still checks the accessed location's confinement and original bytes.
+        """
+        if not isinstance(workspace, EvidenceWorkspace):
+            raise EvidenceError("internal resolver requires a validated workspace")
+        workspace.source(source_id)
+        result = cls.__new__(cls)
+        result.workspace, result.source_id = workspace, source_id
+        return result
+
     def resolve(self, original, *, sha256, bytes):
         _identity({"sha256": sha256, "bytes": bytes})
-        matches = [entry for entry in self.workspace.manifest.get("location_map", [])
-                   if entry["source_id"] == self.source_id and entry["original"] == original]
-        if matches:
-            entry = matches[0]
+        entry = self.workspace._mapping(self.source_id, original)
+        if entry is not None:
             if (entry["sha256"], entry["bytes"]) != (sha256, bytes):
                 raise EvidenceError("location mapping identity conflicts with original")
             path = _local(self.workspace.base, entry["location"], confined=True)
@@ -201,10 +251,8 @@ class EvidenceResolver:
     def resolve_snapshot(self, content_ref):
         """Locate a saved skill manifest; caller must verify semantic bundle hash."""
         original = content_ref["manifest_path"]
-        matches = [entry for entry in self.workspace.manifest.get("location_map", [])
-                   if entry["source_id"] == self.source_id and entry["original"] == original]
-        if matches:
-            entry = matches[0]
+        entry = self.workspace._mapping(self.source_id, original)
+        if entry is not None:
             return self.resolve(original, sha256=entry["sha256"], bytes=entry["bytes"])
         return _local(self.workspace.base, original)
 
@@ -214,10 +262,8 @@ class EvidenceResolver:
         if source["kind"] != "journal":
             raise EvidenceError("subject scope requires a journal source")
         path = _local(self.workspace.base, source["location"])
-        matches = [entry for entry in self.workspace.manifest.get("location_map", [])
-                   if entry["source_id"] == self.source_id and entry["original"] == original]
-        if matches:
-            entry = matches[0]
+        entry = self.workspace._mapping(self.source_id, original)
+        if entry is not None:
             mapped = self.resolve(original, sha256=entry["sha256"], bytes=entry["bytes"])
             if mapped != path:
                 raise EvidenceError("scope mapping does not point to the bound source")

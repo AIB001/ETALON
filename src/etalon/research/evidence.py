@@ -9,7 +9,7 @@ from pathlib import Path
 
 from etalon.active.schema import canonical, digest
 from .evidence_refs import (
-    CONTENT_SCHEMAS, EvidenceError, EvidenceResolver, _identity, _local, file_identity,
+    CONTENT_SCHEMAS, EvidenceError, EvidenceResolver, EvidenceWorkspace, _identity, _local, file_identity,
     load_workspace, make_ref, validate_claim, validate_ref,
 )
 
@@ -20,9 +20,12 @@ MAX_RECORDS = 100000
 MAX_QUERY_BYTES = 32768
 MAX_READ_BYTES = 65536
 MAX_DEPENDENCY_SOURCES = 64
-# Normal execution checkpoints and their immutable predecessors can exceed 64
-# typed records. Match the graph's 128-node ceiling; retain both byte limits.
-MAX_PROJECTED_CONTENTS = 128
+# Indexing a bounded published source and selecting a graph view are different
+# budgets. Checkpoints, decisions and immutable predecessors for a small panel
+# already exceed the graph's 128 displayed nodes. Keep a separate source-index
+# ceiling, plus the 1 MiB per-artifact and 8 MiB total read limits below. Larger
+# histories still need explicitly scoped published sources; no unbounded scan.
+MAX_PROJECTED_CONTENTS = 1024
 
 
 class StaleCursorError(EvidenceError):
@@ -93,6 +96,7 @@ def _project_contents(ws, source, indexed):
     explicit = {p["record_id"]: p["schema"] for p in source.get("content_projections", [])}
     attempted, total = 0, 0
     failures = []
+    resolver = None
     for rid, row in indexed.items():
         body = row["record"]
         declared = body.get("bindings", {}).get("schema")
@@ -109,7 +113,9 @@ def _project_contents(ws, source, indexed):
             total += body["bytes"]
             if attempted > MAX_PROJECTED_CONTENTS or body["bytes"] > 1024 * 1024 or total > 8 * 1024 * 1024:
                 raise EvidenceError("projection read budget exceeded")
-            path = EvidenceResolver(ws, source["source_id"]).resolve(
+            if resolver is None:
+                resolver = EvidenceResolver._from_validated(ws, source["source_id"])
+            path = resolver.resolve(
                 body["path"], sha256=body["sha256"], bytes=body["bytes"])
             with path.open("rb") as handle:
                 data = handle.read(1024 * 1024 + 1)
@@ -143,6 +149,26 @@ def _project_contents(ws, source, indexed):
 
 
 def _source(ws, source):
+    from .read_scope import CURRENT, source_key
+    scope = CURRENT.get()
+    # Data-snapshot member paths are resolved during decoding. They must be
+    # rebuilt when a source/member symlink moves, even with identical JSON.
+    frozen = source["kind"] == "journal" and source["identity"]["kind"] == "snapshot_sha256"
+    key = source_key(ws, source)
+    if scope is not None and frozen and key in scope.sources:
+        scope.hits += 1
+        return tuple(json.loads(scope.sources[key][2]))
+    result = scope.reuse_source(key, ws, source) if scope is not None and frozen else None
+    if result is None:
+        result = _source_uncached(ws, source)
+        if scope is not None:
+            scope.fresh_sources += 1
+    if scope is not None and frozen:
+        scope.remember_source(key, ws, source, result)
+    return result
+
+
+def _source_uncached(ws, source):
     """Read one source atomically; errors become explicit unavailable coverage."""
     sid = source["source_id"]
     path = _local(ws.base, source["location"])
@@ -246,6 +272,26 @@ def _source(ws, source):
 
 
 def _collect(ws, source_ids=None):
+    from .read_scope import CURRENT, MAX_CACHE_BYTES
+    scope = CURRENT.get()
+    selected = sorted(s["source_id"] for s in ws.manifest["sources"]) if source_ids is None else sorted(set(source_ids))
+    key = (str(ws.base), ws.payload, tuple(selected))
+    if scope is not None and key in scope.collections:
+        scope.collection_hits += 1
+        return tuple(json.loads(scope.collections[key]))
+    result = _collect_uncached(ws, source_ids)
+    if (scope is not None and not result[2]
+            and all(c["status"] == "complete" and ws.source(c["source_id"])["kind"] == "journal"
+                    and ws.source(c["source_id"])["identity"]["kind"] == "snapshot_sha256" for c in result[1])):
+        raw = canonical(result)
+        size = len(raw.encode("utf-8"))
+        if scope.bytes + size <= MAX_CACHE_BYTES:
+            scope.collections[key] = raw
+            scope.bytes += size
+    return result
+
+
+def _collect_uncached(ws, source_ids=None):
     """Read requested sources plus explicit evidence dependencies, never unrelated ones.
 
     Dependency reads preserve the existing transitive visibility rule. A source
@@ -458,7 +504,8 @@ def read_evidence(workspace=None, ref=None, *, view="record", member=None, selec
 def _read_evidence(workspace, ref, *, view="record", member=None, selector=None, offset=0, limit=100,
                    collection=None):
     """Internal single-call reuse; callers must validate the collected view's lifetime."""
-    ws, ref = load_workspace(workspace), validate_ref(ref)
+    ws = workspace if collection is not None and isinstance(workspace, EvidenceWorkspace) else load_workspace(workspace)
+    ref = validate_ref(ref)
     _bounded_int(offset, 0, 2**63 - 1, "offset")
     _bounded_int(limit, 1, 32768, "limit")
     if view not in {"record", "summary", "lineage", "artifact"}:
@@ -565,7 +612,7 @@ def _read_evidence(workspace, ref, *, view="record", member=None, selector=None,
         if "sha256" in ref and (ref["sha256"], ref["bytes"]) != (artifact["sha256"], artifact["bytes"]):
             raise EvidenceError("ref artifact identity mismatch")
         try:
-            path = EvidenceResolver(ws, ref["source_id"]).resolve(artifact["path"], sha256=artifact["sha256"], bytes=artifact["bytes"])
+            path = EvidenceResolver._from_validated(ws, ref["source_id"]).resolve(artifact["path"], sha256=artifact["sha256"], bytes=artifact["bytes"])
             with path.open("rb") as handle:
                 handle.seek(offset)
                 data = handle.read(limit)

@@ -17,7 +17,7 @@ import sys
 
 from etalon.host import _consumer_lock, _root, _save_cursor
 
-VERSION = "etalon-research-hooks/2"
+VERSION = "etalon-research-hooks/3"
 MAX_EVENT_BYTES = 1024 * 1024
 HOST_EVENTS = {
     "codex": {"SessionStart", "PreToolUse", "PostToolUse", "PreCompact", "Stop"},
@@ -167,6 +167,18 @@ def _delivery_payload(context, previous, *, event_name, entry, config):
     elif event_name != "SessionStart" and previous and previous.get("usable"):
         if previous.get("config") != config:
             reason = "configuration_changed"
+        elif (previous["context"].get("task_id"), previous["context"].get("task_workset", {}).get("digest")) != (
+                context.get("task_id"), context.get("task_workset", {}).get("digest")):
+            reason = "task_or_workset_changed"
+            old = previous["context"].get("task_workset", {})
+            new = context.get("task_workset", {})
+            old_parts = old.get("enabled_versions", old.get("enabled", []))
+            new_parts = new.get("enabled_versions", new.get("enabled", []))
+            baseline["delivery"]["workset_transition"] = {
+                "previous_digest": old.get("digest"), "current_digest": new.get("digest"),
+                "deactivated": [part for part in old_parts if part not in new_parts],
+                "activated": [part for part in new_parts if part not in old_parts],
+                "context_erasure": False}
         else:
             old = previous["context"]
             changed = {key: value for key, value in context.items()
@@ -184,12 +196,19 @@ def _delivery_payload(context, previous, *, event_name, entry, config):
             # through the exact entry, never assumed consumed.
             controls = {key: context[key] for key in (
                 "checkpoint_ref", "continuation", "branches", "authority", "pending", "publications",
-                "source_watermarks", "source_issues", "execution_permission", "automatic_retry")
+                "source_watermarks", "source_issues", "execution_permission", "automatic_retry", "task_workset",
+                "resume_frontier", "checkpoint_progress", "counterevidence")
                 if key in context}
             payload = {"delivery": delivery, "current_controls": controls}
             if mode == "delta":
-                payload["context_delta"] = {"set": changed, "remove": removed,
-                    "semantics": "replace_top_level_values_then_remove_keys"}
+                # Controls remain self-contained even if the host missed the
+                # earlier baseline. Reference their values in the patch instead
+                # of duplicating large watermarks/worksets in every delivery.
+                payload["context_delta"] = {
+                    "set_from_current_controls": sorted(set(changed) & set(controls)),
+                    "set": {key: value for key, value in changed.items() if key not in controls},
+                    "remove": removed,
+                    "semantics": "copy_named_current_controls_then_set_top_level_values_then_remove_keys"}
             if len(_bytes(payload)) < len(_bytes(baseline)):
                 return payload
             reason = "baseline_smaller_than_patch"
@@ -235,7 +254,7 @@ def handle_event(entry, event, *, host, state_dir, policy=None, max_bytes=16384,
         tool_name = _text(event.get("tool_name"), "tool_name")
         if not re.match(TOOL_PATTERN, tool_name):
             return {"ok": True, "ignored": "unrelated_tool", "host_output": {}, "duplicate": False}
-        if tool_name.endswith("__research_hook"):
+        if tool_name.endswith(("__research_hook", "__etalon_research_hook")):
             return {"ok": True, "ignored": "own_hook_handler", "host_output": {}, "duplicate": False}
     else:
         tool_name = None
@@ -262,16 +281,34 @@ def handle_event(entry, event, *, host, state_dir, policy=None, max_bytes=16384,
                     "host_output": saved["host_output"]}
         context = None
         failure = None
+        read_cache = None
+        read_stats = None
         if event_name in {"SessionStart", "PreToolUse", "PreCompact", "Stop"}:
             try:
-                context = _build_context(entry, policy=policy, max_bytes=max_bytes,
-                                         conditions=conditions)
+                from .research.read_scope import verified_read, MAX_CACHE_BYTES
+                cached = None
+                cache_path = _receipt_io_path(root / "source-read-cache")
+                cache_ref = previous.get("source_read_cache") if previous else None
+                if cache_ref and cache_path.exists():
+                    try:
+                        candidate = _read_json(cache_path, 2 * MAX_CACHE_BYTES)
+                        if _digest(candidate) == cache_ref.get("sha256"):
+                            cached = candidate
+                    except (OSError, ValueError):
+                        pass  # Disposable acceleration; always rebuild from originals.
+                with verified_read(cached) as read_scope:
+                    context = _build_context(entry, policy=policy, max_bytes=max_bytes,
+                                             conditions=conditions)
+                read_cache, read_stats = read_scope.snapshot(), read_scope.stats()
                 if not isinstance(context, dict):
                     raise ValueError("context builder returned a non-object")
                 if len(_bytes(context)) > max_bytes:
                     raise ValueError("context builder exceeded requested byte budget")
             except Exception as exc:
                 failure = {"type": type(exc).__name__, "message": str(exc)[:1024]}
+                # Final original/authority checks can fail after assembly.
+                # Never expose the uncommitted context on that error path.
+                context, read_cache, read_stats = None, None, None
         if not strong_identity:
             event_key["context_sha256"] = _digest(context) if context is not None else None
             event_key["failure"] = failure
@@ -307,6 +344,13 @@ def handle_event(entry, event, *, host, state_dir, policy=None, max_bytes=16384,
             next_state = {"schema": VERSION, "config": config, "context": context,
                           "usable": _source_complete(context), "receipt_path": str(path),
                           "consumption_verified": False}
+            if read_cache is not None and next_state["usable"]:
+                try:
+                    _save_cursor(_receipt_io_path(root / "source-read-cache"), read_cache)
+                    next_state["source_read_cache"] = {"sha256": _digest(read_cache)}
+                except OSError:
+                    # Acceleration is optional; durable delivery is not.
+                    read_stats["cache_persisted"] = False
         tool_observation = None
         if event_name in TOOL_EVENTS:
             response = event.get("tool_response")
@@ -348,9 +392,39 @@ def handle_event(entry, event, *, host, state_dir, policy=None, max_bytes=16384,
                    "checkpoint_ack": checkpoint_ack, "host_output": output,
                    "execution_permission": "not_granted", "automatic_retry": False,
                    "rsi_triggered": False, "scientific_writes": 0}
+        receipt["read_stats"] = read_stats
         _commit_delivery(root, path, receipt, next_state)
         return {"ok": failure is None, "duplicate": False, "receipt_path": str(path),
                 "receipt": receipt, "host_output": output}
+
+
+def handle_bound_event(event):
+    """MCP transport for the same handler, using an explicit server-side binding.
+
+    The client cannot choose an arbitrary write directory through tool arguments.
+    Binding changes take effect on the next event and existing event identities
+    still reject conflicting content. This is not authentication of a host event.
+    """
+    name = os.environ.get("ETALON_RESEARCH_HOOK_BINDING")
+    if not name or not Path(name).is_absolute():
+        raise ValueError("install an absolute ETALON_RESEARCH_HOOK_BINDING on this server")
+    binding = _read_json(name, 32768)
+    if (set(binding) != {"schema", "host", "entry", "state_dir", "max_bytes"}
+            or binding["schema"] != "etalon-research-hook-binding/1"):
+        raise ValueError("invalid installed hook binding")
+    for field in ("entry", "state_dir"):
+        if not isinstance(binding[field], str) or not Path(binding[field]).is_absolute():
+            raise ValueError(f"installed hook {field} must be an absolute server path")
+    observed = Path(name).read_bytes()
+    if json.loads(observed.decode("utf-8-sig")) != binding:
+        raise ValueError("hook binding changed while being read")
+    report = handle_event(binding["entry"], event, host=binding["host"],
+                          state_dir=binding["state_dir"], max_bytes=binding["max_bytes"])
+    if Path(name).read_bytes() != observed:
+        # The handler's prepared receipt remains historical; do not return it to
+        # this transport as if it belonged to a stable binding.
+        raise ValueError("hook binding changed before delivery")
+    return report
 
 
 def main(argv=None):

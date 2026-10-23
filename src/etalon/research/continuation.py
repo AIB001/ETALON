@@ -26,7 +26,10 @@ STEP = "etalon-research-step/1"
 CHECKPOINT = "etalon-research-checkpoint/1"
 MAX_CONTENT_BYTES = 16384
 MAX_REFS = 64
-MAX_RESUME_RECORDS = 128
+# Verify a bounded provenance closure, independently of the displayed graph.
+# A 24-case paired panel links receipts, uses and historical checkpoints far
+# beyond 128 records. Overflow still requires an explicitly narrower source.
+MAX_RESUME_RECORDS = 1024
 
 
 def _fields(value, required, optional=()):
@@ -358,12 +361,15 @@ def _status(ws, guards, *, source_id):
             mapped = any(entry["source_id"] == source_id and entry["original"] == location
                          for entry in ws.manifest.get("location_map", []))
             if mapped and guard:
-                path = EvidenceResolver(ws, source_id).resolve(
+                path = EvidenceResolver._from_validated(ws, source_id).resolve(
                     location, sha256=guard["sha256"], bytes=guard["bytes"])
                 row["resolved_location"] = str(path)
             else:
                 path = _local(ws.base, location)
             identity = file_identity(path)
+            from .read_scope import CURRENT
+            if CURRENT.get() is not None:
+                CURRENT.get().observe_file(path, identity)
             row["observed_identity"] = identity
             if location in locations and guard and identity == {k: guard[k] for k in ("sha256", "bytes")}:
                 row.update(state=guard["state"], status="unchanged", basis="host_interpretation_bound_to_current_bytes")
@@ -399,10 +405,13 @@ def _check_frozen_view(ws, records, coverage):
         wal = Path(str(path) + "-wal")
         if source["kind"] == "journal" and wal.exists() and wal.stat().st_size:
             raise EvidenceError("frozen journal acquired WAL content")
+        resolver = None
         for row in records.get(cov["source_id"], {}).values():
             if "projection" in row:
                 body = row["record"]
-                EvidenceResolver(ws, cov["source_id"]).resolve(body["path"], sha256=body["sha256"], bytes=body["bytes"])
+                if resolver is None:
+                    resolver = EvidenceResolver._from_validated(ws, cov["source_id"])
+                resolver.resolve(body["path"], sha256=body["sha256"], bytes=body["bytes"])
 
 
 def resume_research(workspace, checkpoint_ref, *, read_mode="fresh"):
@@ -487,7 +496,7 @@ def resume_research(workspace, checkpoint_ref, *, read_mode="fresh"):
             try:
                 if "sha256" in ref and (ref["sha256"], ref["bytes"]) != (body["sha256"], body["bytes"]):
                     raise EvidenceError("artifact identity mismatch")
-                EvidenceResolver(ws, ref["source_id"]).resolve(body["path"], sha256=body["sha256"], bytes=body["bytes"])
+                EvidenceResolver._from_validated(ws, ref["source_id"]).resolve(body["path"], sha256=body["sha256"], bytes=body["bytes"])
             except (OSError, ValueError):
                 reason = "artifact_unavailable_or_changed"
         if reason:

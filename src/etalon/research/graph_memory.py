@@ -7,6 +7,7 @@ narrow it before content projection; it cannot grant access to unpublished data.
 from __future__ import annotations
 
 import base64
+from collections import deque
 import json
 from pathlib import Path
 import sqlite3
@@ -14,6 +15,7 @@ import sqlite3
 from etalon.active.schema import canonical, digest
 from .continuation import CHECKPOINT, STEP, _exact_refs, resume_research
 from .evidence import _collect, _read_evidence
+from .read_scope import bounded_read
 from .evidence_refs import (EvidenceError, EvidenceWorkspace, _local, file_identity,
                             load_workspace, make_ref, validate_ref)
 
@@ -224,6 +226,7 @@ def _project_node(ref, row, *, task_id, home_overrides):
     return node
 
 
+@bounded_read
 def build_research_graph(workspace, *, checkpoint_ref, policy=None, purpose="research",
                          home_overrides=None, max_nodes=64, max_bytes=65536, as_of=None):
     """Project reachable records without changing a journal or executing work.
@@ -257,13 +260,21 @@ def build_research_graph(workspace, *, checkpoint_ref, policy=None, purpose="res
     from .method_links import method_links
     attribution = {key: method_links(row.get("projected_content", row["record"]), key[0], universe)
                    for key, row in universe.items()}
-    selected, queue, issues = {}, [], []
+    selected, queue, issues = {}, deque(), []
+    queued = set()
+    reverse_counters = {}
+    for (sid, rid), candidate in universe.items():
+        payload = candidate.get("projected_content", candidate["record"])
+        for target in payload.get("counter_refs", []):
+            if isinstance(target, dict):
+                reverse_counters.setdefault(node_identity(target), []).append((sid, rid))
     counter_ids, counter_context_ids = set(), set()
     def enqueue(ref):
         validate_ref(ref)
         key = node_identity(ref)
-        if key not in selected and all(node_identity(r) != key for r in queue):
+        if key not in selected and key not in queued:
             queue.append(ref)
+            queued.add(key)
     # Explicit counterevidence is prioritized before the node bound.
     for ref in checkpoint["counter_refs"]:
         counter_ids.add(node_identity(ref)); counter_context_ids.add(node_identity(ref)); enqueue(ref)
@@ -295,8 +306,9 @@ def build_research_graph(workspace, *, checkpoint_ref, policy=None, purpose="res
         if value not in edges:
             edges.append(value)
     while queue and len(selected) < max_nodes:
-        ref = queue.pop(0)
+        ref = queue.popleft()
         nid = node_identity(ref)
+        queued.discard(nid)
         row = universe.get((ref["source_id"], ref["record_id"]))
         if row and digest(row["record"]) != ref["record_digest"]:
             raise EvidenceError("referenced record identity changed")
@@ -348,12 +360,10 @@ def build_research_graph(workspace, *, checkpoint_ref, policy=None, purpose="res
                 edge(nid, node_identity(target), "depends_on", ref)
         # Include cross-home/cross-task explicit counterclaims of this record.
         # This bounded universe is the authorized workspace, not a global search.
-        for (sid, rid), candidate in universe.items():
-            payload = candidate.get("projected_content", candidate["record"])
-            if any(node_identity(r) == nid for r in payload.get("counter_refs", []) if isinstance(r, dict)):
-                other = make_ref(sid, rid, candidate["record"])
-                enqueue(other)
-                edge(nid, node_identity(other), "refutes", other)
+        for sid, rid in reverse_counters.get(nid, []):
+            other = make_ref(sid, rid, universe[(sid, rid)]["record"])
+            enqueue(other)
+            edge(nid, node_identity(other), "refutes", other)
     # Workflow template edges are attached only to instances with the same exact
     # workflow ref. Do not infer chronological order from artifact hashes.
     workflow_nodes = {}

@@ -12,6 +12,8 @@ from etalon import research_hooks as hooks
 def context(monkeypatch):
     ref = {"source_id": "fixture", "record_id": "result", "record_digest": "a" * 64}
     value = {"schema": "fixture/1", "context_id": "c1", "checkpoint_ref": ref,
+        "checkpoint_progress": {"step_count": 17, "tail_step_refs": [ref]},
+        "counterevidence": {"coverage_complete": False, "relationship_count": 2},
         "items": [{"ref": ref, "summary": "bounded evidence " * 180}],
         "reference_index": [ref], "source_watermarks": [{"source_id": "fixture", "status": "complete", "sequence": 1}],
         "continuation": {"authority_state": "paused", "pending": [{"request_id": "running-1"}]},
@@ -42,6 +44,8 @@ def test_unchanged_is_small_but_retains_controls_and_exact_recovery(tmp_path, co
     assert data["current_controls"]["continuation"]["pending"][0]["request_id"] == "running-1"
     assert data["current_controls"]["branches"][0]["state"] == "paused"
     assert data["current_controls"]["publications"]["incomplete_count"] == 1
+    assert data["current_controls"]["checkpoint_progress"] == context["checkpoint_progress"]
+    assert data["current_controls"]["counterevidence"] == context["counterevidence"]
     assert data["delivery"]["recovery"]["arguments"]["entry"] == str(tmp_path / "entry.json")
     assert data["delivery"]["recovery"]["arguments"]["view"] == "summary"
     assert data["delivery"]["base_receipt"] == first["receipt_path"]
@@ -59,7 +63,8 @@ def test_delta_reconstructs_change_and_deleted_keys_refs(tmp_path, context):
     data = payload(call(tmp_path, "changed"))
     assert data["delivery"]["mode"] == "delta"
     delta = data["context_delta"]
-    reconstructed = {**first, **delta["set"]}
+    reconstructed = {**first, **{key: data["current_controls"][key]
+        for key in delta["set_from_current_controls"]}, **delta["set"]}
     for key in delta["remove"]:
         reconstructed.pop(key)
     assert reconstructed == context
@@ -190,4 +195,27 @@ def test_changed_source_watermark_produces_delta_without_semantic_result_change(
     context["source_watermarks"][0]["sequence"] += 1
     delta = payload(call(tmp_path, "changed"))
     assert delta["delivery"]["mode"] == "delta"
-    assert delta["context_delta"]["set"]["source_watermarks"][0]["sequence"] == 2
+    assert "source_watermarks" in delta["context_delta"]["set_from_current_controls"]
+    assert "source_watermarks" not in delta["context_delta"]["set"]
+    assert delta["current_controls"]["source_watermarks"][0]["sequence"] == 2
+
+
+def test_large_changed_controls_are_delivered_once_and_reconstruct_exactly(tmp_path, context):
+    context["task_workset"] = {"digest": "same-scope", "detail": "conditions " * 180}
+    context["source_watermarks"][0]["diagnostic"] = "source identity " * 180
+    before = payload(call(tmp_path, "start", "SessionStart"))["context"]
+    context["source_watermarks"][0]["sequence"] = 2
+    context["checkpoint_ref"] = {**context["checkpoint_ref"], "record_id": "new-result"}
+    context["context_id"] = "c2"
+    data = payload(call(tmp_path, "changed"))
+    assert data["delivery"]["mode"] == "delta"
+    patch = data["context_delta"]
+    assert not set(patch["set"]) & set(data["current_controls"])
+    assert set(patch["set_from_current_controls"]) == {"checkpoint_ref", "source_watermarks"}
+    restored = {**before, **{key: data["current_controls"][key]
+        for key in patch["set_from_current_controls"]}, **patch["set"]}
+    for key in patch["remove"]:
+        restored.pop(key)
+    assert restored == context
+    assert hooks._digest(restored) == data["delivery"]["context_sha256"]
+    assert data["current_controls"]["task_workset"] == context["task_workset"]

@@ -92,6 +92,20 @@ def test_ordinary_artifacts_project_query_read_and_resume_idempotently(case):
     assert file_identity(journal.store.path) == before and not journal.store.actions()
 
 
+def test_large_explicit_closure_is_verified_without_a_large_display(case, monkeypatch):
+    from etalon.research import continuation
+    previous=case[1]
+    for i in range(140):
+        previous=save(case,step(previous,reason=f'Fixture chained progress {i}'))
+    cp=save(case,checkpoint(case,previous));ws=publish(case)
+    result=resume_research(ws,cp)
+    assert len(result['checked_refs'])>128 and not result['review_required']
+    monkeypatch.setattr(continuation,'MAX_RESUME_RECORDS',8)
+    limited=resume_research(ws,cp)
+    assert limited['review_required']
+    assert any(v['reason']=='reference_walk_truncated' for v in limited['issues'])
+
+
 def test_db_failure_leaves_complete_orphan_and_retry_reuses_it(case, monkeypatch):
     journal, ref, _, root = case
     original = journal.record

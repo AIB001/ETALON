@@ -29,7 +29,9 @@ class Artifact(Record):
     bytes: int
     source_kind: str
     role: str
-    bindings: dict[str, str]
+    # JSON bindings may include exact evidence_refs for transitive visibility.
+    # This preserves the existing serialized Artifact format and digest rules.
+    bindings: dict[str, Any]
     parents: tuple[str, ...] = ()
 
     def __post_init__(self):

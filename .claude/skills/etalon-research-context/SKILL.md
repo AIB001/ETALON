@@ -11,6 +11,28 @@ The entry locates published evidence; reading it does not authorize execution.
 Start with `view="summary"`, expand an exact node with `view="node"`, then read
 the original evidence when needed. `view="full"` retains the broader context.
 
+On first continuation or after compaction, check `resume_frontier` for the
+latest checkpoint steps, exact output references and unresolved controls before
+choosing what to do. Distinguish newly saved progress from material that already
+existed and is only now being read. A provenance-only update need not change the
+scientific conclusion. The context reader does not establish that distinction
+for you: follow the latest step and relevant output originals when claiming to
+have verified their contents, and keep their declared scope. Do not expand every
+historical step merely to satisfy a fixed reading sequence.
+
+When a host replaces a long tool or hook response with a persisted-output pointer,
+the preview is incomplete. Follow that host-owned output or re-read the research
+entry through the existing context/evidence interface. Do not apply a delta to a
+baseline known only from a preview, and do not infer that omitted counters were read.
+
+For paged originals, attach each reported number to a method or branch label
+actually present in the source, including units and comparison scope. A trailing
+page may belong to an ablation or another candidate. If its label is outside the
+read fragment, follow the neighboring bytes or leave that attribution unknown.
+Use the returned next offset; a whole-file hash verifies identity, not that all
+pages were read. Prioritize these checks over a fixed tool-count target and state
+remaining read gaps when the available budget is insufficient.
+
 Follow the current node, its inputs and competing branches across Search, Judge,
 Quick and Deep. Expand exact evidence references when a bounded summary omits a
 condition. Check counterevidence, superseded advice and visibility/coverage gaps;

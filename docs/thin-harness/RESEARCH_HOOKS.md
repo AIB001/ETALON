@@ -43,6 +43,11 @@ delivery ID to retry; repeating its ID returns the same failure.
 
 ## Opt-in project exports
 
+For relocatable installation and the native MCP transport, see
+[portable project adapters](PORTABLE_HOST_INSTALL.md). The command export below
+retains its existing behavior; native MCP hooks share the same handler, context
+reader and durable receipt protocol.
+
 ```text
 python -m etalon.host export --host codex --target NEW_PROJECT --research-entry ENTRY.json
 python -m etalon.host verify --target NEW_PROJECT
@@ -133,7 +138,9 @@ and handler version, the output has one of three `delivery.mode` values:
   failure, configuration drift, or when a patch would be larger than the baseline.
   `replaces_previous_context: true` means replace the earlier snapshot rather
   than merge it, including after visibility-policy changes.
-- `delta`: `context_delta.set` replaces complete top-level values and
+- `delta` (handler `/3`): first copy each key named in
+  `context_delta.set_from_current_controls` from `current_controls` into the base;
+  then `context_delta.set` replaces other complete top-level values; finally
   `context_delta.remove` deletes keys. Lists are replacements, never append-only
   merges. `reference_removals` explicitly identifies references absent from the
   current summary; absence means no longer selected, not scientific retraction.
@@ -146,6 +153,13 @@ context hash and receipt and always include the entry and parameters for a fresh
 `etalon_research_context` summary read. A host with a missing or uncertain base
 must re-read that entry; it must not infer that omitted evidence was consumed.
 Every delivery states `consumption_verified: false`.
+
+Handler `/3` avoids transmitting changed controls twice. New events using an older
+handler cursor rebuild a baseline after the version change. Reusing the exact
+strong event ID with a different handler configuration remains a conflict, not an
+automatic migration or retry. Summary tail bodies may be omitted within the byte
+budget, counted by `selection.tail_details_omitted`; exact tail references and
+counter/control metadata remain available for follow-up reads.
 
 Changed source watermarks cause an update even if scientific text is identical.
 An unavailable source or publication manifest cannot yield an unchanged notice.

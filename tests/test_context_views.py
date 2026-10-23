@@ -57,6 +57,11 @@ def test_updated_checkpoint_summary_exposes_newly_archived_progress(graph_case):
     result = build_research_context(c["entry"], view="summary")
     assert result["checkpoint_progress"]["step_count"] == 2
     assert result["checkpoint_progress"]["tail_step_refs"] == [step]
+    frontier = result["resume_frontier"]
+    assert result["checkpoint_ref"] == checkpoint and result["checkpoint_progress"]["step_count"] == 2
+    assert frontier["latest_steps"][0]["node_id"] == node_identity(step)
+    assert "NEW_ARCHIVED_PROGRESS" in frontier["latest_steps"][0]["summary"]["text"]
+    assert frontier["read_is_new_progress"] is False
     assert result["items"][0]["ref"] == step
     assert "NEW_ARCHIVED_PROGRESS" in result["items"][0]["summary"]["text"]
     assert result["items"][0]["selection_reason"] == "checkpoint_tail_step"

@@ -7,6 +7,7 @@ The intent and stage receipts survive a process crash; replay only archives data
 from __future__ import annotations
 
 import json
+import hashlib
 import os
 from contextlib import closing
 from pathlib import Path
@@ -18,7 +19,8 @@ import tempfile
 from etalon.active import CampaignSpec, CampaignStore, Endpoint
 from etalon.active.schema import canonical, digest
 from etalon.host import _consumer_lock
-from .continuation import CHECKPOINT, STEP, MAX_CONTENT_BYTES, _content_result, _exact_refs, read_content, record_content
+from .continuation import (CHECKPOINT, STEP, MAX_CONTENT_BYTES, _content_result, _exact_refs,
+                           read_content, record_content, validate_content)
 from .evidence_refs import (
     EvidenceError, _local, _text, file_identity, load_workspace, make_ref,
 )
@@ -28,6 +30,8 @@ from .schema import Artifact
 INTENT = "etalon-research-publication/1"
 STAGES = ("results_saved", "results_recorded", "steps_recorded", "checkpoint_recorded",
           "snapshot_saved", "workspace_saved", "entry_replaced", "complete")
+DISPOSITION = "etalon-research-publication-disposition/1"
+TERMINAL_DISPOSITIONS = {"withdrawn", "replaced"}
 
 
 def _read(path):
@@ -116,7 +120,9 @@ def _index_path(entry):
 
 def _resolve_aliases(value, refs):
     if isinstance(value, dict):
-        if set(value) == {"publication_ref"}:
+        if "publication_ref" in value:
+            if set(value) != {"publication_ref"}:
+                raise EvidenceError("publication alias must contain only publication_ref")
             try:
                 return refs[value["publication_ref"]]
             except (KeyError, TypeError):
@@ -146,7 +152,8 @@ def _frozen_sources(workspace):
 
 
 def prepare_publication(entry, directory=None, operation_id=None, expected_entry_identity=None, *,
-                        parent_entry=None, results=(), steps=(), checkpoint_additions=None):
+                        parent_entry=None, results=(), steps=(), checkpoint_additions=None,
+                        corrects_intent=None, correction_reason=None):
     """Persist explicit publication intent; do not write results or change entry.
 
     A missing destination entry requires ``parent_entry`` and expected identity
@@ -167,6 +174,14 @@ def prepare_publication(entry, directory=None, operation_id=None, expected_entry
     request = {"entry": str(entry), "parent_entry": str(parent), "operation_id": operation_id,
                "expected_entry_identity": expected_entry_identity, "results": list(results),
                "steps": list(steps), "checkpoint_additions": checkpoint_additions or {}}
+    # Keep absent optional fields absent: old intent requests remain byte-for-byte
+    # compatible with exact replay of the original API.
+    if corrects_intent is not None or correction_reason is not None:
+        if (corrects_intent is None or not isinstance(correction_reason, str)
+                or not correction_reason.strip() or len(correction_reason) > 4096):
+            raise EvidenceError("a correction requires an old intent and an explicit reason")
+        request["corrects_intent"] = str(Path(corrects_intent).resolve(strict=True))
+        request["correction_reason"] = correction_reason
     request = json.loads(canonical(request))
     entry.parent.mkdir(parents=True, exist_ok=True)
     with _consumer_lock(entry.parent / (entry.name + ".publication")):
@@ -213,6 +228,8 @@ def prepare_publication(entry, directory=None, operation_id=None, expected_entry
             raise EvidenceError("publication requires 1..16 explicit steps and at most 32 results")
         names = set()
         for item in [*results, *steps]:
+            if not isinstance(item, dict):
+                raise EvidenceError("publication results and steps must be explicit objects")
             name = item.get("name")
             if not isinstance(name, str) or not re.fullmatch(r"[A-Za-z0-9_-]{1,80}", name) or name in names:
                 raise EvidenceError("publication names must be unique bounded identifiers")
@@ -225,7 +242,8 @@ def prepare_publication(entry, directory=None, operation_id=None, expected_entry
             Artifact(item["path"], **item["identity"], source_kind=item["source_kind"],
                      role=item["role"], bindings=item["bindings"])
         for item in steps:
-            if set(item) != {"name", "content"} or item["content"].get("schema") != STEP:
+            if (set(item) != {"name", "content"} or not isinstance(item["content"], dict)
+                    or item["content"].get("schema") != STEP):
                 raise EvidenceError("steps must be explicit research-step content")
             if item["content"].get("task_id") != checkpoint["task_id"]:
                 raise EvidenceError("publication step must remain in the parent task")
@@ -236,11 +254,32 @@ def prepare_publication(entry, directory=None, operation_id=None, expected_entry
         source_id = "publication-" + digest({"root": str(root), "operation_id": operation_id})[:20]
         if source_id in {source["source_id"] for source in ws.manifest["sources"]}:
             raise EvidenceError("publication source identity conflicts with parent")
+        correction = None
+        if corrects_intent is not None:
+            old_path = Path(request["corrects_intent"])
+            old = _read(old_path)
+            old_status = inspect_publication(old_path)
+            if (old["request"]["entry"] != str(entry)
+                    or old["parent_checkpoint"]["task_id"] != checkpoint["task_id"]):
+                raise EvidenceError("correction must remain in the same destination entry and task")
+            if old_status["status"] in {"published", "superseded", "withdrawn", "replaced"}:
+                raise EvidenceError("correction requires an unfinished publication")
+            correction = {"intent_path": str(old_path), "identity": file_identity(old_path),
+                          "operation_id": old["request"]["operation_id"]}
+        # All shape/enumeration, alias-order, existing/local typed links and the
+        # final aggregated checkpoint are checked without a temporary database or
+        # copied result. Runtime-dependent availability is still rechecked on resume.
+        try:
+            _preflight(request, root, source_id, checkpoint, checkpoint_ref, ws)
+        except (KeyError, TypeError, AttributeError, IndexError) as exc:
+            raise EvidenceError("invalid publication content or reference: " + type(exc).__name__) from exc
         intent = {"schema": INTENT, "request": request, "source_id": source_id,
                   "parent_entry_identity": parent_identity, "parent_workspace": str(workspace_path),
                   "parent_workspace_identity": file_identity(workspace_path),
                   "parent_checkpoint_ref": checkpoint_ref, "parent_checkpoint": checkpoint,
                   "protected_sources": protected}
+        if correction is not None:
+            intent["corrects"] = correction
         if len(canonical(intent).encode()) > 4 * 1024 * 1024:
             raise EvidenceError("publication intent exceeds 4 MiB")
         # Publish discoverability first: death before the intent becomes durable
@@ -276,12 +315,13 @@ def _verify_parent(intent, *, check_entry=True):
     return load_workspace(intent["parent_workspace"])
 
 
-def _verify_external(content, source_id, ws):
+def _verify_external(content, source_id, ws, *, collection=None):
     from .evidence import _collect, _read_evidence
     refs = {canonical(ref): ref for ref in _exact_refs(content) if ref["source_id"] != source_id}
     if not refs:
         return
-    collection = _collect(ws, list(dict.fromkeys(ref["source_id"] for ref in refs.values())))
+    if collection is None:
+        collection = _collect(ws, list(dict.fromkeys(ref["source_id"] for ref in refs.values())))
     for ref in refs.values():
         result = _read_evidence(ws, ref, view="record", collection=collection)
         if result.get("verification", {}).get("record") != "verified":
@@ -304,6 +344,137 @@ def _verify_external(content, source_id, ws):
                 raise EvidenceError("external publication reference has the wrong content schema")
 
 
+class _PreflightJournal:
+    """Read-only in-memory records for the existing composition link validator."""
+
+    def __init__(self):
+        self.records, self.contents, self.paths = {}, {}, {}
+
+    def get(self, identifier):
+        try:
+            return self.records[identifier]
+        except KeyError:
+            raise EvidenceError("publication reference does not name an earlier record") from None
+
+    def artifact_path(self, artifact):
+        if artifact.id in self.contents:
+            text = canonical(self.contents[artifact.id])
+
+            class Content:
+                def read_text(self, *args, **kwargs):
+                    return text
+
+            return Content()
+        path = self.paths.get(artifact.id)
+        if path is None or file_identity(path) != {"sha256": artifact.sha256, "bytes": artifact.bytes}:
+            raise EvidenceError("preflight result changed or cannot be read")
+        return path
+
+
+def _preflight(request, root, source_id, parent_checkpoint, parent_ref, ws):
+    """Resolve the exact future records, validate them, and persist nothing.
+
+    No synthetic journal, action, observation or handle is created. Artifact
+    identity construction matches record_content; that function remains the
+    authoritative writer and revalidates dynamic conditions during recovery.
+    """
+    from .evidence import _collect, _read_evidence, _visible
+    from .evidence_refs import CONTENT_SCHEMAS
+    from .continuation import _check_frozen_view
+    collection = _collect(ws)
+    journal, refs, step_refs = _PreflightJournal(), {}, []
+
+    def body(ref):
+        if ref["source_id"] == source_id:
+            return journal.get(ref["record_id"])
+        return _read_evidence(ws, ref, view="record", collection=collection)["record"]
+
+    def validate_links(content):
+        _verify_external(content, source_id, ws, collection=collection)
+        local = {}
+        for ref in _exact_refs(content):
+            if ref["source_id"] != source_id:
+                continue
+            value = journal.get(ref["record_id"])
+            if digest(value) != ref["record_digest"] or not _visible(value):
+                raise EvidenceError("local publication reference is changed or not visible")
+            if "member" in ref:
+                raise EvidenceError("local member refs require an explicitly published source envelope")
+            if "sha256" in ref and (ref["sha256"], ref["bytes"]) != (value["sha256"], value["bytes"]):
+                raise EvidenceError("local publication artifact identity mismatch")
+            local[ref["record_id"]] = value
+        typed = [(ref, content["schema"]) for ref in content.get("supersedes", [])]
+        if content["schema"] == CHECKPOINT:
+            typed.extend((ref, STEP) for ref in content["step_refs"])
+            typed.extend((ref, "etalon-research-claim/1") for ref in content["claim_refs"])
+        elif content.get("operation") == "judgment":
+            typed.extend((ref, "etalon-research-claim/1") for ref in content["detail"]["claim_refs"])
+        for ref, schema in typed:
+            if ref["source_id"] == source_id:
+                value = journal.get(ref["record_id"])
+                if value.get("bindings", {}).get("schema") != schema:
+                    raise EvidenceError("local publication reference has the wrong content schema")
+                payload = validate_content(json.loads(journal.artifact_path(Artifact(**value)).read_text("utf-8-sig")))
+                if payload["schema"] != schema:
+                    raise EvidenceError("local publication artifact differs from its declared schema")
+        if (content.get("operation") in {"node", "evaluation_plan", "evaluation"}
+                or content["schema"] == "etalon-research-workflow/1"):
+            from .composition import validate_local_links
+            validate_local_links(journal, content, source_id, local, external_workspace=ws)
+        if content.get("operation") == "result":
+            detail = content["detail"]
+            experiments = {(ref["source_id"], ref["record_id"]) for ref in detail["experiment_refs"]}
+            if any(not ref["record_id"].startswith("experiment-") for ref in detail["experiment_refs"]):
+                raise EvidenceError("result requires existing Experiment references")
+            for ref in detail["observation_refs"]:
+                if (not ref["record_id"].startswith("observation-") or
+                        (ref["source_id"], body(ref).get("experiment_id")) not in experiments):
+                    raise EvidenceError("result Observation must belong to the referenced Experiment")
+
+    def remember(content):
+        content = validate_content(content)
+        validate_links(content)
+        data = (canonical(content) + "\n").encode()
+        external = any(ref["source_id"] != source_id for ref in _exact_refs(content))
+        artifact = Artifact(str(root / "content" / (digest(content) + ".json")),
+            sha256=hashlib.sha256(data).hexdigest(), bytes=len(data), source_kind="existing_real_artifact",
+            role="diagnostic", bindings={"schema": content["schema"], "source_id": source_id,
+                "task_id": content.get("task_id", ""),
+                "reference_verification": "local_checked_external_unresolved" if external else "local_checked"})
+        journal.records[artifact.id] = artifact.as_dict()
+        journal.contents[artifact.id] = content
+        return make_ref(source_id, artifact.id, artifact.as_dict())
+
+    result_contents = []
+    for item in request["results"]:
+        artifact = Artifact(str(root / "results" / item["identity"]["sha256"]), **item["identity"],
+            source_kind=item["source_kind"], role=item["role"], bindings=item["bindings"])
+        journal.records[artifact.id] = artifact.as_dict()
+        journal.paths[artifact.id] = Path(item["path"])
+        refs[item["name"]] = make_ref(source_id, artifact.id, artifact.as_dict())
+        declared = item["bindings"].get("schema")
+        if declared in CONTENT_SCHEMAS:
+            payload = validate_content(json.loads(journal.artifact_path(artifact).read_text("utf-8-sig")))
+            if payload["schema"] != declared:
+                raise EvidenceError("result content differs from its declared schema")
+            result_contents.append(payload)
+    for content in result_contents:
+        validate_links(content)
+    for item in request["steps"]:
+        ref = remember(_resolve_aliases(item["content"], refs))
+        refs[item["name"]] = ref
+        step_refs.append(ref)
+    checkpoint = json.loads(canonical(parent_checkpoint))
+    checkpoint["step_refs"].extend(ref for ref in step_refs if ref not in checkpoint["step_refs"])
+    for key, additions in request["checkpoint_additions"].items():
+        for ref in _resolve_aliases(additions, refs):
+            if ref not in checkpoint[key]:
+                checkpoint[key].append(ref)
+    checkpoint["supersedes"] = [parent_ref]
+    remember(checkpoint)
+    _check_frozen_view(ws, *collection[:2])
+
+
 def _verify_published(root, intent, *, check_parent_entry=False):
     """A saved pointer alone is insufficient for an idempotent-success receipt."""
     _verify_parent(intent, check_entry=check_parent_entry)
@@ -319,12 +490,25 @@ def _verify_published(root, intent, *, check_parent_entry=False):
     for item in intent["request"]["results"]:
         if file_identity(root / "results" / item["identity"]["sha256"]) != item["identity"]:
             raise EvidenceError("published result bytes changed")
-    checkpoint = read_content(entry["workspace"], entry["checkpoint_ref"])
     ws = load_workspace(entry["workspace"])
-    _verify_external(checkpoint, None, ws)
+    from .evidence import _collect, _read_evidence
+    from .continuation import _check_frozen_view
+    collection = None
+    if all(s["identity"]["kind"] == "snapshot_sha256" for s in ws.manifest["sources"]):
+        candidate = _collect(ws, [entry["checkpoint_ref"]["source_id"]])
+        if not candidate[2] and all(c["status"] == "complete" for c in candidate[1]):
+            collection = candidate
+    def content(ref):
+        if collection is None:
+            return read_content(ws, ref)
+        return _content_result(_read_evidence(ws, ref, view="artifact",
+            limit=MAX_CONTENT_BYTES + 1, collection=collection))
+    checkpoint = content(entry["checkpoint_ref"])
+    _verify_external(checkpoint, None, ws, collection=collection)
     for ref in checkpoint["step_refs"]:
-        content = read_content(ws, ref)
-        _verify_external(content, None, ws)
+        _verify_external(content(ref), None, ws, collection=collection)
+    if collection is not None:
+        _check_frozen_view(ws, *collection[:2])
 
 
 def _workspace(intent, root, snapshot):
@@ -362,6 +546,8 @@ def resume_publication(intent_path):
     entry = Path(request["entry"])
     with _consumer_lock(entry.parent / (entry.name + ".publication")):
         state = inspect_publication(intent_path)
+        if state["status"] in TERMINAL_DISPOSITIONS:
+            raise EvidenceError("terminal publication cannot be resumed; create an explicit new operation")
         if state["status"] in {"published", "superseded"}:
             _verify_published(root, intent)
             # The pointer may have been replaced immediately before process death.
@@ -463,14 +649,85 @@ def inspect_publication(intent_path):
         status = "conflict"
     else:
         status = "in_progress" if receipts else "prepared"
+    disposition_path = root / "disposition.json"
+    disposition = None
+    if disposition_path.exists():
+        disposition = _read(disposition_path)
+        if (disposition.get("schema") != DISPOSITION
+                or disposition.get("request", {}).get("disposition") not in TERMINAL_DISPOSITIONS
+                or disposition.get("request", {}).get("intent_identity") != file_identity(path)
+                or disposition.get("operation_id") != request["operation_id"]
+                or disposition.get("entry") != request["entry"]):
+            raise EvidenceError("invalid or mismatched terminal publication disposition")
+        if status in {"published", "superseded"}:
+            raise EvidenceError("terminal disposition conflicts with a successful publication")
+        status = disposition["request"]["disposition"]
     checkpoint_ref = next((r["checkpoint_ref"] for r in receipts if r["phase"] == "checkpoint_recorded"), None)
     return {"schema": "etalon-research-publication-status/1", "operation_id": request["operation_id"],
         "intent_path": str(path), "entry": request["entry"], "source_id": intent["source_id"],
         "status": status, "phase": phase, "needs_recovery": status in {"prepared", "in_progress", "conflict"},
         "checkpoint_ref": checkpoint_ref, "entry_conflict": status == "conflict",
+        "intent_identity": file_identity(path), "terminal": disposition is not None,
+        "disposition": disposition,
         "published_entry_identity": published_identity, "current_entry_identity": current,
         "stages": [r["phase"] for r in receipts], "automatic_retry": False,
         "execution_permission": "not_granted", "verification": "metadata_only_use_resume_for_full_verification"}
+
+
+def close_publication(intent_path, *, disposition, reason, expected_intent_identity, replacement_intent=None):
+    """Explicitly finish an unsuccessful publication, retaining all historical bytes.
+
+    ``withdrawn`` needs a reason. ``replaced`` additionally requires a prepared
+    correction operation that names this exact intent. Neither action publishes
+    the replacement or resumes science. A successful publication cannot be closed
+    as a failure, including the pointer-replaced/before-receipt crash window.
+    """
+    if disposition not in TERMINAL_DISPOSITIONS:
+        raise EvidenceError("publication disposition must be withdrawn or replaced")
+    if not isinstance(reason, str) or not reason.strip() or len(reason) > 4096:
+        raise EvidenceError("terminal publication requires an explicit bounded reason")
+    if (disposition == "replaced") != (replacement_intent is not None):
+        raise EvidenceError("only replaced disposition requires a replacement intent")
+    path = Path(intent_path).resolve(strict=True)
+    intent = _read(path)
+    if intent.get("schema") != INTENT or file_identity(path) != expected_intent_identity:
+        raise EvidenceError("terminal publication intent identity mismatch")
+    entry = Path(intent["request"]["entry"])
+    with _consumer_lock(entry.parent / (entry.name + ".publication")):
+        if file_identity(path) != expected_intent_identity:
+            raise EvidenceError("terminal publication intent changed during review")
+        state = inspect_publication(path)
+        replacement = None
+        if replacement_intent is not None:
+            replacement_path = Path(replacement_intent).resolve(strict=True)
+            candidate = _read(replacement_path)
+            expected_correction = {"intent_path": str(path), "identity": expected_intent_identity,
+                                   "operation_id": intent["request"]["operation_id"]}
+            if (replacement_path == path or candidate.get("schema") != INTENT
+                    or candidate.get("corrects") != expected_correction
+                    or candidate["request"]["entry"] != str(entry)
+                    or candidate["parent_checkpoint"]["task_id"] != intent["parent_checkpoint"]["task_id"]):
+                raise EvidenceError("replacement must explicitly correct this intent in the same entry and task")
+            replacement = {"intent_path": str(replacement_path), "identity": file_identity(replacement_path),
+                           "operation_id": candidate["request"]["operation_id"]}
+        terminal_request = {"disposition": disposition, "reason": reason,
+                            "intent_identity": expected_intent_identity, "replacement": replacement}
+        terminal_path = path.parent / "disposition.json"
+        if terminal_path.exists():
+            if _read(terminal_path).get("request") != terminal_request:
+                raise EvidenceError("terminal publication disposition is immutable")
+            return state
+        if state["status"] in {"published", "superseded"}:
+            raise EvidenceError("a successful publication cannot be closed as a failure")
+        if replacement_intent is not None:
+            candidate_state = inspect_publication(replacement["intent_path"])
+            if candidate_state["status"] in TERMINAL_DISPOSITIONS:
+                raise EvidenceError("replacement operation is already terminal")
+        _save(terminal_path, {"schema": DISPOSITION, "request": terminal_request,
+            "operation_id": intent["request"]["operation_id"], "entry": str(entry),
+            "phase_at_close": state["phase"], "entry_identity_at_close": state["current_entry_identity"],
+            "execution_permission": "not_granted", "automatic_retry": False})
+        return inspect_publication(path)
 
 
 def inspect_publications(directory, *, entry=None):

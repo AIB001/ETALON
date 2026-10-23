@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import re
 from pathlib import Path, PurePosixPath
 
 WORKFLOWS = {
@@ -21,6 +22,7 @@ WORKFLOWS = {
     "data-design": "etalon-data-design",
     "research": "etalon-research",
     "research-context": "etalon-research-context",
+    "research-index": "etalon-research-index",
     "method-configuration": "etalon-method-configuration",
     "skill-improvement": "etalon-skill-improvement",
     "molquarry-analogue-search": "molquarry-analogue-search",
@@ -39,7 +41,7 @@ SNAPSHOT_MANIFEST = "etalon-bundle-manifest.json"
 
 def library_catalog() -> dict:
     """Optional discovery groups; they do not constrain selection or duplicate bundles."""
-    memory = ["research-context", "research"]
+    memory = ["research-context", "research", "research-index"]
     rsi = ["skill-improvement"]
     return {"schema": "etalon-skill-libraries/1", "libraries": {
         "memory": memory,
@@ -124,6 +126,8 @@ def snapshot(slug: str, *, bundle_ref: dict | None = None) -> tuple[dict, dict[s
     if (not metadata.get("name") or (bundle_ref is None and metadata["name"] != WORKFLOWS[slug])
             or not metadata.get("description", "").strip()):
         raise ValueError("skill frontmatter must declare its name and description")
+    if not re.fullmatch(r"[a-z0-9][a-z0-9-]{0,63}", metadata["name"]):
+        raise ValueError("skill name must be a safe single directory name")
     manifest = {
         "schema": "etalon-capability-version/1", "kind": "domain_skill", "slug": slug,
         "name": metadata["name"], "description": metadata["description"],

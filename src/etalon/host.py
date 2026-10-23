@@ -29,7 +29,8 @@ def _source() -> dict:
             "pythonpath": str(Path(__file__).resolve().parent.parent)}
 
 
-def _research_hook_files(host: str, source: dict, config: dict) -> dict[str, bytes]:
+def _research_hook_files(host: str, source: dict, config: dict,
+                         transport: str = "command") -> dict[str, bytes]:
     """Emit opt-in project hooks; never edit the active host's configuration."""
     from etalon.research_hooks import TOOL_PATTERN
     if set(config) != {"entry", "state_dir", "launcher"}:
@@ -37,6 +38,37 @@ def _research_hook_files(host: str, source: dict, config: dict) -> dict[str, byt
     for value in config.values():
         if not isinstance(value, str) or not Path(value).is_absolute():
             raise ValueError("research hook export paths must be absolute")
+    if transport not in {"command", "mcp_tool"}:
+        raise ValueError("hook transport must be command or mcp_tool")
+    if transport == "mcp_tool":
+        hooks = {}
+        events = ["SessionStart", "PreToolUse", "PostToolUse", "PreCompact", "Stop"]
+        if host == "claude":
+            events.append("PostToolUseFailure")
+        for event in events:
+            payload = {"hook_event_name": event, "session_id": "${session_id}"}
+            if event == "SessionStart":
+                payload["source"] = "${source}"
+            if event in {"PreToolUse", "PostToolUse", "PostToolUseFailure"}:
+                payload.update(tool_name="${tool_name}", tool_use_id="${tool_use_id}",
+                               tool_input="${tool_input}")
+            if event == "PostToolUse":
+                payload["tool_response"] = "${tool_response}"
+            handler = {"type": "mcp_tool", "server": "etalon",
+                       "tool": "etalon_research_hook", "input": {"event": payload},
+                       "timeout": 30}
+            if host == "codex" and event in {"SessionStart", "PreToolUse"}:
+                handler["additionalContextLimit"] = 6000
+            group = {"hooks": [handler]}
+            if event in {"PreToolUse", "PostToolUse", "PostToolUseFailure"}:
+                group["matcher"] = TOOL_PATTERN
+            hooks[event] = [group]
+        config_name = ".codex/hooks.json" if host == "codex" else ".claude/settings.json"
+        return {config_name: _json({"hooks": hooks}),
+                ".etalon/research-hook-binding.json": _json({
+                    "schema": "etalon-research-hook-binding/1", "host": host,
+                    "entry": config["entry"], "state_dir": config["state_dir"],
+                    "max_bytes": 16384})}
     launcher = ("# Generated from the active ETALON installation.\n"
                 "import sys\n"
                 f"sys.path.insert(0, {source['pythonpath']!r})\n"
@@ -72,15 +104,33 @@ def _research_hook_files(host: str, source: dict, config: dict) -> dict[str, byt
     return {".etalon/research-hook.py": launcher.encode("utf-8"), config_name: _json({"hooks": hooks})}
 
 
-def _payload(host: str, research_hooks: dict | None = None) -> tuple[dict, dict[str, bytes]]:
+def _payload(host: str, research_hooks: dict | None = None, task_workset: dict | None = None,
+             *, hook_transport: str = "command", portable: bool = False) -> tuple[dict, dict[str, bytes]]:
     if host not in {"codex", "claude"}:
         raise ValueError("host must be codex or claude")
     source = _source()
     files: dict[str, bytes] = {}
     versions = []
     directory = ".agents/skills" if host == "codex" else ".claude/skills"
-    for slug in skills.WORKFLOWS:
-        manifest, contents = skills.snapshot(slug)
+    if task_workset is None:
+        selection = [{"slug": slug} for slug in skills.WORKFLOWS]
+    else:
+        from etalon.research.meta_context import selected_skill_members
+        selection = selected_skill_members(task_workset)
+        files[".etalon/task-workset.json"] = _json(task_workset)
+    output_names = set()
+    for chosen in selection:
+        slug = chosen["slug"]
+        manifest, contents = skills.snapshot(slug, bundle_ref=chosen.get("bundle_ref"))
+        if manifest["name"] in output_names:
+            raise ValueError("selected skills collide in the host export directory")
+        output_names.add(manifest["name"])
+        if chosen.get("manifest_sha256", manifest["manifest_sha256"]) != manifest["manifest_sha256"]:
+            raise ValueError("workset skill version changed before export")
+        if "members" in chosen:
+            if not set(chosen["members"]) <= set(contents):
+                raise ValueError("workset skill member is unavailable")
+            contents = {name: contents[name] for name in chosen["members"]}
         versions.append(manifest)
         for name, data in contents.items():
             files[f"{directory}/{manifest['name']}/{name}"] = data
@@ -99,6 +149,9 @@ def _payload(host: str, research_hooks: dict | None = None) -> tuple[dict, dict[
             files[f"host-guides/{path.name}"] = path.read_bytes()
     launch = {"command": source["python"], "args": ["-m", "etalon.mcp"],
               "env": {"PYTHONPATH": source["pythonpath"], "PYTHONUTF8": "1"}}
+    if research_hooks and hook_transport == "mcp_tool":
+        launch["env"]["ETALON_RESEARCH_HOOK_BINDING"] = str(
+            Path(research_hooks["launcher"]).parent / "research-hook-binding.json")
     if host == "codex":
         files[".codex/config.toml"] = (
             "[mcp_servers.etalon]\n"
@@ -106,12 +159,20 @@ def _payload(host: str, research_hooks: dict | None = None) -> tuple[dict, dict[
             'args = ["-m", "etalon.mcp"]\n'
             "\n[mcp_servers.etalon.env]\n"
             f"PYTHONPATH = {json.dumps(source['pythonpath'])}\n"
-            'PYTHONUTF8 = "1"\n'
+            'PYTHONUTF8 = "1"\n' +
+            (f"ETALON_RESEARCH_HOOK_BINDING = {json.dumps(launch['env']['ETALON_RESEARCH_HOOK_BINDING'])}\n"
+             if "ETALON_RESEARCH_HOOK_BINDING" in launch["env"] else "")
         ).encode()
     else:
         files[".mcp.json"] = _json({"mcpServers": {"etalon": {"type": "stdio", **launch}}})
     if research_hooks is not None:
-        files.update(_research_hook_files(host, source, research_hooks))
+        files.update(_research_hook_files(host, source, research_hooks, hook_transport))
+    if portable:
+        files["etalon-install.json"] = _json({"schema": "etalon-host-install/1",
+            "host": host, "hook_transport": hook_transport,
+            "entry": "supply_explicit_local_or_server_entry_on_install",
+            "runtime": "python_running_etalon_host_install",
+            "trust": "host_native_review_required_for_new_definitions"})
     manifest = {
         "schema": "etalon-host-export/1", "host": host, "source": source,
         "skills": versions,
@@ -123,6 +184,12 @@ def _payload(host: str, research_hooks: dict | None = None) -> tuple[dict, dict[
     }
     if research_hooks is not None:
         manifest["research_hooks"] = research_hooks
+    if hook_transport != "command" or portable:
+        manifest["hook_transport"] = hook_transport
+        manifest["portable"] = portable
+    if task_workset is not None:
+        manifest["task_workset_digest"] = task_workset["digest"]
+        manifest["skill_selection"] = selection
     return manifest, files
 
 
@@ -133,7 +200,9 @@ def _root(target: str | Path) -> Path:
     return root
 
 
-def export(target: str | Path, host: str = "codex", *, research_entry: str | Path | None = None) -> dict:
+def export(target: str | Path, host: str = "codex", *, research_entry: str | Path | None = None,
+           task_workset: dict | None = None, hook_transport: str = "command",
+           portable: bool = False) -> dict:
     """Create an export without modifying existing projects or host settings."""
     root = _root(target)
     config = None
@@ -143,7 +212,10 @@ def export(target: str | Path, host: str = "codex", *, research_entry: str | Pat
             raise ValueError("research entry must be an existing local JSON file")
         config = {"entry": str(entry), "state_dir": str(root / ".etalon" / "research-hook-receipts"),
                   "launcher": str(root / ".etalon" / "research-hook.py")}
-    manifest, files = _payload(host, config)
+    if hook_transport not in {"command", "mcp_tool"}:
+        raise ValueError("hook transport must be command or mcp_tool")
+    manifest, files = _payload(host, config, task_workset,
+                               hook_transport=hook_transport, portable=portable)
     # Fail even for an existing empty directory. No existing role or config is replaced.
     root.mkdir(parents=True, exist_ok=False)
     for name, data in files.items():
@@ -178,7 +250,16 @@ def verify(target: str | Path) -> dict:
     saved = json.loads(manifest_path.read_text(encoding="utf-8"))
     if saved.get("schema") != "etalon-host-export/1":
         raise ValueError("unsupported host export schema")
-    current, current_files = _payload(saved["host"], saved.get("research_hooks"))
+    workset = None
+    if "task_workset_digest" in saved:
+        workset_path = _member(root, ".etalon/task-workset.json")
+        if workset_path.stat().st_size > 32768:
+            raise ValueError("exported workset exceeds limit")
+        workset = json.loads(workset_path.read_text(encoding="utf-8"))
+        if workset.get("digest") != saved["task_workset_digest"]:
+            raise ValueError("export workset identity mismatch")
+    current, current_files = _payload(saved["host"], saved.get("research_hooks"), workset,
+        hook_transport=saved.get("hook_transport", "command"), portable=saved.get("portable", False))
     files = saved.get("files")
     if not isinstance(files, dict) or not files or len(files) > 2000:
         raise ValueError("host manifest needs a bounded file inventory")
@@ -193,14 +274,13 @@ def verify(target: str | Path) -> dict:
             changed.append(name)
     directory = ".agents/skills" if saved["host"] == "codex" else ".claude/skills"
     unexpected = []
-    for name in skills.WORKFLOWS.values():
-        bundle = _member(root, f"{directory}/{name}")
-        if bundle.exists():
-            for path in bundle.rglob("*"):
-                relative = path.relative_to(root).as_posix()
-                _member(root, relative)
-                if path.is_file() and relative not in files:
-                    unexpected.append(relative)
+    bundle_root = _member(root, directory)
+    if bundle_root.exists():
+        for path in bundle_root.rglob("*"):
+            relative = path.relative_to(root).as_posix()
+            _member(root, relative)
+            if path.is_file() and relative not in files:
+                unexpected.append(relative)
     guide_root = _member(root, "host-guides")
     if guide_root.exists():
         for path in guide_root.rglob("*"):
@@ -339,6 +419,18 @@ def consume_events(log_ref: dict, *, state_path: str | Path, handler_method_vers
         return {"handled": handled, "skipped": skipped, "next_cursor": state["cursor"],
                 "has_more": page["has_more"], "delivery": "at_least_once_with_stable_request_id"}
 
+def install(target, *, research_entry, host="codex", hook_transport="mcp_tool"):
+    """Install or relocate an owned portable project, preserving previous bytes."""
+    from etalon.host_install import install as bind
+    return bind(target, research_entry=research_entry, host=host, hook_transport=hook_transport)
+
+
+def doctor(target):
+    """Inspect portable runtime bindings without claiming host trust or delivery."""
+    from etalon.host_install import doctor as inspect
+    return inspect(target)
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     sub = parser.add_subparsers(dest="command", required=True)
@@ -351,6 +443,16 @@ def main() -> int:
     create.add_argument("--host", choices=("codex", "claude"), default="codex")
     create.add_argument("--research-entry", type=Path,
                         help="opt in to project-local research lifecycle hooks for this JSON entry")
+    create.add_argument("--hook-transport", choices=("command", "mcp_tool"), default="command")
+    create.add_argument("--portable", action="store_true",
+                        help="include a recipe for explicit runtime/entry rebinding")
+    setup = sub.add_parser("install", help="create or rebind a portable host project")
+    setup.add_argument("--target", type=Path, required=True)
+    setup.add_argument("--host", choices=("codex", "claude"), default="codex")
+    setup.add_argument("--research-entry", type=Path, required=True)
+    setup.add_argument("--hook-transport", choices=("command", "mcp_tool"), default="mcp_tool")
+    diagnose = sub.add_parser("doctor", help="check bindings; native trust/delivery remain separate")
+    diagnose.add_argument("--target", type=Path, required=True)
     check = sub.add_parser("verify", help="check an export for changed, missing or added files")
     check.add_argument("--target", type=Path, required=True)
     args = parser.parse_args()
@@ -358,11 +460,19 @@ def main() -> int:
         if args.command == "catalog":
             report = {**skills.catalog(detail=args.detail, skills=args.skills), "source": _source()}
         elif args.command == "export":
-            report = export(args.target, args.host, research_entry=args.research_entry)
+            report = export(args.target, args.host, research_entry=args.research_entry,
+                            hook_transport=args.hook_transport, portable=args.portable)
+        elif args.command == "install":
+            report = install(args.target, host=args.host, research_entry=args.research_entry,
+                             hook_transport=args.hook_transport)
+        elif args.command == "doctor":
+            report = doctor(args.target)
         else:
             report = verify(args.target)
         good = args.command != "verify" or all(report[key] for key in
                     ("export_matches_manifest", "matches_current_source", "runtime_matches"))
+        if args.command == "doctor":
+            good = report["configuration_verified"] and report["entry_exists_on_server"]
         print(_json({"ok": good, **report}).decode("utf-8"), end="")
         return 0 if good else 1
     except (ValueError, KeyError, OSError) as error:
