@@ -21,6 +21,7 @@ from etalon.research.continuation import (
     CHECKPOINT, STEP, capture_watermarks, record_content, resume_research,
 )
 from etalon.research.evidence import query_evidence, read_evidence
+from etalon.research.entry import resolve_entry
 from etalon.research.evidence_refs import file_identity, make_ref
 
 
@@ -190,8 +191,8 @@ def main():
     if args.command == "build":
         result = build(args.released_root, args.output, args.paused_status)
     else:
-        entry = json.loads(args.entry.read_text(encoding="utf-8"))
-        result = resume_research(entry["workspace"], entry["checkpoint_ref"])
+        workspace, checkpoint_ref, _, _ = resolve_entry(args.entry)
+        result = resume_research(workspace, checkpoint_ref)
     print(json.dumps(result, ensure_ascii=False, indent=2))
 
 
