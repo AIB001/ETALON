@@ -12,6 +12,7 @@ import json
 from etalon.active.schema import canonical, digest
 from .schema import Artifact
 from .evidence_refs import EvidenceError, validate_ref
+from .read_scope import bounded_read
 
 CONTEXT = 'etalon-revision-context/1'
 OPPORTUNITY = 'etalon-revision-opportunity/1'
@@ -171,11 +172,15 @@ def _saved(journal, schema, source_id):
             yield ref, _local(journal, ref, source_id, schema)
 
 
-def register_opportunity(journal, context_ref, directory, *, source_id, source_kind):
+def register_opportunity(journal, context_ref, directory, *, source_id, source_kind,
+                         family_ref=None, external_workspace=None):
     """Stable semantic identity across distinct events; incomplete work is resumable.
 
     Returned request_id must be used by the caller's existing idempotent executor.
     This is not exactly-once model invocation. A pending request is not completion.
+    Optional dispositions close a no-change opportunity even without a patch.
+    A reviewed family can reuse a terminal judgment for identical original inputs;
+    changed evidence requires a separate, explicit reconsideration review.
     """
     ctx = _local(journal, context_ref, source_id, CONTEXT)
     validate_content(ctx)
@@ -184,7 +189,91 @@ def register_opportunity(journal, context_ref, directory, *, source_id, source_k
     from etalon.host import _consumer_lock
     key = ctx['opportunity_key']
     with _consumer_lock(journal.store.path.parent / ('.revision-' + key + '.lock')):
-        return _register_opportunity(journal, context_ref, directory, source_id, source_kind, ctx)
+        result = _register_opportunity(journal, context_ref, directory, source_id, source_kind, ctx)
+        from .opportunity_state import resolve_opportunity_state
+        state = resolve_opportunity_state(journal, result['opportunity_ref'], source_id=source_id,
+                                          external_workspace=external_workspace)
+        if state['history_refs']:
+            result.update(state=state['state'], lifecycle=state, request_id=state['request_id'],
+                          proposal_permission='host_review_required' if state['state'] == 'reopened' else 'not_granted')
+        briefs = [r for r, b in _saved(journal, 'etalon-candidate-brief/1', source_id)
+                  if b['opportunity_ref'] == result['opportunity_ref']]
+        if briefs:
+            result['brief_refs'] = briefs
+            if not state['history_refs']:
+                result['state'] = 'already_proposed'
+        if family_ref is not None:
+            _family_recovery(journal, result, ctx, family_ref, source_id, external_workspace)
+        return result
+
+
+@bounded_read
+def _family_recovery(journal, result, ctx, family_ref, source_id, workspace):
+    """Reviewed grouping informs reuse; it cannot silently reopen old conclusions."""
+    from .defect_family import DEFECT_FAMILY, read_defect_family, validate_local_links
+    from .opportunity_state import resolve_opportunity_state
+    if family_ref['source_id'] == source_id:
+        family = _local(journal, family_ref, source_id, DEFECT_FAMILY)
+        validate_local_links(journal, family, source_id, external_workspace=workspace)
+    else:
+        if workspace is None:
+            raise EvidenceError('external family requires an explicit workspace')
+        family = read_defect_family(workspace, family_ref)
+    members = family['members']
+    current = [m for m in members if m['opportunity_ref'] == result['opportunity_ref']]
+    if not current or any(not m['accepted'] for m in current):
+        raise EvidenceError('family suppression requires unambiguous accepted membership')
+    if any(family[k] != ctx[k] for k in ('task_id', 'scope', 'conditions')):
+        raise EvidenceError('family recovery cannot broaden task, scope or conditions')
+    related, conflicts, foreign_lifecycle = [], [], []
+    def originals(member):
+        identities = set()
+        for ref in member['problem_refs'] + member['evidence_refs']:
+            if 'member' in ref:
+                material = read_material(workspace, ref)
+                identities.add(canonical({k: material['ref'][k] for k in ('sha256', 'bytes')}))
+                continue
+            if ref['source_id'] == source_id:
+                body = journal.get(ref['record_id'])
+                if digest(body) != ref['record_digest']:
+                    raise EvidenceError('family original record changed')
+                if ref['record_id'].startswith('artifact-'):
+                    journal.artifact_path(Artifact(**body))
+            else:
+                body = read_material(workspace, ref)['record']
+            identities.add(canonical({k: body[k] for k in ('sha256', 'bytes')})
+                           if 'sha256' in body else canonical(body))
+        return identities
+    current_originals = [originals(m) for m in current]
+    for member in members:
+        if not member['accepted'] or member['opportunity_ref'] == result['opportunity_ref']:
+            continue
+        if any(not m['accepted'] and m['opportunity_ref'] == member['opportunity_ref'] for m in members):
+            conflicts.append(member['opportunity_ref'])
+            continue
+        if member['opportunity_ref']['source_id'] != source_id:
+            # The resolver's history bound is the explicit local journal. Reading
+            # a foreign opportunity through a workspace does not inspect its
+            # source's terminal history; absence here must never mean open there.
+            unknown = {'opportunity_ref': member['opportunity_ref'], 'state': 'unknown',
+                       'coverage': 'external_lifecycle_not_checked',
+                       'reason': 'current journal cannot establish the external opportunity head'}
+            if unknown not in foreign_lifecycle:
+                foreign_lifecycle.append(unknown)
+            continue
+        prior = resolve_opportunity_state(journal, member['opportunity_ref'], source_id=source_id,
+                                           external_workspace=workspace)
+        if prior['terminal']:
+            related.append({'state': prior, 'same_original_inputs':
+                            any(originals(member) == known for known in current_originals)})
+    result['family'] = {'ref': family_ref, 'related_terminals': related, 'conflicting_member_refs': conflicts,
+                        'foreign_lifecycle': foreign_lifecycle,
+                        'meaning': 'reviewed relation; no transfer or scientific benefit inferred'}
+    if conflicts or foreign_lifecycle:
+        result.update(state='family_review_required', proposal_permission='not_granted')
+    elif related and not result.get('lifecycle', {}).get('history_refs'):
+        result.update(state='family_terminal' if all(r['same_original_inputs'] for r in related)
+                      else 'family_reconsideration_required', proposal_permission='not_granted')
 
 
 def _register_opportunity(journal, context_ref, directory, source_id, source_kind, ctx):

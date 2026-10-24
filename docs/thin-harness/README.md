@@ -8,6 +8,10 @@ ETALON 是宿主 agent 的科学能力扩展。宿主拥有问题选择、下一
 
 ## 阅读入口
 
+2026-10-24 可选范围读取：[SCOPED_GRAPH_READS](SCOPED_GRAPH_READS.md) 通过已有 graph/context 接口选择精确节点或分支，分别报告范围内引用、反证关系和摘要覆盖。保持原有上限、原件校验与暂停状态；范围内完成不代表全图完备。
+
+2026-10-24 可选研究决策增量：[RESEARCH_DECISION](RESEARCH_DECISION.md) 将问题结构、可区分预测、选择与结果更新绑定到已有研究节点；[EVIDENCE_WINDOW](EVIDENCE_WINDOW.md) 区分回顾声明与 API 控制的交付/决策/结果发布顺序；[CAPABILITY_PROFILE](CAPABILITY_PROFILE.md) 只汇总明确引用的评价及其适用范围。三者复用同一 journal、Artifact、checkpoint 和入口，不构成强制 Probe 或新调度器。`research-decision` skill 为按需入口；API 时序不证明宿主从未见过答案。
+
 2026-10-21 新接续：专项约定、元 skill 自身改进和跨 chat 证据复用进入实施；当前方案/验收/文件唯一负责人见 [EVOLUTION_CONTRACT](EVOLUTION_CONTRACT.md)、[EVOLUTION_ACCEPTANCE](EVOLUTION_ACCEPTANCE.md)、[EVOLUTION_WORKSTREAMS](EVOLUTION_WORKSTREAMS.md)。这是已有动作/结果/方法契约的增量，不是已通过报告或新运行框架。旧 I2/I3/E2 的正负结论继续保留。
 
 | 文档 | 唯一负责的内容 |

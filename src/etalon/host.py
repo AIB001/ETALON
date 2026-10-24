@@ -116,7 +116,11 @@ def _payload(host: str, research_hooks: dict | None = None, task_workset: dict |
         selection = [{"slug": slug} for slug in skills.WORKFLOWS]
     else:
         from etalon.research.meta_context import selected_skill_members
-        selection = selected_skill_members(task_workset)
+        task_workspace = None
+        if research_hooks is not None:
+            from etalon.research.entry import resolve_entry
+            task_workspace = resolve_entry(research_hooks["entry"])[0]
+        selection = selected_skill_members(task_workset, workspace=task_workspace)
         files[".etalon/task-workset.json"] = _json(task_workset)
     output_names = set()
     for chosen in selection:

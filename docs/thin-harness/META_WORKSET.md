@@ -124,9 +124,54 @@ this module never creates one itself. The current session has no visible-thread
 creation tool, so a CLI session or subagent is not reported as a sidebar chat.
 
 Further work remains: adapters that discover descriptors from each source library,
-execution bindings for arbitrary semantic method parts, actual-use/evaluation
-joins for the workset, independent scientific adaptation-benefit comparisons,
+mechanical execution bindings for arbitrary semantic method parts, independent scientific adaptation-benefit comparisons,
 and native visible-chat handoff/ownership receipts. Selecting a part is not proof
 that execution consumed it. RSI can reference the saved review/workset as a
 concrete improvement context, but this batch does not automatically trigger or
 claim improvement.
+
+## Explicit resource use and feedback associations
+
+`research.resource_usage` connects an exact workset part to existing MethodVersion,
+MethodUse, research node, evaluation step and subsequent decision. It stores one
+ordinary `etalon-resource-usage/1` Artifact with complete evidence dependencies
+and source-qualified graph links. It creates no MethodUse, evaluation, cost entry,
+executor or activation. Use `build_resource_usage`, `record_resource_usage`, then
+`read_resource_usage` to verify the association. `workset_resource_part` resolves
+the reviewed part and its selection disposition.
+
+The reader checks exact identities, same-task MethodUse, explicit node/use/method
+links, evaluation plan and compared methods, and the later decision's evaluation
+basis. The decision may refer through one explicit existing method experience
+whose evaluation, task and method match. A method resource must identify that
+exact MethodVersion; a skill must match its manifest identity. No name matching
+fills a missing edge.
+
+| Field | Evidence and limit |
+| --- | --- |
+| `selected` | Derived from the reviewed workset, including inactive parts. It proves neither activation nor use. |
+| `read` | Historical phase observation; the reader separately reports that it verified the named resource now. Reading bytes does not demonstrate comprehension. |
+| `consumed` | `unknown` or explicit `host_reported`, never inferred from a MethodUse, delivered context or successful node. |
+| `executed` | `unknown` or explicit `host_reported`; a report requires an applied node and receipt, while success/failure/reuse remains separate. |
+
+Every phase report includes evidence refs and a note. Reports require MethodUse
+to bind `host_conditions.task_workset_ref`, name the exact `used_parts`, and appear
+in the report's evidence. Executed reports also cite their node. Mechanical
+resource-consumption telemetry is not implemented; `tool_observed` is rejected.
+Retrospective associations require explicit provenance/source refs and keep all
+three historical phases `unknown`, even when old MethodUse records are host
+reported. Optional `checkpoint_ref` checks activation at that exact checkpoint;
+without it activation is unknown. It is never a latest-head claim.
+
+Verification covers the named resource and explicit association chain, not every
+indexed resource. Corrupt/missing sources are errors; absent optional links remain
+unknown. `chain_complete` means all specified association edges were checked, not
+causal benefit or proven execution of a skill. An association Artifact can enter
+`build_revision_context` as a problem/evidence ref without triggering a revision.
+A historical SND1/PoseBusters association cannot reconstruct pre-CNN knowledge,
+imply independent transfer, or enable incompatible parts.
+
+Graph links for ordinary usage Artifacts are labeled `declared_*`. Artifact
+metadata can declare a relationship; only `read_resource_usage` performs the
+semantic joins. Unknown relation names and links absent from dependency bindings
+are omitted by the graph adapter, never presented as verified resource use.

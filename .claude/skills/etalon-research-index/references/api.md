@@ -66,3 +66,69 @@ All meta payloads are limited to 32 KiB; indexes hold at most 64 resources. Redu
 the explicit scope or publish smaller task-specific metadata instead of silently
 truncating required conditions. Missing originals, changed versions, conflicts or
 incomplete evidence are errors to report or investigate, never implicit adoption.
+
+## Resource use and subsequent selection
+
+Import `etalon.research.resource_usage` when exact workset-to-use attribution is
+needed. These helpers keep existing MethodUse and scientific records intact:
+
+```python
+payload = build_resource_usage(
+    task_id=task_id, workset_ref=workset_ref,
+    resource_id=resource_id, part_id=part_id,
+    method_ref=method_ref, use_ref=use_ref, node_ref=node_ref,
+    evaluation_ref=evaluation_step_ref, selection_ref=decision_ref,
+    provenance={"mode": "retrospective", "note": reason,
+                "source_refs": original_refs})
+artifact_id = record_resource_usage(
+    journal, payload, directory, source_id=source_id,
+    source_kind="existing_real_artifact", workspace=restricted_workspace)
+result = read_resource_usage(published_workspace, artifact_ref)
+```
+
+Optional refs default to `None`; absent phases and edges stay unknown.
+`evaluation_ref` identifies the evaluation **step** with explicit node/use
+attribution, rather than only MethodEvaluation. The decision must cite that
+evaluation directly or through a matching existing method experience. Optional
+`checkpoint_ref` verifies activation at that checkpoint. Leaving it out records
+a snapshot association, not current activation.
+
+Default `observations` separately sets `read`, `consumed`, and `executed` to
+`{"status": "unknown", "evidence_refs": [], "note": ...}`. Contemporaneous host
+reports may use `host_reported` with exact evidence refs. MethodUse must bind
+`host_conditions.task_workset_ref` and name the exact `used_parts`; the report
+cites that use. Executed reports also cite their node and require a receipt.
+This remains a host report, not mechanical proof. Retrospective phase reports
+cannot be upgraded from unknown. Returned `resource_read` describes current
+verification, not historical delivery or comprehension. `chain_complete` only
+verifies explicit associations.
+
+The connected MCP names are `etalon_resource_usage_record(database, record,
+directory, source_id, source_kind, workspace=None)` and
+`etalon_resource_usage_read(ref, workspace=None, entry=None, read_context=None)`.
+Use the entry's existing `read_context` to preserve its source restrictions. The
+writer uses the normal configured Journal and appends one diagnostic Artifact.
+
+## Bounded resource and branch discovery
+
+Reuse `etalon_research_context(entry, view="resources", limit=20, cursor=None,
+max_bytes=65536, view_options={...})`. Allowed options are `source_ids`, `kinds`,
+`skill_refs` and `scan_limit`. Skill refs are explicit installed slugs or pinned
+`{slug, manifest_sha256, bundle_ref}` selections. The inventory preserves original
+refs, declared parts, supporting and opposing evidence; bare resources keep
+unknown applicability. It never creates an enabled workset. An empty page with
+a cursor is incomplete discovery, not absence of resources. Use the same options
+when paging; source or version changes invalidate old cursors.
+
+`view="branch"` additionally requires an exact checkpoint `branch_id`. Its
+`view_options` accepts `usage_refs`, `max_nodes` and `as_of`. `conditions` supports
+an explicitly changed task question. Read `task_workset`, usage observations,
+experience categories, relations and coverage together. The usage-discovery
+cursor belongs to `etalon_evidence_query`, separately from the branch view's
+delivery cursor. Follow it if needed and supply additional exact `usage_refs`.
+Task-wide enabled parts are not inferred to have been used on every branch.
+
+Python equivalents are `research.resource_catalog.build_resource_catalog` and
+`research.branch_context.build_branch_context`. Both are read-only. Detailed
+schemas and counterexamples are in the source distribution's
+`docs/thin-harness/RESOURCE_CATALOG.md` and `BRANCH_RESOURCE_VIEW.md`.

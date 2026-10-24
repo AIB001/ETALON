@@ -166,9 +166,12 @@ def _project_node(ref, row, *, task_id, home_overrides):
     schema = content.get("schema", "")
     claim = schema == "etalon-research-claim/1"
     experience = schema == "etalon-method-experience/1"
+    revision_note = schema in {"etalon-defect-family/1", "etalon-opportunity-disposition/1",
+                              "etalon-opportunity-reopen/1", "etalon-candidate-brief/1"}
+    research_decision = schema in {"etalon-research-decision/1", "etalon-research-decision-update/1"}
     trace = schema == "etalon-research-trace/1"
     home = "Judge" if claim or operation in {"judgment", "decision", "evaluation", "evaluation_plan"} else "Quick" if operation in {"plan", "node", "result"} or row["record_type"] in {"experiment", "observation"} else "Search"
-    if experience or schema in {"etalon-method-contract/1", "etalon-method-comparability/1"}:
+    if experience or revision_note or research_decision or schema in {"etalon-method-contract/1", "etalon-method-comparability/1"}:
         home = "Judge"
     elif schema == "etalon-screen-compilation/1":
         home = "Quick"
@@ -179,14 +182,14 @@ def _project_node(ref, row, *, task_id, home_overrides):
         home = override
     # Work area is not epistemic type. Moving an observation into Judge must
     # not turn a measured result into an interpretation (or vice versa).
-    judgment = claim or experience or operation in {"judgment", "decision", "evaluation", "evaluation_plan"} or schema in {
+    judgment = claim or experience or revision_note or research_decision or operation in {"judgment", "decision", "evaluation", "evaluation_plan"} or schema in {
         "etalon-method-contract/1", "etalon-method-comparability/1"}
     kind = "R" if operation == "result" or row["record_type"] == "observation" else "J" if judgment else "X" if operation in {"node", "plan"} or row["record_type"] == "experiment" else "E"
     if trace:
         kind = "R" if content["phase"] in {"execution", "admission"} else "X"
     elif schema == "etalon-screen-compilation/1":
         kind = "X"
-    summary_text = next((content[k] for k in ("statement", "lesson", "reason", "question", "name") if k in content), row["record_type"])
+    summary_text = next((content[k] for k in ("statement", "lesson", "reason", "question", "title", "mechanism_hypothesis", "name") if k in content), row["record_type"])
     node = {"node_id": node_identity(ref), "ref": ref, "home": home, "kind": kind,
         "home_basis": "explicit_projection_override" if override else "explicit_trace_workspace" if trace else "legacy_record_projection",
         "kind_basis": "explicit_trace_phase" if trace else "legacy_record_semantics_inferred",
@@ -209,8 +212,27 @@ def _project_node(ref, row, *, task_id, home_overrides):
         node["experience"] = {key: content[key] for key in ("outcome", "invalid_when", "capability_id", "conditions", "scope",
                                                             "support_refs", "counter_refs", "supersedes")}
         node["experience"]["lesson"] = _brief(content["lesson"], 1200)
+    if revision_note:
+        node["revision_note"] = {key: content[key] for key in (
+            "family_key", "candidate_key", "opportunity_ref", "previous_state_ref",
+            "previous_terminal_ref", "outcome", "judgment", "reconsider_when", "matched_condition",
+            "support_refs", "counter_refs", "missing_evidence") if key in content}
+        node["revision_note"].update(
+            interpretation="immutable reviewed annotation; follow predecessor chain for current state",
+            execution_permission="not_granted", measured_improvement="not_inferred")
     if trace:
         node["trace"] = {key: content[key] for key in ("phase", "origin", "sequence", "attempt_id", "state")}
+    if research_decision:
+        node["research_decision"] = {key: content[key] for key in (
+            "decision_ref", "previous_update_ref", "evidence_window_ref", "structure", "outcome",
+            "disposition", "gaps", "support_refs", "counter_refs") if key in content}
+        node["research_decision"].update(
+            interpretation="attributable judgment; exact predictions and actions remain in the original",
+            execution_permission="not_granted", benefit="not_inferred")
+    if schema in {"etalon-evidence-window/1", "etalon-outcome-release/1"}:
+        node["evidence_timing"] = {key: content[key] for key in (
+            "window_ref", "decision_ref", "timing_mode", "snapshot_digest", "boundary",
+            "window_delivery", "outcome_delivery", "consumption") if key in content}
     if schema == "etalon-method-use/1":
         node["method_use"] = {key: content[key] for key in (
             "selected_methods", "subject_refs", "basis", "reason", "host_conditions")}
@@ -228,7 +250,8 @@ def _project_node(ref, row, *, task_id, home_overrides):
 
 @bounded_read
 def build_research_graph(workspace, *, checkpoint_ref, policy=None, purpose="research",
-                         home_overrides=None, max_nodes=64, max_bytes=65536, as_of=None):
+                         home_overrides=None, max_nodes=64, max_bytes=65536, as_of=None,
+                         scope=None):
     """Project reachable records without changing a journal or executing work.
 
     Legacy nodes default to Quick when resource mode was never recorded. Deep
@@ -257,6 +280,12 @@ def build_research_graph(workspace, *, checkpoint_ref, policy=None, purpose="res
     resumed = resume_research(ws, checkpoint_ref, read_mode="frozen_view")
     task_id = checkpoint["task_id"]
     universe = {(sid, rid): row for sid, rows in records.items() for rid, row in rows.items()}
+    if scope is not None:
+        from .graph_scope import build_scoped_graph
+        return build_scoped_graph(ws, checkpoint_ref=checkpoint_ref, checkpoint=checkpoint,
+            resumed=resumed, collection=(records, coverage, warnings), universe=universe,
+            scope=scope, policy=policy, policy_receipt=policy_receipt, temporal=temporal,
+            home_overrides=home_overrides, max_nodes=max_nodes, max_bytes=max_bytes)
     from .method_links import method_links
     attribution = {key: method_links(row.get("projected_content", row["record"]), key[0], universe)
                    for key, row in universe.items()}

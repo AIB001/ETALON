@@ -52,6 +52,22 @@ and observed model consumption. Reused sources still incur original-byte checks;
 zero fresh decodes does not mean zero I/O. A patch requires its exact prior context
 hash, and the current controls include a full-entry recovery route.
 
+Stable event IDs replay the exact saved receipt without rereading or rewinding a
+newer cursor. A retry after a failed read needs a new host event ID; the original
+failure remains. Content-only identities cannot distinguish two identical
+compactions from a retry. Every such `PreCompact` observation therefore invalidates
+the currently prepared baseline, even when its receipt is a duplicate. The old
+receipt stays unchanged, and the next injection prepares a self-contained baseline.
+This is conservative invalidation, not a count of distinct native compactions.
+
+Tool receipts retain explicit failure signals and hashes, not raw responses or
+error text. Direct MCP `isError`, a JSON-encoded MCP result, JSON-RPC errors and
+Claude's `PostToolUseFailure` are observable. A successful observation receipt can
+describe a failed tool; it does not make that tool successful or authorize retry.
+Plain error-like text and application-domain error fields do not establish a
+protocol failure. Supplied events still require native host trace correlation
+before they count as native delivery evidence.
+
 The `/3` delivery format references changed controls through
 `context_delta.set_from_current_controls`, then applies `set`, then `remove`.
 This keeps controls self-contained without duplicating them in the patch.

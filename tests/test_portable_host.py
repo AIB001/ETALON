@@ -21,6 +21,10 @@ def test_doctor_supports_export_without_optional_research_hooks(tmp_path):
     assert result["configuration_verified"]
     assert result["configured_events"] == []
     assert not result["entry_exists_on_server"]
+    assert result["verification_stages"]["static_installation"] == "verified"
+    assert result["verification_stages"]["login"] == "not_checked"
+    assert result["verification_stages"]["mcp_reachability"] == "not_checked"
+    assert not result["acceptance_complete"]
 
 
 @pytest.mark.parametrize("consumer", ["codex", "claude"])
@@ -249,6 +253,27 @@ def test_native_mcp_tool_result_baseline_compact_resume_and_idempotency(graph_ca
             bad = await session.call_tool("etalon_research_hook", {"event": {"hook_event_name": "Bogus",
                                                                           "session_id": event["session_id"]}})
             assert bad.isError
+            # A real MCP schema rejection, then a supplied host-shaped event.
+            # This tests transport/receipt continuity, not native host dispatch.
+            failed_call = await session.call_tool("etalon_evidence_read", {"limit": 0})
+            assert failed_call.isError
+            failure_event = {"hook_event_name": "PostToolUse" if consumer == "codex" else "PostToolUseFailure",
+                "session_id": event["session_id"], "event_id": "real-mcp-rejection",
+                "tool_name": "mcp__etalon__etalon_evidence_read", "tool_use_id": "rejected-call",
+                "tool_input": {"limit": 0}, "tool_response": failed_call.model_dump(mode="json")}
+            observed = await session.call_tool("etalon_research_hook", {"event": failure_event})
+            repeated = await session.call_tool("etalon_research_hook", {"event": failure_event})
+            assert not observed.isError and observed.content[0].text == repeated.content[0].text == "{}"
+            binding = json.loads((project / ".etalon/research-hook-binding.json").read_bytes())
+            receipt_root = research_hooks._receipt_io_path(Path(binding["state_dir"]))
+            receipts = [json.loads(path.read_bytes()) for path in receipt_root.rglob("*.json")]
+            failures = [value for value in receipts if value["event_identity"]["value"] == "real-mcp-rejection"]
+            assert len(failures) == 1
+            failure = failures[0]
+            assert failure["tool_observation"]["observation"] == "failed"
+            assert "mcp_is_error" in failure["tool_observation"]["failure_signals"]
+            assert failure["tool_observation"]["response_sha256"] == research_hooks._digest(failure_event["tool_response"])
+            assert failure["scientific_writes"] == 0 and not failure["automatic_retry"]
     asyncio.run(asyncio.wait_for(exercise(), timeout=90))
 
 

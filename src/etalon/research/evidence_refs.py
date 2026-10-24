@@ -21,7 +21,11 @@ CONTENT_SCHEMAS = {"etalon-method-revision/1", "etalon-research-claim/1",
                    "etalon-revision-opportunity/1", "etalon-method-patch/1",
                    "etalon-revision-assessment/1", "etalon-method-experience/1",
                    "etalon-method-contract/1", "etalon-screen-compilation/1",
-                   "etalon-method-comparability/1", "etalon-research-trace/1"}
+                   "etalon-method-comparability/1", "etalon-research-trace/1",
+                   "etalon-defect-family/1", "etalon-opportunity-disposition/1",
+                   "etalon-opportunity-reopen/1", "etalon-candidate-brief/1",
+                   "etalon-research-decision/1", "etalon-research-decision-update/1",
+                   "etalon-evidence-window/1", "etalon-outcome-release/1"}
 
 
 class EvidenceError(ValueError):
@@ -187,6 +191,9 @@ def load_workspace(workspace):
         keys.add(key)
         _identity(entry)
         _local(base, entry.get("location"), confined=True)
+    if "skill_bundle_map" in data:
+        from .skill_sources import validate_skill_bundle_map
+        validate_skill_bundle_map(data, base=base)
     value = EvidenceWorkspace(base.resolve(), canonical(data))
     if scope is not None:
         scope.workspaces[(str(value.base), value.payload)] = value

@@ -22,6 +22,7 @@ WORKFLOWS = {
     "data-design": "etalon-data-design",
     "research": "etalon-research",
     "research-context": "etalon-research-context",
+    "research-decision": "etalon-research-decision",
     "research-index": "etalon-research-index",
     "method-configuration": "etalon-method-configuration",
     "skill-improvement": "etalon-skill-improvement",
@@ -41,7 +42,7 @@ SNAPSHOT_MANIFEST = "etalon-bundle-manifest.json"
 
 def library_catalog() -> dict:
     """Optional discovery groups; they do not constrain selection or duplicate bundles."""
-    memory = ["research-context", "research", "research-index"]
+    memory = ["research-context", "research", "research-index", "research-decision"]
     rsi = ["skill-improvement"]
     return {"schema": "etalon-skill-libraries/1", "libraries": {
         "memory": memory,

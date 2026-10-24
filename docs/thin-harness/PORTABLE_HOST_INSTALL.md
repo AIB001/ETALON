@@ -81,14 +81,31 @@ to the exact failed intent. Old artifacts and failure stages remain. Successfull
 published operations cannot be closed as failed, and terminal failures are not
 automatically resumed. See [publication](RESEARCH_PUBLICATION.md).
 
-`doctor` verifies generated configuration and bindings; its native discovery,
-trust, delivery and consumption fields remain unverified. For Codex, inspect
-`python -m etalon.codex_hooks --target PROJECT`, then use normal project trust and
+`doctor` verifies generated configuration and bindings. Its `verification_stages`
+separately reports static installation, app-server reachability, native discovery,
+host review, login, MCP reachability, native event acceptance and model consumption.
+Only static installation is checked by doctor; `acceptance_complete` remains
+false. A receipt on disk does not upgrade these other stages.
+
+For Codex, inspect `python -m etalon.codex_hooks --target PROJECT`, then use normal project trust and
 `/hooks` review. For Claude, review the actual project hooks and MCP configuration
-through the host. Neither stdio protocol tests nor manually constructed compact
+through the host. Inspection first reads bounded `app-server --help` output and
+selects the advertised `--listen stdio://`, `--stdio`, or explicit default stdio
+transport. It does not infer compatibility from a version number or upgrade the
+host. An unsupported `hooks/list` keeps transport/configuration diagnostics and
+reports discovery as unsupported rather than pretending hooks were accepted.
+Use `--check-login` to read account metadata with token refresh disabled. Existing
+credentials are reported as `credential_present_unvalidated`; this is not a model
+access test. Missing login, project review, MCP reachability and actual event
+delivery are independent states. Raw configuration, account identity and tokens
+are not returned.
+
+Neither stdio protocol tests nor manually constructed compact
 events prove native compaction. Real acceptance requires a Codex contextCompaction
 item or Claude compact_boundary, followed by verified entry reads and no duplicate
 scientific actions. Keep failed host attempts and classify them separately.
 
 Protocol references: [Codex hooks](https://learn.chatgpt.com/docs/hooks#mcp-tool-hooks)
 and [Claude Code hooks](https://code.claude.com/docs/en/hooks#mcp-tool-hook-fields).
+The transport and read-only account interface are documented in
+[Codex App Server](https://learn.chatgpt.com/docs/app-server).

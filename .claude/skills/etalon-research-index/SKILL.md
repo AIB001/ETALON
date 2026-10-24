@@ -24,6 +24,14 @@ input just because their molecular identity matches.
 
 ## Organize resources
 
+For automatic discovery use `etalon_research_context(view="resources")` with the
+entry or its pinned `read_context`. It inventories published originals and
+explicitly named skills; page through the returned cursor and keep coverage gaps.
+Inventory membership supplies neither applicability nor activation. For one
+branch use `view="branch", branch_id=...`; task-wide selection, exact usage links,
+unknown consumption and later decisions remain distinct. These are optional
+views over the same records, not additional memory stores.
+
 Use `etalon.research.meta_context.describe_resource` and `index_resources` on an
 explicit bounded set. Keep originals in their existing libraries. Each part names
 its conditions, required dimensions, explicitly irrelevant dimensions, available
@@ -47,6 +55,12 @@ explicit reason; it does not prove the template is best. `publish_task_workset`
 prepares an existing publication; `resume_publication` completes archival only.
 The workset is active only through its published checkpoint decision. Read it back
 with `read_task_workset` and retain its exact refs, selected parts and exclusions.
+
+When tracing a selected resource into actual work, use the optional resource-use
+association in the API reference. Bind exact MethodUse, node, evaluation and later
+decision refs; keep selected, read, consumed and executed separate. A delivered
+skill or completed node does not show instruction consumption. Old records lacking
+phase observations remain unknown in explicitly retrospective annotations.
 
 For details and callable signatures, read `references/api.md` only when building
 or publishing a workset. Do not invent MCP write tools; the Python SDK supplies

@@ -391,6 +391,8 @@ def _preflight(request, root, source_id, parent_checkpoint, parent_ref, ws):
 
     def validate_links(content):
         _verify_external(content, source_id, ws, collection=collection)
+        from .continuation import validate_revision_links
+        validate_revision_links(journal, content, source_id, external_workspace=ws)
         local = {}
         for ref in _exact_refs(content):
             if ref["source_id"] != source_id:
@@ -445,7 +447,7 @@ def _preflight(request, root, source_id, parent_checkpoint, parent_ref, ws):
         journal.contents[artifact.id] = content
         return make_ref(source_id, artifact.id, artifact.as_dict())
 
-    result_contents = []
+    result_contents, opportunity_heads = [], {}
     for item in request["results"]:
         artifact = Artifact(str(root / "results" / item["identity"]["sha256"]), **item["identity"],
             source_kind=item["source_kind"], role=item["role"], bindings=item["bindings"])
@@ -457,6 +459,15 @@ def _preflight(request, root, source_id, parent_checkpoint, parent_ref, ws):
             payload = validate_content(json.loads(journal.artifact_path(artifact).read_text("utf-8-sig")))
             if payload["schema"] != declared:
                 raise EvidenceError("result content differs from its declared schema")
+            from .opportunity_state import DISPOSITION as STATE_DISPOSITION, REOPEN as STATE_REOPEN
+            if declared in {STATE_DISPOSITION, STATE_REOPEN}:
+                previous = (payload["previous_state_ref"] if declared == STATE_DISPOSITION
+                            else payload["previous_terminal_ref"])
+                key = canonical([payload["opportunity_ref"], previous])
+                ref = refs[item["name"]]
+                if key in opportunity_heads and opportunity_heads[key] != ref:
+                    raise EvidenceError("ambiguous concurrent opportunity heads in publication results")
+                opportunity_heads[key] = ref
             result_contents.append(payload)
     for content in result_contents:
         validate_links(content)
@@ -521,6 +532,28 @@ def _workspace(intent, root, snapshot):
         destination = root / "mapped" / mapping["sha256"]
         _copy(_local(ws.base, mapping["location"], confined=True), destination, identity)
         mapping["location"] = str(destination)
+    # Skill roots are canonical workspace-relative locators, not ordinary
+    # location_map entries. Preserve each pinned version when changing base;
+    # never substitute an installed bundle or retain the old relative root.
+    if manifest.get("skill_bundle_map"):
+        from etalon import skills
+        from .skill_sources import _root as bundle_root
+        for mapping in manifest["skill_bundle_map"]:
+            source_root = bundle_root(ws.base, mapping["root"])
+            pinned = {"root": str(source_root), "manifest_sha256": mapping["manifest_sha256"]}
+            version, _ = skills.snapshot(mapping["slug"], bundle_ref=pinned)
+            relative = "skills/" + mapping["manifest_sha256"] + "/bundle"
+            destination = bundle_root(root, relative)
+            for member in version["files"]:
+                target = bundle_root(root, relative + "/" + member["path"])
+                _copy(source_root / member["path"], target,
+                      {key: member[key] for key in ("sha256", "bytes")})
+            # Recheck both inventories, including on replay where _copy may
+            # already have complete targets. Extra/changed members fail closed.
+            skills.snapshot(mapping["slug"], bundle_ref=pinned)
+            skills.snapshot(mapping["slug"], bundle_ref={
+                "root": str(destination), "manifest_sha256": mapping["manifest_sha256"]})
+            mapping["root"] = relative
     manifest["sources"].append({"source_id": intent["source_id"], "kind": "journal",
         "location": str(snapshot), "identity": {"kind": "snapshot_sha256", "value": file_identity(snapshot)["sha256"]}})
     # Relocated authority mappings remain live authority reads for the new CP.
@@ -573,6 +606,14 @@ def resume_publication(intent_path):
         for item in saved_results:
             value = Artifact(item["saved_path"], **item["identity"], source_kind=item["source_kind"],
                              role=item["role"], bindings=item["bindings"])
+            from .evidence_refs import CONTENT_SCHEMAS
+            if item["bindings"].get("schema") in CONTENT_SCHEMAS:
+                content = validate_content(json.loads(journal.artifact_path(value).read_text("utf-8-sig")))
+                if content["schema"] != item["bindings"]["schema"]:
+                    raise EvidenceError("result content differs from its declared schema")
+                _verify_external(content, intent["source_id"], ws)
+                from .continuation import validate_revision_links
+                validate_revision_links(journal, content, intent["source_id"], external_workspace=ws)
             identifier = journal.record(value)
             refs[item["name"]] = make_ref(intent["source_id"], identifier, journal.get(identifier))
         _stage(root, "results_recorded", {"refs": refs})

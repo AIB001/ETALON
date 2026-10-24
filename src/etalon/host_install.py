@@ -243,6 +243,13 @@ def doctor(target):
         ".codex/hooks.json" if saved["host"] == "codex" else ".claude/settings.json")
     events = list(json.loads(_read(hooks_path)).get("hooks", {})) if _io(hooks_path).is_file() else []
     return {"schema": "etalon-host-doctor/1", "configuration_verified": good,
+            "verification_stages": {
+                "static_installation": "verified" if good else "mismatch",
+                "app_server": "not_checked", "native_discovery": "not_checked",
+                "host_review": "not_checked", "login": "not_checked",
+                "mcp_reachability": "not_checked", "native_event_acceptance": "not_verified",
+                "model_consumption": "not_verified"},
+            "acceptance_complete": False,
             "host": saved["host"], "transport": transport, "verification": verification,
             "entry_exists_on_server": bool(entry and Path(entry).is_file()),
             "configured_events": events,

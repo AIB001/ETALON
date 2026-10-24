@@ -60,6 +60,11 @@ def _receipt_io_path(path):
     """
     value = str(path)
     if os.name == "nt" and not value.startswith("\\\\?\\"):
+        # Path.absolute() can retain `..`; extended Win32 paths disable the
+        # ordinary Win32 normalization that interprets those components. Apply
+        # that lexical normalization before prefixing. Do not resolve links:
+        # _root must still see and reject redirected receipt ancestors.
+        value = os.path.abspath(value)
         if value.startswith("\\\\"):
             return Path("\\\\?\\UNC\\" + value[2:])
         return Path("\\\\?\\" + value)
@@ -225,6 +230,41 @@ def _event_identity(event):
     return {"kind": "payload_fingerprint", "value": _digest(event)}, False
 
 
+def _invalidated_state(config, path, reason):
+    return {"schema": VERSION, "config": config, "usable": False, "reason": reason,
+            "receipt_path": str(path), "consumption_verified": False}
+
+
+def _tool_outcome(event):
+    """Observe explicit protocol failure flags, never infer success from prose."""
+    response = event.get("tool_response")
+    encoding = "absent" if "tool_response" not in event else "json_value"
+    if isinstance(response, str):
+        try:
+            response = json.loads(response)
+            encoding = "json_string"
+        except (ValueError, RecursionError):
+            encoding = "unparsed_text"
+    signals = []
+    if event["hook_event_name"] == "PostToolUseFailure":
+        signals.append("host_post_tool_failure")
+    if event.get("is_error") is True:
+        signals.append("event_is_error")
+    if isinstance(response, dict):
+        if response.get("isError") is True:
+            signals.append("mcp_is_error")
+        # Do not mistake an application-domain `error` or `result` for MCP.
+        if response.get("jsonrpc") == "2.0":
+            if response.get("error") is not None:
+                signals.append("jsonrpc_error")
+            if isinstance(response.get("result"), dict) and response["result"].get("isError") is True:
+                signals.append("mcp_is_error")
+    return {"observation": "failed" if signals else
+                "requested" if event["hook_event_name"] == "PreToolUse" else "returned_status_unverified",
+            "failure_signals": signals, "response_encoding": encoding,
+            "error_sha256": _digest(event["error"]) if event.get("error") is not None else None}
+
+
 def handle_event(entry, event, *, host, state_dir, policy=None, max_bytes=16384,
                  conditions=None):
     """Handle one event with durable, session-scoped, idempotent receipts.
@@ -321,6 +361,12 @@ def handle_event(entry, event, *, host, state_dir, policy=None, max_bytes=16384,
             saved = _read_json(_receipt_io_path(path), 4 * MAX_EVENT_BYTES)
             if saved["input_sha256"] != payload_hash or saved["config"] != config:
                 raise ValueError("hook event identity conflicts with prior payload or configuration")
+            if not strong_identity and (event_name == "PreCompact" or saved["status"] == "failed"):
+                # Equal content cannot distinguish a retry from another compact
+                # or read failure. Preserve the receipt, but conservatively drop
+                # a baseline prepared since the previous equal observation.
+                reason = "precompact_requires_fresh_baseline" if event_name == "PreCompact" else "context_read_failed"
+                _save_cursor(_receipt_io_path(root / "delivery-cursor"), _invalidated_state(config, path, reason))
             return {"ok": saved["status"] == "prepared", "duplicate": True,
                     "receipt_path": str(path), "receipt": saved, "host_output": saved["host_output"]}
         output = {}
@@ -354,13 +400,10 @@ def handle_event(entry, event, *, host, state_dir, policy=None, max_bytes=16384,
         tool_observation = None
         if event_name in TOOL_EVENTS:
             response = event.get("tool_response")
-            explicitly_failed = (event_name == "PostToolUseFailure" or event.get("is_error") is True
-                                 or isinstance(response, dict) and response.get("isError") is True)
             tool_observation = {"tool_name": tool_name, "tool_use_id": event.get("tool_use_id"),
                 "input_sha256": _digest(event.get("tool_input")),
                 "response_sha256": _digest(response) if "tool_response" in event else None,
-                "observation": "failed" if explicitly_failed else
-                    "requested" if event_name == "PreToolUse" else "returned_status_unverified",
+                **_tool_outcome(event),
                 "basis": "host_event", "scientific_admission": "not_assessed",
                 "request_id": event.get("tool_input", {}).get("request_id")
                     if isinstance(event.get("tool_input"), dict) else None}
@@ -377,13 +420,9 @@ def handle_event(entry, event, *, host, state_dir, policy=None, max_bytes=16384,
         if event_name == "PreCompact":
             # Even a failed source read cannot make an old pre-compaction
             # baseline usable. SessionStart after compact always rebuilds it.
-            next_state = {"schema": VERSION, "config": config, "usable": False,
-                          "reason": "precompact_requires_fresh_baseline",
-                          "receipt_path": str(path), "consumption_verified": False}
+            next_state = _invalidated_state(config, path, "precompact_requires_fresh_baseline")
         elif failure is not None:
-            next_state = {"schema": VERSION, "config": config, "usable": False,
-                          "reason": "context_read_failed", "receipt_path": str(path),
-                          "consumption_verified": False}
+            next_state = _invalidated_state(config, path, "context_read_failed")
         receipt = {"schema": VERSION, "scope": scope, "event": event_name,
                    "event_identity": identity, "identity_strength": "host_id" if strong_identity else "content_only",
                    "input_sha256": payload_hash, "config": config,

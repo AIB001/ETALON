@@ -78,6 +78,37 @@ def test_long_receipt_path_retains_full_identity_and_replays(tmp_path, context):
     assert first["receipt"] == again["receipt"]
 
 
+@pytest.mark.skipif(os.name != "nt", reason="Windows extended paths disable parent normalization")
+def test_bound_receipt_state_with_parent_components_writes_and_replays(tmp_path, context, monkeypatch):
+    parent = tmp_path / "existing-parent"
+    parent.mkdir()
+    state = (parent / ".." / ("long-export-" + "x" * 85) / "receipts").absolute()
+    assert ".." in state.parts
+    binding = tmp_path / "binding.json"
+    binding.write_text(json.dumps({"schema": "etalon-research-hook-binding/1", "host": "codex",
+        "entry": str(tmp_path / "entry.json"), "state_dir": str(state), "max_bytes": 16384}), encoding="utf-8")
+    monkeypatch.setenv("ETALON_RESEARCH_HOOK_BINDING", str(binding))
+    first = hooks.handle_bound_event(event())
+    public_path = Path(first["receipt_path"])
+    io_path = hooks._receipt_io_path(public_path)
+    assert first["ok"] and len(str(public_path)) > 260
+    assert ".." in public_path.parts and ".." not in io_path.parts
+    assert io_path == Path("\\\\?\\" + os.path.abspath(str(public_path)))
+    assert hooks._receipt_io_path(io_path) == io_path
+    stored = io_path.read_bytes()
+    repeated = hooks.handle_bound_event(event())
+    assert repeated["duplicate"] and repeated["receipt"] == first["receipt"]
+    assert io_path.read_bytes() == stored
+
+
+def test_receipt_normalization_does_not_resolve_link_components(tmp_path, monkeypatch):
+    # Link resolution here would hide aliases from _root's redirect checks.
+    path = tmp_path / "symbolic-alias" / "receipt.json"
+    monkeypatch.setattr(Path, "resolve", lambda *a, **k: pytest.fail("must not resolve links"))
+    converted = hooks._receipt_io_path(path)
+    assert "symbolic-alias" in converted.parts
+
+
 def test_native_payload_fallback_refreshes_context_after_compaction(tmp_path, context):
     native = event(source="compact")
     native.pop("event_id")
@@ -136,6 +167,29 @@ def test_host_specific_failure_events(tmp_path):
         invoke(tmp_path, value)
     report = hooks.handle_event({}, value, host="claude", state_dir=tmp_path)
     assert report["receipt"]["tool_observation"]["observation"] == "failed"
+    observation = report["receipt"]["tool_observation"]
+    assert observation["failure_signals"] == ["host_post_tool_failure"]
+    assert observation["error_sha256"] == hooks._digest("offline")
+    assert "offline" not in json.dumps(report["receipt"])
+
+
+@pytest.mark.parametrize("response, expected", [
+    (json.dumps({"isError": True, "content": [{"text": "PRIVATE_ERROR"}]}), ["mcp_is_error"]),
+    ({"jsonrpc": "2.0", "id": 1, "error": {"code": -32603, "message": "PRIVATE_ERROR"}}, ["jsonrpc_error"]),
+    ({"jsonrpc": "2.0", "id": 1, "result": {"isError": True}}, ["mcp_is_error"]),
+    ({"result": {"isError": True}, "error": "domain field"}, []),
+    ("Error occurred in a historical example", []),
+    ("[" * 1500 + "]" * 1500, []),
+])
+def test_mcp_error_shapes_are_observed_without_guessing_from_domain_content(tmp_path, response, expected):
+    value = event("PostToolUse", tool_name="mcp__etalon__read_evidence", tool_response=response)
+    report = invoke(tmp_path, value)
+    observation = report["receipt"]["tool_observation"]
+    assert observation["failure_signals"] == expected
+    assert observation["observation"] == ("failed" if expected else "returned_status_unverified")
+    assert observation["response_sha256"] == hooks._digest(response)
+    assert "PRIVATE_ERROR" not in json.dumps(report["receipt"])
+    assert report["ok"] and report["host_output"] == {}
 
 
 def test_cli_failure_has_no_success_stdout(tmp_path):

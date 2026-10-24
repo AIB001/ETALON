@@ -88,6 +88,21 @@ def validate_content(payload):
     if schema in IMPROVEMENT_SCHEMAS:
         from .improvement import validate_content as validate_improvement
         return validate_improvement(payload)
+    if schema == "etalon-defect-family/1":
+        from .defect_family import validate_content as validate_family
+        return validate_family(payload)
+    if schema in {"etalon-opportunity-disposition/1", "etalon-opportunity-reopen/1"}:
+        from .opportunity_state import validate_content as validate_state
+        return validate_state(payload)
+    if schema == "etalon-candidate-brief/1":
+        from .candidate_brief import validate_content as validate_brief
+        return validate_brief(payload)
+    if schema in {"etalon-research-decision/1", "etalon-research-decision-update/1"}:
+        from .research_decision import validate_content as validate_decision
+        return validate_decision(payload)
+    if schema in {"etalon-evidence-window/1", "etalon-outcome-release/1"}:
+        from .evidence_window import validate_content as validate_window
+        return validate_window(payload)
     if schema == "etalon-research-claim/1":
         return validate_claim(payload)
     if schema == "etalon-research-workflow/1":
@@ -212,6 +227,27 @@ def _exact_refs(value):
             yield from _exact_refs(item)
 
 
+def validate_revision_links(journal, content, source_id, *, external_workspace=None):
+    """Optional RSI annotations use the same checked writer and publication path."""
+    schema = content.get("schema")
+    if schema == "etalon-defect-family/1":
+        from .defect_family import validate_local_links
+    elif schema in {"etalon-opportunity-disposition/1", "etalon-opportunity-reopen/1"}:
+        from .opportunity_state import validate_local_links
+    elif schema == "etalon-candidate-brief/1":
+        from .candidate_brief import validate_local_links
+    elif schema in {"etalon-research-decision/1", "etalon-research-decision-update/1"}:
+        from .research_decision import validate_local_links
+    elif schema in {"etalon-evidence-window/1", "etalon-outcome-release/1"}:
+        from .evidence_window import validate_local_links
+    else:
+        return
+    validate_local_links(journal, content, source_id, external_workspace=external_workspace)
+    if schema == "etalon-research-decision/1" and content.get("evidence_window_ref") is not None:
+        from .evidence_window import validate_decision_window
+        validate_decision_window(journal, content, source_id, external_workspace=external_workspace)
+
+
 def record_content(journal, payload, directory, *, source_id, source_kind, role="diagnostic", external_workspace=None):
     """Save claim/step/checkpoint through ResearchJournal.record(Artifact).
 
@@ -242,6 +278,7 @@ def record_content(journal, payload, directory, *, source_id, source_kind, role=
     if content["schema"] in IMPROVEMENT_SCHEMAS:
         from .improvement import validate_local_links as validate_improvement_links
         validate_improvement_links(journal, content, source_id)
+    validate_revision_links(journal, content, source_id, external_workspace=external_workspace)
     if content["schema"] == "etalon-research-trace/1":
         from .research_trace import validate_local_links as validate_trace_links
         validate_trace_links(journal, content, source_id)

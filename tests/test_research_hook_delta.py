@@ -190,6 +190,32 @@ def test_weak_tool_identity_after_compaction_does_not_reuse_old_delta(tmp_path, 
     assert not after["duplicate"]
 
 
+def test_repeated_identical_weak_compaction_invalidates_each_recovered_baseline(tmp_path, context):
+    call(tmp_path, "start", "SessionStart")
+    compact = {"hook_event_name": "PreCompact", "session_id": "A", "trigger": "auto"}
+    def reset():
+        return hooks.handle_event(tmp_path / "entry.json", compact, host="codex",
+                                  state_dir=tmp_path / "receipts")
+    first = reset()
+    saved_bytes = Path(first["receipt_path"]).read_bytes()
+    assert payload(call(tmp_path, "after-first"))["delivery"]["mode"] == "baseline"
+    second = reset()
+    assert second["duplicate"] and second["receipt_path"] == first["receipt_path"]
+    assert Path(first["receipt_path"]).read_bytes() == saved_bytes
+    assert payload(call(tmp_path, "after-second"))["delivery"]["mode"] == "baseline"
+
+
+def test_replayed_strong_compaction_does_not_invalidate_later_baseline(tmp_path, context):
+    call(tmp_path, "start", "SessionStart")
+    call(tmp_path, "compact", "PreCompact")
+    fresh = call(tmp_path, "fresh")
+    assert payload(fresh)["delivery"]["mode"] == "baseline"
+    assert call(tmp_path, "compact", "PreCompact")["duplicate"]
+    after = payload(call(tmp_path, "next"))
+    assert after["delivery"]["mode"] == "unchanged"
+    assert after["delivery"]["base_receipt"] == fresh["receipt_path"]
+
+
 def test_changed_source_watermark_produces_delta_without_semantic_result_change(tmp_path, context):
     call(tmp_path, "start", "SessionStart")
     context["source_watermarks"][0]["sequence"] += 1

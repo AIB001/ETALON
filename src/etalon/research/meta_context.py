@@ -137,8 +137,9 @@ def verify_resource(resource, workspace=None, *, _collection=None):
     _resource_check(resource)
     if resource["kind"] == "skill":
         from etalon.skills import snapshot
+        from .skill_sources import resolve_skill_bundle
         ref = resource["content_ref"]
-        manifest, members = snapshot(ref["slug"], bundle_ref=ref.get("bundle_ref"))
+        manifest, members = snapshot(ref["slug"], bundle_ref=resolve_skill_bundle(ref, workspace))
         if manifest["manifest_sha256"] != ref["manifest_sha256"]:
             raise EvidenceError("skill resource version changed")
         if not {p["part_id"] for p in resource["parts"]} <= set(members):
@@ -415,7 +416,7 @@ def read_task_workset(workspace, checkpoint_ref, *, verify=True):
     return {"status": "active", "task_id": cp["task_id"], **{k: active[k] for k in ("ref", "activation_ref", "workset")}}
 
 
-def selected_skill_members(workset):
+def selected_skill_members(workset, *, workspace=None):
     """Exact installed/external bundle members selected by a validated workset."""
     validate_workset(workset)
     enabled = {_key(v) for v in workset["enabled"]}
@@ -427,10 +428,31 @@ def selected_skill_members(workset):
             # host discovery. The reviewer must include SKILL.md explicitly.
             if "SKILL.md" not in members:
                 raise EvidenceError("selected skill export requires an explicitly selected SKILL.md")
-            result.append({**resource["content_ref"], "members": sorted(members)})
+            selected = {**resource["content_ref"], "members": sorted(members)}
+            if workspace is not None:
+                from .skill_sources import resolve_skill_bundle
+                bundle_ref = resolve_skill_bundle(resource["content_ref"], workspace)
+                if bundle_ref is not None:
+                    selected["bundle_ref"] = bundle_ref
+                verify_resource(resource, workspace)
+            result.append(selected)
     if len({x["slug"] for x in result}) != len(result):
         raise EvidenceError("ambiguous selected skill slug")
     return result
+
+
+def workset_resource_part(workset, resource_id, part_id):
+    """Resolve an exact reviewed part; selection is not evidence of actual use."""
+    validate_workset(workset)
+    _text(resource_id); _text(part_id)
+    resource = next((r for r in workset["index"]["resources"] if r["resource_id"] == resource_id), None)
+    part = next((p for p in resource["parts"] if p["part_id"] == part_id), None) if resource else None
+    if part is None:
+        raise EvidenceError("resource part is outside the reviewed workset")
+    decision = next(d for d in workset["review"]["decisions"]
+                    if (d["resource_id"], d["part_id"]) == (resource_id, part_id))
+    return {"resource": resource, "part": part, "decision": decision,
+            "selected": {"resource_id": resource_id, "part_id": part_id} in workset["enabled"]}
 
 
 def workset_summary(workspace, checkpoint_ref, *, conditions=None):
@@ -446,6 +468,7 @@ def workset_summary(workspace, checkpoint_ref, *, conditions=None):
         enabled_versions=[] if changed else [{**part, "resource_digest": next(
             r["digest"] for r in value["index"]["resources"] if r["resource_id"] == part["resource_id"])}
             for part in value["enabled"]],
+        selected_skill_sources=[] if changed else selected_skill_members(value, workspace=workspace),
         inactive=[{k: d[k] for k in ("resource_id", "part_id", "disposition")} for d in value["review"]["decisions"] if d["disposition"] != "reuse"],
         details="read ref artifact for exact conditions, reasons, evidence and versions")
 

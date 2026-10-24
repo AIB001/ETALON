@@ -3,7 +3,7 @@
 Bare Journal IDs resolve only inside their own published source. In particular,
 two methods sharing a name or task are not evidence of use or evaluation.
 """
-from .evidence_refs import make_ref
+from .evidence_refs import EvidenceError, make_ref, validate_ref
 
 
 def method_links(content, source_id, records):
@@ -29,6 +29,24 @@ def method_links(content, source_id, records):
                 value = make_ref(source_id, value, row["record"])
             if isinstance(value, dict) and value.get("schema") == "etalon-evidence-ref/1":
                 links.append((value, relation))
+
+    # Ordinary usage Artifacts expose the same exact links as their JSON. The
+    # dedicated reader checks full semantic joins; graph edges do not assert use.
+    bindings = content.get("bindings", {})
+    if isinstance(bindings, dict) and bindings.get("schema") == "etalon-resource-usage/1":
+        from .resource_usage import RELATIONS
+        dependencies = bindings.get("evidence_refs", [])
+        declared = bindings.get("resource_usage_links", [])
+        if not isinstance(dependencies, list) or not isinstance(declared, list) or len(declared) > 64:
+            return links
+        for row in declared:
+            if (isinstance(row, dict) and row.get("relation") in RELATIONS.values()
+                    and isinstance(row.get("ref"), dict) and row["ref"] in dependencies):
+                try:
+                    validate_ref(row["ref"])
+                except EvidenceError:
+                    continue
+                add([row["ref"]], row["relation"])
 
     if schema == "etalon-method-use/1":
         add([s["method_version_ref"] for s in content["selected_methods"]], "selected_method")

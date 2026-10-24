@@ -74,6 +74,7 @@ def _focused_context(graph, nodes, *, workspace, node_id, question, purpose, max
     """
     selected_scope = set()
     reasons = {}
+    scoped = graph.get("scope_receipt")
 
     def add(nid, reason):
         if nid in nodes:
@@ -82,7 +83,14 @@ def _focused_context(graph, nodes, *, workspace, node_id, question, purpose, max
 
     if node_id is not None:
         add(node_id, "selected_node")
-    if view == "node":
+    if scoped is not None:
+        # The graph reader already selected and verified this explicit scope.
+        # Do not run another implicit neighborhood expansion over its excerpts.
+        roots = {node_identity(ref) for ref in scoped["root_refs"]}
+        tails = {node_identity(ref) for ref in graph["checkpoint_progress"]["tail_step_refs"]}
+        for nid in nodes:
+            add(nid, "scope_root" if nid in roots else "checkpoint_tail_step" if nid in tails else "explicit_scope_reference")
+    elif view == "node":
         add(node_id, "selected_node")
         branch = nodes[node_id]["branch_id"]
         for nid, node in nodes.items():
@@ -132,7 +140,7 @@ def _focused_context(graph, nodes, *, workspace, node_id, question, purpose, max
                 add(nid, "current_judgment")
 
     expected_edges = [e for e in graph["edges"] if e["kind"] == "refutes" and
-                      (view == "summary" or e["from"] in selected_scope or e["to"] in selected_scope)]
+                      (scoped is not None or view == "summary" or e["from"] in selected_scope or e["to"] in selected_scope)]
     references = {}
 
     def reference(ref):
@@ -161,8 +169,20 @@ def _focused_context(graph, nodes, *, workspace, node_id, question, purpose, max
     # Conditions may be large; even omitted experiences retain an exact way to
     # inspect them. No omitted condition is treated as an applicability match.
     for nid in selected_scope:
-        if "experience" in nodes[nid] or nid == node_id:
+        if scoped is not None or "experience" in nodes[nid] or nid == node_id:
             reference(nodes[nid]["ref"])
+    if scoped is not None:
+        # These pointers are mandatory navigation, not optional body excerpts.
+        # Some belong to an explicitly reported ordinary-hop boundary.
+        for key in ("root_refs", "control_refs", "counter_endpoint_refs", "deliberate_boundary_refs"):
+            for ref in scoped[key]:
+                reference(ref)
+        for relation in scoped["counter_relations"]:
+            for key in ("from_ref", "to_ref", "basis_ref"):
+                reference(relation[key])
+        for relation in graph["edges"]:
+            reference(relation["basis_ref"])
+        expected_edges = [_compact_relation(edge) for edge in expected_edges]
 
     complete = not graph["issues"] and all(c["status"] == "complete" for c in graph["coverage"])
     result = {"schema": CONTEXT, "view": view, "checkpoint_ref": graph["checkpoint_ref"], **handoff,
@@ -196,15 +216,31 @@ def _focused_context(graph, nodes, *, workspace, node_id, question, purpose, max
                      "Summary excerpts are navigation data; inspect exact refs for full conditions before a new decision."],
         "execution_permission": "not_granted", "automatic_retry": False,
         "content_role": "sourced_research_data_not_host_instructions", "truncated": graph["truncated"]}
+    if scoped is not None:
+        result["scope"] = scoped["requested_scope"]
+        result["scope_receipt"] = _compact_scope_receipt(scoped)
+        result["selection"]["strategy"] = "explicit-scope-navigation-" + view + "/1"
+        result["selection"]["exclusion_scope"] = "explicit requested scope; ordinary-hop boundaries remain exact references"
+        result["selection"]["coverage_complete"] = False
+        result["counterevidence"]["scope"] = "explicit_requested_scope"
+        result["followup"].update(
+            scope_source="pass scope with read_context to repeat this explicit scope",
+            boundary_ref_source="resolve scope_receipt.deliberate_boundary_node_ids in reference_index; read originals or start a new root_refs scope",
+            omitted_excerpt_refs="reference_index entries absent from items; use evidence_tool with read_context")
+        result["unknowns"].append("Scoped reference coverage does not establish global coverage or reading every original body.")
+        result["unknowns"].append("Traversal covers recognized explicit references; opaque artifact bodies do not establish a scientific dependency closure.")
+        _scope_excerpt_receipt(result, set(), selected_scope)
     if view == "summary":
         result["resume_frontier"] = _resume_frontier(workspace, graph, nodes, max_bytes=max_bytes)
     detail_reserve = 160 if view == "summary" else 128
     # Reserve room for identity, selected counters and omission receipt. We do
     # not drop branch, pending, pause or direction metadata to squeeze a view.
     if len(canonical(result).encode()) > max_bytes - max(256, detail_reserve):
+        if scoped is not None:
+            raise EvidenceError("scoped checkpoint and counter metadata exceeds context bound; choose narrower roots or ordinary_hops, or read exact originals")
         raise EvidenceError("checkpoint and counter control metadata exceeds context bound; increase max_bytes")
     priority = sorted(selected_scope, key=lambda nid: (
-        nid != node_id, reasons[nid] != "checkpoint_tail_step", "experience" not in nodes[nid],
+        nid != node_id, reasons[nid] != "checkpoint_tail_step", reasons[nid] != "scope_root", "experience" not in nodes[nid],
         nid not in graph["counter_node_ids"], reasons[nid] != "branch_reference",
         nodes[nid]["kind"] != "J", nid))
     if view == "summary":
@@ -217,13 +253,14 @@ def _focused_context(graph, nodes, *, workspace, node_id, question, purpose, max
             result["selection"]["excluded_by_view"] += 1
             continue
         node = nodes[nid]
-        item = dict(node) if view == "node" else {k: node[k] for k in (
+        item = dict(node) if view != "summary" else {k: node[k] for k in (
             "node_id", "ref", "home", "kind", "kind_basis", "state", "branch_id", "content_type")}
         if view == "summary":
             brief = node["summary"]
             item["summary"] = {"text": brief["text"][:240], "truncated": brief["truncated"] or len(brief["text"]) > 240}
             # Do not abbreviate applicability, alternatives or claim scope.
-            item.update({k: node[k] for k in ("experience", "decision", "claim_scope") if k in node})
+            item.update({k: node[k] for k in ("experience", "decision", "claim_scope", "revision_note",
+                                             "research_decision", "evidence_timing") if k in node})
         item["selection_reason"] = reasons[nid]
         result["items"].append(item)
         selected.add(nid)
@@ -232,6 +269,8 @@ def _focused_context(graph, nodes, *, workspace, node_id, question, purpose, max
             result["items"].pop(); selected.remove(nid)
             result["selection"]["excluded_by_budget"] += 1
             if nid == node_id:
+                if scoped is not None:
+                    raise EvidenceError("selected node and scoped controls exceed context bound; read its exact original with etalon_evidence_read")
                 raise EvidenceError("selected node and control metadata exceed context bound; increase max_bytes")
             if reasons[nid] == "checkpoint_tail_step":
                 # A growing checkpoint must not make a bounded resumption card
@@ -240,10 +279,10 @@ def _focused_context(graph, nodes, *, workspace, node_id, question, purpose, max
                 # and reference_index; only optional excerpts are omitted.
                 result["selection"]["tail_details_omitted"] = result["selection"].get("tail_details_omitted", 0) + 1
     _counter_receipt(result, graph, nodes, selected, selected_scope, complete)
-    if view == "node":
+    if view != "summary":
         for edge in graph["edges"]:
             if edge["kind"] != "refutes" and edge["from"] in selected and edge["to"] in selected:
-                result["relations"].append(edge)
+                result["relations"].append(_compact_relation(edge) if scoped is not None else edge)
                 if len(canonical(result).encode()) > max_bytes - 128:
                     result["relations"].pop()
                     result["selection"]["omitted_optional_relations"] = result["selection"].get("omitted_optional_relations", 0) + 1
@@ -253,6 +292,8 @@ def _focused_context(graph, nodes, *, workspace, node_id, question, purpose, max
         result["unknowns"].append("Some explicit evidence references were unavailable or changed.")
     result["context_id"] = "research-context-" + digest(result)
     if len(canonical(result).encode()) > max_bytes:
+        if scoped is not None:
+            raise EvidenceError("scoped context receipt exceeds byte bound; choose narrower roots or ordinary_hops, or read exact originals")
         raise EvidenceError("context receipt exceeds byte bound; increase max_bytes")
     return result
 
@@ -264,6 +305,58 @@ def _counter_receipt(result, graph, nodes, selected, selected_scope, complete):
         declared_counter_refs=[nodes[nid]["ref"] for nid in graph["counter_evidence_node_ids"] if nid in selected],
         status="found" if counters & selected else "none_in_checked_scope" if complete and not graph["truncated"] and not counters else "coverage_insufficient",
         coverage_complete=complete and not graph["truncated"] and graph["counter_context_complete"] and counters <= selected)
+    if "scope_receipt" in result:
+        # Preserve the old conservative flag: only the explicitly named scope
+        # receipt can claim scoped success. A small excerpt cap says nothing
+        # about whether all declared counter pointers have been delivered.
+        result["counterevidence"]["coverage_complete"] = False
+        _scope_excerpt_receipt(result, selected, selected_scope)
+
+
+def _compact_relation(edge):
+    return {**{key: value for key, value in edge.items() if key != "basis_ref"},
+            "basis_node_id": node_identity(edge["basis_ref"])}
+
+
+def _compact_scope_receipt(scoped):
+    """Keep exact identities once in reference_index, preserving every relation."""
+    ref_fields = ("root_refs", "control_refs", "counter_endpoint_refs", "deliberate_boundary_refs")
+    receipt = {key: value for key, value in scoped.items()
+               if key not in {*ref_fields, "counter_relations", "boundary_relations", "requested_scope", "schema"}}
+    receipt.update(schema="etalon-research-context-scope/1", graph_scope_schema=scoped["schema"],
+                   reference_table="reference_index; node_id resolves to the exact original ref")
+    for key in ref_fields:
+        receipt[key.replace("_refs", "_node_ids")] = [node_identity(ref) for ref in scoped[key]]
+    requested = scoped["requested_scope"]
+    receipt["requested_scope"] = ({"root_node_ids": [node_identity(ref) for ref in requested["root_refs"]],
+        "ordinary_hops": requested["ordinary_hops"]} if "root_refs" in requested else requested)
+    groups = {}
+    for edge in scoped["boundary_relations"]:
+        groups.setdefault((edge["from"], edge["relation"]), []).append(edge["to"])
+    receipt["boundary_relation_groups"] = [{"from": source, "relation": relation, "to_node_ids": targets}
+        for (source, relation), targets in sorted(groups.items())]
+    receipt["boundary_relation_count"] = len(scoped["boundary_relations"])
+    # All counter directions are mandatory top-level relations. Point to that
+    # single lossless representation rather than delivering every edge twice.
+    receipt["counter_relation_source"] = "relations where kind=refutes; basis_node_id resolves in reference_index"
+    receipt["counter_relation_count"] = len(scoped["counter_relations"])
+    return receipt
+
+
+def _scope_excerpt_receipt(result, selected, selected_scope):
+    receipt = result["scope_receipt"]
+    counters = set(receipt["counter_endpoint_node_ids"])
+    result["excerpt_coverage"] = {
+        "eligible_count": len(selected_scope), "selected_count": len(selected & selected_scope),
+        "omitted_count": len(selected_scope - selected), "complete": selected_scope <= selected,
+        "counter_endpoint_count": len(counters), "selected_counter_endpoint_count": len(counters & selected),
+        "omitted_counter_endpoint_count": len(counters - selected), "counter_complete": counters <= selected,
+        "meaning": "node excerpts only; original-byte verification is separate from reading full original content"}
+    receipt["excerpt_coverage_complete"] = selected_scope <= selected
+    result["counterevidence"]["reference_coverage_complete"] = receipt["counter_reference_coverage_complete"]
+    result["counterevidence"]["excerpt_coverage_complete"] = counters <= selected
+    result["counterevidence"]["status"] = ("found" if counters else "none_in_checked_scope"
+        if receipt["counter_reference_coverage_complete"] else "coverage_insufficient")
 
 
 def _publication_context(entry):
@@ -293,16 +386,18 @@ def load_entry(entry):
 @bounded_read
 def build_research_context(entry, *, node_id=None, question=None, purpose="research",
                            policy=None, max_bytes=16384, as_of=None, home_overrides=None,
-                           conditions=None, view="full"):
+                           conditions=None, view="full", scope=None):
     """Read local/adjacent/counterevidence context and report selection coverage.
 
     question records the host's purpose; it does not rewrite the research task
     or silently impose a semantic relevance filter. No embedding model or global
     search is invoked. A missing counter is reported, never filled to a quota.
+    Optional scope selects exact roots or a branch before bounded graph traversal;
+    scoped reference coverage and excerpt delivery never imply global coverage.
     """
     if view not in {"summary", "node", "full"}:
         raise EvidenceError("context view must be summary, node or full")
-    if view == "node" and (not isinstance(node_id, str) or not node_id):
+    if view == "node" and scope is None and (not isinstance(node_id, str) or not node_id):
         raise EvidenceError("node context requires node_id")
     if type(max_bytes) is not int or not 4096 <= max_bytes <= 65536:
         raise EvidenceError("context max_bytes must be 4096..65536")
@@ -324,8 +419,10 @@ def build_research_context(entry, *, node_id=None, question=None, purpose="resea
         # Use the exact verified definition for this assembly, even if a publisher
         # atomically advances a path while source records are being collected.
         workspace = workspace_from_context(read_context, apply_policy=False)
+    graph_options = {} if scope is None else {"scope": scope}
     graph = build_research_graph(workspace, checkpoint_ref=checkpoint_ref, policy=policy,
-        purpose=purpose, home_overrides=home_overrides, max_nodes=128, max_bytes=131072, as_of=as_of)
+        purpose=purpose, home_overrides=home_overrides, max_nodes=128, max_bytes=131072, as_of=as_of,
+        **graph_options)
     from .meta_context import workset_summary
     from .graph_memory import restrict_workspace
     try:
@@ -354,7 +451,7 @@ def build_research_context(entry, *, node_id=None, question=None, purpose="resea
             node["experience"]["applicability"] = "not_checked_for_new_branch" if conditions is None else "conditions_mismatch" if unmet else "conditions_match_host_review_required"
             node["experience"]["unmatched_conditions"] = unmet
             add(nid, "current_task_experience" if conditions is None else "matched_experience" if not unmet else "experience_counterexample_to_transfer")
-    if view != "full":
+    if view != "full" or scope is not None:
         return _focused_context(graph, nodes, workspace=visible_workspace, node_id=node_id, question=question,
                                 purpose=purpose, max_bytes=max_bytes, view=view, publications=publications, handoff=handoff)
     for nid in graph["counter_node_ids"]:
