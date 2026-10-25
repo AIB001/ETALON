@@ -57,24 +57,31 @@ entry path may use a workspace path relative to itself. A dictionary may also
 contain an already validated EvidenceWorkspace. No migration of old SND1
 Journals is required.
 
-Three views use the same verified identities and access policy:
+The views use the same verified identities and access policy:
 
 | View | Delivered context | Expansion |
 | --- | --- | --- |
 | `summary` | Pause, pending, branches, source coverage, publication status and up to four navigation cards. The checkpoint's last declared step, conditional experience and counter-context have priority. | Exact item/index refs; `followup` names the existing context/evidence tools and their limits. |
 | `node` | Requires a stable or unambiguous logical `node_id`; follows same-branch records, direct neighbors, provenance dependencies and related counter edges. | Full node metadata in the selected neighborhood; excluded unrelated records are counted. |
 | `full` | Existing bounded task/checkpoint selection, preserving previous default behavior. | Increase the bound or read exact references. |
+| `card` | Small continuation card with immediate authority/pending/task/branch state and authored conclusion excerpts. | Lossless paged `manifest` sections and existing branch/evidence readers. |
+| `manifest` | Exact branch, reference, counter-direction, watermark and other navigation rows. | Follow `next_cursor`; MCP uses `view_options.section`, SDK uses `section`. |
 
-Every view preserves control metadata, `checkpoint_ref`, `context_id`,
-`continuation`, `source_watermarks`, `reference_index`, and selection/coverage
-receipts. `checkpoint_progress.tail_step_refs` exposes the last entry in the
+The summary/node/full contexts preserve control metadata, `checkpoint_ref`,
+`context_id`, `continuation`, `source_watermarks`, `reference_index`, and
+selection/coverage receipts. Card moves complete reference and watermark rows
+to its manifest when needed; authority, pending and all branch states remain
+immediate. Manifest pages carry pinned identity and coverage for their section.
+`checkpoint_progress.tail_step_refs` exposes the last entry in the
 published checkpoint's step list, with its exact reference. This is declared
-list order, not an inferred execution chronology. In summary view its card must
-fit or the call explicitly fails, so newly archived progress cannot be silently
-hidden behind old branch references. Full checkpoint content is still available
+list order, not an inferred execution chronology. An unscoped summary whose
+mandatory metadata exceeds its cap switches to the [small continuation card](CONTINUATION_CARD.md).
+That card retains the tail reference and exposes full navigation through pinned
+manifest pages; optional excerpts do not establish that original bodies were read.
+Full checkpoint content is still available
 through `etalon_evidence_read`.
 
-Focused views keep directional counter edges and readable endpoint refs even
+Node and ordinary summary views keep directional counter edges and readable endpoint refs even
 when detailed cards are omitted. `coverage_complete=false` distinguishes a
 reference-only conflict from fully delivered counter-context. Missing or
 restricted evidence is never invented. A small budget may fail explicitly when
@@ -85,7 +92,8 @@ budgets do not authorize a broader workspace.
 4096..262144 bytes. MCP schemas expose these constraints and evidence query
 limits of 1..50 and read limits of 1..32768. Artifact paging uses byte offsets and
 `fragment.next_offset`; an oversized request is rejected, not silently clamped.
-Summary/node outputs never inline base64 originals. Retrieval still collects a
+Summary/node/card outputs never inline base64 originals. Manifest pages can use
+exact UTF-8 byte fragments for a single oversized metadata row. Retrieval still collects a
 bounded permitted graph before delivery selection; this change does not claim
 reduced backend I/O or semantic question ranking.
 

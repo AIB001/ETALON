@@ -348,9 +348,10 @@ def build_research_graph(workspace, *, checkpoint_ref, policy=None, purpose="res
             issues.append({"reason": "referenced_content_unavailable"}); continue
         # Verify actual bytes even for ordinary raw artifacts. No scientific
         # interpretation is inferred from a successful read.
-        read = _read_evidence(ws, ref, view="artifact" if row["record_type"] == "artifact" else "record", limit=512,
+        artifact = row["record_type"] == "artifact" or "member" in ref
+        read = _read_evidence(ws, ref, view="artifact" if artifact else "record", limit=512,
                               collection=(records, coverage, warnings))
-        if read.get("availability") != "available" or (row["record_type"] == "artifact" and read.get("verification", {}).get("artifact") != "verified"):
+        if read.get("availability") != "available" or (artifact and read.get("verification", {}).get("artifact") != "verified"):
             raise EvidenceError("referenced artifact unavailable or identity changed")
         selected[nid] = _project_node(ref, row, task_id=task_id, home_overrides=home_overrides)
         if row["record_type"] == "artifact" and "projected_content" not in row:

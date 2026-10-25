@@ -153,7 +153,7 @@ def _frozen_sources(workspace):
 
 def prepare_publication(entry, directory=None, operation_id=None, expected_entry_identity=None, *,
                         parent_entry=None, results=(), steps=(), checkpoint_additions=None,
-                        corrects_intent=None, correction_reason=None):
+                        corrects_intent=None, correction_reason=None, branch_updates=None):
     """Persist explicit publication intent; do not write results or change entry.
 
     A missing destination entry requires ``parent_entry`` and expected identity
@@ -161,6 +161,8 @@ def prepare_publication(entry, directory=None, operation_id=None, expected_entry
     id with different request content is rejected, even after successful publish.
     Results are declared files with {name,path,identity,source_kind,role,bindings}.
     Steps are {name,content}; {publication_ref: name} binds earlier named records.
+    Optional branch_updates bind existing branch transitions to a new decision
+    step. They never change authority, pending handles or task scope.
     """
     from .research_context import load_entry
     entry = Path(entry).resolve()
@@ -174,6 +176,8 @@ def prepare_publication(entry, directory=None, operation_id=None, expected_entry
     request = {"entry": str(entry), "parent_entry": str(parent), "operation_id": operation_id,
                "expected_entry_identity": expected_entry_identity, "results": list(results),
                "steps": list(steps), "checkpoint_additions": checkpoint_additions or {}}
+    if branch_updates is not None:
+        request["branch_updates"] = branch_updates
     # Keep absent optional fields absent: old intent requests remain byte-for-byte
     # compatible with exact replay of the original API.
     if corrects_intent is not None or correction_reason is not None:
@@ -251,6 +255,9 @@ def prepare_publication(entry, directory=None, operation_id=None, expected_entry
             raise EvidenceError("publication cannot silently change branches, pending, guards or research scope")
         if any(not isinstance(items, list) for items in request["checkpoint_additions"].values()):
             raise EvidenceError("checkpoint additions must be explicit reference lists")
+        if "branch_updates" in request and (not isinstance(request["branch_updates"], list)
+                or not 1 <= len(request["branch_updates"]) <= 16):
+            raise EvidenceError("branch updates require 1..16 explicit decisions")
         source_id = "publication-" + digest({"root": str(root), "operation_id": operation_id})[:20]
         if source_id in {source["source_id"] for source in ws.manifest["sources"]}:
             raise EvidenceError("publication source identity conflicts with parent")
@@ -342,6 +349,63 @@ def _verify_external(content, source_id, ws, *, collection=None):
             result = _read_evidence(ws, ref, view="artifact", limit=MAX_CONTENT_BYTES + 1, collection=collection)
             if _content_result(result)["schema"] != schema:
                 raise EvidenceError("external publication reference has the wrong content schema")
+
+
+def _advance_checkpoint(request, parent, parent_ref, refs, step_refs):
+    """Apply only explicit, evidence-bound updates; no interpretation of output prose.
+
+    The same pure transition is used before persistence and during crash recovery.
+    A decision changes research state, never execution authority or runtime state.
+    """
+    checkpoint = json.loads(canonical(parent))
+    checkpoint["step_refs"].extend(ref for ref in step_refs if ref not in checkpoint["step_refs"])
+    for key, additions in request["checkpoint_additions"].items():
+        for ref in _resolve_aliases(additions, refs):
+            if ref not in checkpoint[key]:
+                checkpoint[key].append(ref)
+    branches = {b["branch_id"]: b for b in checkpoint["branches"]}
+    decisions = {canonical(refs[item["name"]]): _resolve_aliases(item["content"], refs)
+                 for item in request["steps"]}
+    seen = set()
+    for raw in request.get("branch_updates", []):
+        if not isinstance(raw, dict) or set(raw) != {
+            "branch_id", "expected_state", "state", "basis_refs", "next_read_refs",
+            "reconsider_when", "decision_ref"
+        }:
+            raise EvidenceError("branch update requires state, exact prior state, evidence and a decision reference")
+        update = _resolve_aliases(raw, refs)
+        bid = update["branch_id"]
+        if not isinstance(bid, str) or bid not in branches or bid in seen:
+            raise EvidenceError("branch update must name a distinct existing branch")
+        seen.add(bid)
+        old = branches[bid]
+        if update["expected_state"] != old["state"]:
+            raise EvidenceError("branch update prior state differs from selected checkpoint")
+        decision = decisions.get(canonical(update["decision_ref"]))
+        if (decision is None or decision.get("operation") != "decision"
+                or decision.get("branch_id") != bid or decision.get("task_id") != parent["task_id"]):
+            raise EvidenceError("branch transition requires a new same-branch decision step")
+        detail = decision["detail"]
+        allowed = {"open": {"reconsider", "fork"}, "active": {"proceed", "reconsider", "fork"},
+                   "waiting": {"defer"}, "resolved": {"reuse", "stop", "merge"}, "stopped": {"stop"}}
+        if update["state"] not in allowed or detail["choice"] not in allowed[update["state"]]:
+            raise EvidenceError("branch state does not match its explicit decision")
+        if old["state"] in {"resolved", "stopped"} and update["state"] in {"open", "active", "waiting"}:
+            if detail["choice"] != "reconsider":
+                raise EvidenceError("terminal branch reopening requires explicit reconsideration")
+        if (update["basis_refs"] != detail["basis_refs"]
+                or update["reconsider_when"] != detail["reconsider_when"]):
+            raise EvidenceError("branch evidence and reopening condition must match the decision")
+        if not isinstance(update["next_read_refs"], list) or any(
+                ref not in update["basis_refs"] for ref in update["next_read_refs"]):
+            raise EvidenceError("branch next reads must be selected from its decision evidence")
+        old.update({k: update[k] for k in ("state", "basis_refs", "next_read_refs", "reconsider_when")})
+        # Keep the author and reason directly reachable from the branch as well
+        # as the append-only step list; the evidence itself is not replaced.
+        if update["decision_ref"] not in old["basis_refs"]:
+            old["basis_refs"].append(update["decision_ref"])
+    checkpoint["supersedes"] = [parent_ref]
+    return validate_content(checkpoint)
 
 
 class _PreflightJournal:
@@ -475,13 +539,7 @@ def _preflight(request, root, source_id, parent_checkpoint, parent_ref, ws):
         ref = remember(_resolve_aliases(item["content"], refs))
         refs[item["name"]] = ref
         step_refs.append(ref)
-    checkpoint = json.loads(canonical(parent_checkpoint))
-    checkpoint["step_refs"].extend(ref for ref in step_refs if ref not in checkpoint["step_refs"])
-    for key, additions in request["checkpoint_additions"].items():
-        for ref in _resolve_aliases(additions, refs):
-            if ref not in checkpoint[key]:
-                checkpoint[key].append(ref)
-    checkpoint["supersedes"] = [parent_ref]
+    checkpoint = _advance_checkpoint(request, parent_checkpoint, parent_ref, refs, step_refs)
     remember(checkpoint)
     _check_frozen_view(ws, *collection[:2])
 
@@ -627,13 +685,8 @@ def resume_publication(intent_path):
             refs[item["name"]] = ref
             step_refs.append(ref)
         _stage(root, "steps_recorded", {"refs": refs, "step_refs": step_refs})
-        checkpoint = json.loads(canonical(intent["parent_checkpoint"]))
-        checkpoint["step_refs"].extend(ref for ref in step_refs if ref not in checkpoint["step_refs"])
-        for key, additions in request["checkpoint_additions"].items():
-            for ref in _resolve_aliases(additions, refs):
-                if ref not in checkpoint[key]:
-                    checkpoint[key].append(ref)
-        checkpoint["supersedes"] = [intent["parent_checkpoint_ref"]]
+        checkpoint = _advance_checkpoint(request, intent["parent_checkpoint"],
+                                         intent["parent_checkpoint_ref"], refs, step_refs)
         _verify_external(checkpoint, intent["source_id"], ws)
         identifier = record_content(journal, checkpoint, root / "content", source_id=intent["source_id"],
                                     source_kind="existing_real_artifact")

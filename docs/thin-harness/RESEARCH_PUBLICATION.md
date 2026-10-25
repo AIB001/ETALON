@@ -50,7 +50,23 @@ Validation failures may leave the per-entry lock file/directory, but do not crea
 
 The publisher copies the selected checkpoint, appends the new step references, and sets `supersedes` to the parent checkpoint. It retains the task and question, all earlier steps, claims, counterevidence, methods, branches, pending handles, authority guards and source watermarks. Optional `checkpoint_additions` can append explicit `claim_refs`, `counter_refs`, or `method_refs`; it cannot replace those lists. Reference identities and typed step/claim links are checked before the entry changes.
 
-This batch deliberately **does not resolve a pending action, close/reopen a branch, replace a scientific judgment, or relax a pause**. Those changes need explicit resolution evidence and a separate reviewed checkpoint transition. A completed action may therefore remain in `pending_handles` until such a transition; existing continuation reads its current state and still never resubmits it. This publisher closes the archival/publication path, not the entire scientific lifecycle.
+By default publication preserves every branch. Optional `branch_updates` explicitly change an **existing** branch, bound to a newly published same-task, same-branch decision step:
+
+```python
+branch_updates=[{
+    "branch_id": "md-controls",
+    "expected_state": "waiting",
+    "state": "resolved",
+    "basis_refs": [{"publication_ref": "analysis"}, {"publication_ref": "limitations"}],
+    "next_read_refs": [{"publication_ref": "analysis"}, {"publication_ref": "limitations"}],
+    "reconsider_when": "A new prepared system or analysis question changes the scope",
+    "decision_ref": {"publication_ref": "reuse_decision"},
+}]
+```
+
+The decision's `basis_refs` and `reconsider_when` must match the transition. Next reads must belong to that evidence. The resulting branch also links the decision itself. `resolved` accepts `reuse`, `stop`, or `merge`; `waiting` requires `defer`; `stopped` requires `stop`; `open`/`active` require the corresponding explicit reconsideration/proceed/fork choice. Reopening a terminal branch always requires `reconsider`. This records a host decision, not automatic scientific judgment. A missing, stale, duplicate or cross-branch update fails during preflight before archival writes. The transition is included in immutable intent equality and replayed through the same crash-safe publication stages.
+
+Task/question, authority guards, pending action handles, watermarks and existing counterevidence cannot be replaced through this option. A branch marked active does not grant execution permission or relax a pause. Legacy external jobs without an ETALON runtime handle remain explicitly linked producer receipts on a research node; do not fabricate a runtime handle or interpret an empty `pending_handles` list as a global idle-machine assertion. This API does not poll jobs, launch work, select a method or certify scientific results. Native receipt reconciliation remains an explicit producer read followed by a reviewed publication.
 
 ## Durable sequence and recovery
 

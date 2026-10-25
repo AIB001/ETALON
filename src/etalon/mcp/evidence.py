@@ -91,7 +91,7 @@ def register(mcp: Any) -> None:
                                 purpose: str = "research", policy: dict | None = None,
                                 max_bytes: Annotated[int, Field(ge=4096, le=65536)] = 16384,
                                 conditions: dict | None = None,
-                                view: Literal["summary", "node", "full", "resources", "branch"] = "full",
+                                view: Literal["summary", "node", "full", "resources", "branch", "card", "manifest", "reading"] = "full",
                                 branch_id: str | None = None,
                                 cursor: str | None = None,
                                 limit: Annotated[int, Field(ge=1, le=50)] = 20,
@@ -104,11 +104,35 @@ def register(mcp: Any) -> None:
         Does not write memory, submit science, adopt a method or trigger RSI.
         summary is a compact continuation card; node requires node_id and follows
         explicit dependencies; full preserves the original bounded graph selection.
+        card explicitly selects the small continuation card. summary automatically
+        uses that card when mandatory navigation metadata would exceed its cap.
+        manifest pages exact navigation with view_options={"section": "references"};
+        sections are branches, references, counters, watermarks, publications,
+        issues, authority and workset. Use the card's read_context and next_cursor.
+        The optional closure section pages the declared reference and full permitted
+        counter-incidence closure. Retain consecutive page receipts from index zero;
+        a final cursor alone never proves previous pages or original bodies were read.
+        Closure pages retain legacy resume reviews and grant no execution.
+        For one known node, manifest plus node_id returns its exact typed reference
+        without paging the whole inventory. Rows provide original_read arguments.
+        reading_menu gives optional status, branch, exact-original and scoped recipes;
+        a status-only question need not expand every original or manifest section.
+        reading pages a decision-directed reading plan: supply question and an exact
+        scope or branch_id. view_options accepts reading_mode (status/decision/diagnosis),
+        relevance (explicit ref/why/affects_decision annotations), decision_changed,
+        and as_of. Without a scope it starts at the published task tail. The plan
+        preserves counter pointers, coverage gaps and source roles; it neither ranks
+        natural-language relevance nor certifies that the host read or understood a
+        body. Use the same options and returned read_context/next_cursor to continue.
+        reading supports the existing 4096..16384 byte range; no budget expansion.
+        Index completeness does not establish that original bodies were read.
         max_bytes is 4096..65536. Expand returned refs with etalon_evidence_read; question
         is descriptive and does not perform semantic ranking.
         entry may be a server path, a one-hop {entry: server_path} locator, or the
         returned read_context for a pinned view. Follow-up evidence calls accept
         read_context directly; never guess a workspace or open server files locally.
+        Cross-workspace refs require the explicitly linked entry's own read_context;
+        this tool never follows arbitrary body links or expands a workspace for you.
         resources inventories cross-type originals without activation; view_options
         allows source_ids, kinds, skill_refs, scan_limit. branch requires branch_id;
         options allows usage_refs, max_nodes, as_of. Both views paginate with cursor
@@ -121,6 +145,20 @@ def register(mcp: Any) -> None:
         options = {} if view_options is None else view_options
         if not isinstance(options, dict):
             raise EvidenceError("view_options must be an object")
+        if view == "reading":
+            if node_id is not None:
+                raise EvidenceError("reading uses exact scope.root_refs or branch_id; resolve node refs through manifest")
+            if set(options) - {"reading_mode", "relevance", "decision_changed", "as_of"}:
+                raise EvidenceError("unknown reading view option")
+            if branch_id is not None:
+                if scope is not None:
+                    raise EvidenceError("reading takes branch_id or scope, not both")
+                scope = {"branch_id": branch_id, "ordinary_hops": 1}
+            from etalon.research.decision_reading import build_decision_reading
+            return _context_page(build_decision_reading(_entry_argument(entry),
+                question=question, scope=scope, purpose=purpose, policy=policy,
+                conditions=conditions, max_bytes=max_bytes, cursor=cursor, limit=limit,
+                **options), max_bytes)
         if view in {"resources", "branch"}:
             if scope is not None:
                 raise EvidenceError("graph scope belongs to summary, node or full context views")
@@ -143,6 +181,15 @@ def register(mcp: Any) -> None:
             return _context_page(build_branch_context(_entry_argument(entry), branch_id=branch_id,
                 conditions=conditions, purpose=purpose, policy=policy, max_bytes=max_bytes,
                 limit=limit, cursor=cursor, **options), max_bytes)
+        if view == "manifest":
+            if branch_id is not None or question is not None or conditions is not None or scope is not None:
+                raise EvidenceError("manifest uses exact node navigation, without branch/question/conditions/scope selection")
+            if set(options) - {"section"}:
+                raise EvidenceError("unknown manifest view option")
+            from etalon.research.research_context import build_research_context
+            return _context_page(build_research_context(_entry_argument(entry), purpose=purpose,
+                policy=policy, max_bytes=max_bytes, view=view, node_id=node_id,
+                cursor=cursor, limit=limit, **options), max_bytes)
         if branch_id is not None or cursor is not None or options or limit != 20:
             raise EvidenceError("branch_id/cursor/limit/view_options require resources or branch view")
         from etalon.research.research_context import build_research_context
@@ -203,6 +250,10 @@ def register(mcp: Any) -> None:
 
         Metadata access is not original-byte verification. Original identities, roles,
         and costs are retained; no model, network or scientific execution is started.
+        Use view=record for journal records such as method_evaluation; follow their
+        linked report refs separately. view=artifact is for artifact files or an
+        explicitly published snapshot member, not every evidence record. Manifest
+        reference rows expose original_read; do not infer view from a scientific label.
         limit is 1..32768; artifact offset/limit are byte counts. Page with the
         returned fragment.next_offset rather than requesting a larger limit.
         Supply ref and exactly one of workspace, entry or the returned read_context.

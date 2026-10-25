@@ -1,6 +1,6 @@
 ---
 name: etalon-research-context
-description: Recover a research decision context from an ETALON entry, including branch differences, evidence, counterevidence, pending work and applicable experience; use for continuation and selective memory reading.
+description: Select and read the ETALON evidence needed for a current status, decision or diagnosis, using exact task, branch or root references while preserving counterevidence, applicability and read gaps.
 ---
 
 # Read the research needed for this decision
@@ -8,8 +8,28 @@ description: Recover a research decision context from an ETALON entry, including
 Start from the project's research entry and current question. Use
 `etalon_research_context`, or the SDK in [context access](references/context.md).
 The entry locates published evidence; reading it does not authorize execution.
-Start with `view="summary"`, expand an exact node with `view="node"`, then read
-the original evidence when needed. `view="full"` retains the broader context.
+Choose the smallest useful read for the host's question. `view="summary"` or
+`view="card"` locates current progress; optional `view="reading"` assembles a
+decision-directed read with `view_options.reading_mode` set to `status`,
+`decision` or `diagnosis`. Select a known branch or exact root refs with `scope`.
+Free question text is not a semantic search or evidence-ranking mechanism.
+The SDK and paging details are in [context access](references/context.md).
+
+For a status question, stop once the requested controls and progress are clear;
+there is no requirement to read all historical originals. For a changed decision,
+read the relevant original basis, counterevidence and applicability conditions
+before adopting a conclusion. For diagnosis, follow exact execution, input,
+output and checker links until the competing explanations can be distinguished;
+missing links leave cause unknown. A diagnostic/Probe stage is optional, not a
+mandatory prelude to every decision.
+
+Each reading item distinguishes its exact source, structured selection reason,
+what it may change, and any host-declared relevance. Treat those declarations as
+attributable judgments, not measured truth. Keep conflicting and superseded
+experience visible; a condition match does not itself authorize reuse. Required
+reads, conditional detail and unresolved counter closure remain separate. Expand
+when a material gap or changed condition affects the question; otherwise stop.
+Do not turn the reading plan into an unconditional full-history traversal.
 
 On first continuation or after compaction, check `resume_frontier` for the
 latest checkpoint steps, exact output references and unresolved controls before

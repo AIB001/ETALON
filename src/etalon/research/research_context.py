@@ -72,6 +72,7 @@ def _focused_context(graph, nodes, *, workspace, node_id, question, purpose, max
     omitted with a receipt; exact branch/counter/experience refs remain readable.
     This bounds delivery bytes, not collection I/O or scientific completeness.
     """
+    from .continuation_card import reading_menu
     selected_scope = set()
     reasons = {}
     scoped = graph.get("scope_receipt")
@@ -212,6 +213,7 @@ def _focused_context(graph, nodes, *, workspace, node_id, question, purpose, max
                      "evidence_scope": "pass read_context; do not infer workspace paths",
                      "evidence_views": ["record", "artifact"], "evidence_limit": {"minimum": 1, "maximum": 32768},
                      "artifact_paging": "follow fragment.next_offset; no need to repeat the computation"},
+        "reading_menu": reading_menu(),
         "unknowns": ["No global semantic search or scientific truth assessment was performed.",
                      "Summary excerpts are navigation data; inspect exact refs for full conditions before a new decision."],
         "execution_permission": "not_granted", "automatic_retry": False,
@@ -386,7 +388,8 @@ def load_entry(entry):
 @bounded_read
 def build_research_context(entry, *, node_id=None, question=None, purpose="research",
                            policy=None, max_bytes=16384, as_of=None, home_overrides=None,
-                           conditions=None, view="full", scope=None):
+                           conditions=None, view="full", scope=None, section="references",
+                           cursor=None, limit=20):
     """Read local/adjacent/counterevidence context and report selection coverage.
 
     question records the host's purpose; it does not rewrite the research task
@@ -395,8 +398,14 @@ def build_research_context(entry, *, node_id=None, question=None, purpose="resea
     Optional scope selects exact roots or a branch before bounded graph traversal;
     scoped reference coverage and excerpt delivery never imply global coverage.
     """
-    if view not in {"summary", "node", "full"}:
-        raise EvidenceError("context view must be summary, node or full")
+    if view not in {"summary", "node", "full", "card", "manifest"}:
+        raise EvidenceError("context view must be summary, node, full, card or manifest")
+    if view in {"card", "manifest"} and scope is not None:
+        raise EvidenceError("card and manifest use the pinned checkpoint; graph scope belongs to summary, node or full")
+    if view != "manifest" and (section != "references" or cursor is not None or limit != 20):
+        raise EvidenceError("section/cursor/limit require manifest context view")
+    if view == "manifest" and (question is not None or conditions is not None):
+        raise EvidenceError("manifest uses exact navigation, without question or conditions selection")
     if view == "node" and scope is None and (not isinstance(node_id, str) or not node_id):
         raise EvidenceError("node context requires node_id")
     if type(max_bytes) is not int or not 4096 <= max_bytes <= 65536:
@@ -419,10 +428,27 @@ def build_research_context(entry, *, node_id=None, question=None, purpose="resea
         # Use the exact verified definition for this assembly, even if a publisher
         # atomically advances a path while source records are being collected.
         workspace = workspace_from_context(read_context, apply_policy=False)
+    if view == "manifest" and section == "closure":
+        if node_id is not None or as_of is not None or home_overrides is not None:
+            raise EvidenceError("closure pages use the pinned declared closure without node/as_of/home selection")
+        from .continuation_pages import closure_page
+        return closure_page(workspace, checkpoint_ref, handoff, policy=policy, purpose=purpose,
+                            cursor=cursor, limit=limit, max_bytes=max_bytes)
     graph_options = {} if scope is None else {"scope": scope}
-    graph = build_research_graph(workspace, checkpoint_ref=checkpoint_ref, policy=policy,
-        purpose=purpose, home_overrides=home_overrides, max_nodes=128, max_bytes=131072, as_of=as_of,
-        **graph_options)
+    graph, metadata_overflow = None, None
+    if view != "manifest":
+        try:
+            graph = build_research_graph(workspace, checkpoint_ref=checkpoint_ref, policy=policy,
+                purpose=purpose, home_overrides=home_overrides, max_nodes=128, max_bytes=131072, as_of=as_of,
+                **graph_options)
+        except EvidenceError as exc:
+            # Only a transport metadata overflow can select the alternate
+            # presentation. Missing, corrupt or forbidden originals still fail.
+            if view not in {"summary", "card"} or scope is not None or str(exc) not in {
+                    "checkpoint metadata exceeds graph byte bound; use a smaller published checkpoint",
+                    "graph identity exceeds byte bound"}:
+                raise
+            metadata_overflow = str(exc)
     from .meta_context import workset_summary
     from .graph_memory import restrict_workspace
     try:
@@ -430,7 +456,20 @@ def build_research_context(entry, *, node_id=None, question=None, purpose="resea
         handoff["task_workset"] = workset_summary(visible_workspace, checkpoint_ref, conditions=conditions)
     except (ValueError, OSError, KeyError) as exc:
         handoff["task_workset"] = {"status": "unavailable", "reason": str(exc)[:500]}
-        graph["issues"].append({"code": "task_workset_unavailable", "message": str(exc)[:500]})
+        if graph is not None:
+            graph["issues"].append({"code": "task_workset_unavailable", "message": str(exc)[:500]})
+    def card_or_manifest(reason=None):
+        from .continuation_card import _inventory, continuation_card, manifest_page
+        data = _inventory(workspace, checkpoint_ref, policy=policy, purpose=purpose,
+            publications=publications, handoff=handoff, graph=graph, as_of=as_of, home_overrides=home_overrides,
+            neutral_workset=handoff["task_workset"] if conditions is None else None)
+        if view == "manifest":
+            return manifest_page(data, checkpoint_ref, handoff, section=section, cursor=cursor,
+                                 limit=limit, max_bytes=max_bytes, node_id=node_id)
+        return continuation_card(data, checkpoint_ref, handoff, publications=publications, purpose=purpose,
+            max_bytes=max_bytes, view=view, question=question, node_id=node_id, fallback_reason=reason)
+    if view in {"card", "manifest"} or metadata_overflow is not None:
+        return card_or_manifest(metadata_overflow)
     nodes = {n["node_id"]: n for n in graph["nodes"]}
     if node_id is not None and node_id not in nodes:
         # Accept a unique original workflow-node ID for convenience, but never
@@ -452,8 +491,15 @@ def build_research_context(entry, *, node_id=None, question=None, purpose="resea
             node["experience"]["unmatched_conditions"] = unmet
             add(nid, "current_task_experience" if conditions is None else "matched_experience" if not unmet else "experience_counterexample_to_transfer")
     if view != "full" or scope is not None:
-        return _focused_context(graph, nodes, workspace=visible_workspace, node_id=node_id, question=question,
-                                purpose=purpose, max_bytes=max_bytes, view=view, publications=publications, handoff=handoff)
+        try:
+            return _focused_context(graph, nodes, workspace=visible_workspace, node_id=node_id, question=question,
+                                    purpose=purpose, max_bytes=max_bytes, view=view, publications=publications, handoff=handoff)
+        except EvidenceError as exc:
+            if view != "summary" or scope is not None or str(exc) not in {
+                    "checkpoint and counter control metadata exceeds context bound; increase max_bytes",
+                    "context receipt exceeds byte bound; increase max_bytes"}:
+                raise
+            return card_or_manifest(str(exc))
     for nid in graph["counter_node_ids"]:
         add(nid, "declared_counter_relationship_context")
     if node_id:

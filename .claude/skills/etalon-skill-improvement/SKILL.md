@@ -15,6 +15,14 @@ to actual actions. Its decision/update references can supply this method's
 problem context; a supported prediction still needs a scoped method evaluation
 before adoption. Do not introduce a fixed diagnostic or Probe stage.
 
+When that decision already exists, the optional
+`revision_guidance.build_revision_input` reads a selected prediction with exact
+JSON observations and their host-attributed relation to each explanation.
+`build_candidate_from_decision` connects it to the existing candidate brief,
+preserving the observable, fixed evaluation originals and normal-use action.
+Use [decision-backed candidates](references/decision-candidates.md) for this
+bridge; do not reconstruct the decision or manufacture a candidate for no-change.
+
 Choose the object of the change: **S** is a scientific method's description,
 references or scripts; **U** is how the host chooses, combines or skips methods;
 **G** is this improvement method. Keep their versions separate. G's generating

@@ -10,6 +10,7 @@ from pathlib import Path
 from typing import Any
 
 from etalon.boundary.infra import load
+from etalon.data.source_archive import SourceArchive, public_url
 
 
 @dataclass(frozen=True)
@@ -41,7 +42,8 @@ class Quarry:
     counted as an actual overrun, rather than being hidden from the usage journal.
     """
 
-    def __init__(self, home: Path, budget: DataBudget, *, transport: Any = None) -> None:
+    def __init__(self, home: Path, budget: DataBudget, *, transport: Any = None,
+                 archive_root: Path | None = None, source: str | None = None) -> None:
         self.infra = load("molquarry")
         import httpx
         from molquarry import MolQuarry
@@ -53,6 +55,7 @@ class Quarry:
         self.exhausted: str | None = None
         self.started = time.monotonic()
         self.lock = threading.Lock()
+        self.archive = SourceArchive(archive_root, source=source) if archive_root else None
         owner = self
 
         def charge(*, request: bool = False, size: int = 0) -> None:
@@ -72,28 +75,91 @@ class Quarry:
                 owner.requests += int(request)
 
         class MeteredStream(httpx.SyncByteStream):
-            def __init__(self, stream: Any) -> None:
+            def __init__(self, stream: Any, writer: Any = None) -> None:
                 self.stream = stream
+                self.writer = writer
 
             def __iter__(self):
-                for chunk in self.stream:
-                    charge(size=len(chunk))
-                    yield chunk
+                try:
+                    for chunk in self.stream:
+                        # Count and retain received bytes even when this chunk crosses the limit.
+                        if self.writer:
+                            self.writer.write(chunk)
+                        charge(size=len(chunk))
+                        yield chunk
+                except BaseException:
+                    if self.writer:
+                        self.writer.finish(reason="stream_aborted")
+                    raise
+                else:
+                    if self.writer:
+                        self.writer.finish(complete=True)
 
             def close(self) -> None:
-                self.stream.close()
+                try:
+                    # Downloads may reject status/redirect headers before reading the body.
+                    # Preserve that error response too, within the same byte/time allowance.
+                    if self.writer and not self.writer.closed:
+                        try:
+                            for chunk in self.stream:
+                                self.writer.write(chunk)
+                                charge(size=len(chunk))
+                        except Exception:
+                            self.writer.finish(reason="close_drain_aborted")
+                            raise
+                        self.writer.finish(complete=True)
+                finally:
+                    self.stream.close()
+                    if self.writer:
+                        self.writer.finish(reason="stream_not_consumed")
 
         def request_hook(_request: Any) -> None:
-            charge(request=True)
+            attempt = owner.archive.begin_attempt(_request) if owner.archive else None
+            try:
+                charge(request=True)
+            except Exception as error:
+                if attempt is not None:
+                    attempt["error"] = {"type": type(error).__name__, "code": "request_refused"}
+                raise
+            if attempt is not None:
+                attempt["admitted"] = True
 
         def response_hook(response: Any) -> None:
+            writer = owner.archive.response(response) if owner.archive else None
             if response.is_stream_consumed:
                 # Injected transports may return a response whose content is already buffered.
-                charge(size=len(response.content))
+                if writer:
+                    writer.write(response.content)
+                try:
+                    charge(size=len(response.content))
+                except Exception:
+                    if writer:
+                        writer.finish(reason="budget_exhausted")
+                    raise
+                if writer:
+                    writer.finish(complete=True)
             else:
-                response.stream = MeteredStream(response.stream)
+                response.stream = MeteredStream(response.stream, writer)
 
-        http = HttpClient(cache_dir=None, transport=transport,
+        class ArchivedHttpClient(HttpClient):
+            def _request(self, spec: Any, method: str, url: str, **kwargs: Any) -> Any:
+                if owner.archive is None:
+                    return super()._request(spec, method, url, **kwargs)
+                operation = owner.archive.begin_operation(spec.id, method, url, kwargs)
+                try:
+                    result = super()._request(spec, method, url, **kwargs)
+                except Exception as error:
+                    owner.archive.finish_operation(operation, error=error)
+                    raise
+                owner.archive.finish_operation(operation, provenance=result.provenance.model_dump())
+                # Workflows may persist this provenance independently of service._query_pages.
+                # Keep scientific data and the SDK's original digests; only publicize locators.
+                result.provenance.url = public_url(result.provenance.url)
+                result.headers = {key: public_url(value) if value.startswith(("https://", "http://"))
+                                  else value for key, value in result.headers.items()}
+                return result
+
+        http = ArchivedHttpClient(cache_dir=None, transport=transport,
                           timeout=min(30.0, budget.max_seconds),
                           max_retry_wait=min(30.0, budget.max_seconds),
                           max_response_bytes=min(20 * 1024 * 1024, budget.max_bytes))
@@ -110,7 +176,11 @@ class Quarry:
         return self
 
     def __exit__(self, *_: Any) -> None:
-        self.client.close()
+        try:
+            self.client.close()
+        finally:
+            if self.archive:
+                self.archive.finalize()
 
 
 def describe(source: str | None = None) -> dict[str, Any]:

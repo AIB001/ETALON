@@ -51,6 +51,14 @@ evidence rather than deleting them. A new interpretation is not automatic method
 adoption. Use the existing RSI candidate, evaluation, experience and disposition
 interfaces when a method or workflow should actually change.
 
+For a saved decision, `revision_guidance.build_revision_input` can keep exact
+failure differences beside the alternatives they bear on, with missing values
+and confounders explicit. Its candidate bridge carries the same observable,
+normal execution and evaluation checks into the existing candidate brief.
+Diagnostic inputs and the update's later evaluation observations remain separate;
+neither a failure label nor a supported prediction chooses the edit automatically.
+See the SDK reference for the optional calls and no-change boundary.
+
 Keep local lessons scoped to their conditions. Parameter settings, experimental
 design patterns and general integrity checks can have different reuse ranges.
 The read-only capability profile groups exact versions and declared case families;

@@ -194,7 +194,7 @@ def test_mcp_declares_bounds_and_rejects_oversized_read():
     register(server)
     listed = {item.name: item.inputSchema for item in asyncio.run(server.list_tools())}
     context = listed["etalon_research_context"]["properties"]
-    assert context["view"]["enum"] == ["summary", "node", "full", "resources", "branch"]
+    assert context["view"]["enum"] == ["summary", "node", "full", "resources", "branch", "card", "manifest", "reading"]
     assert context["view"]["default"] == "full"
     assert (context["max_bytes"]["minimum"], context["max_bytes"]["maximum"]) == (4096, 65536)
     evidence = listed["etalon_evidence_read"]["properties"]

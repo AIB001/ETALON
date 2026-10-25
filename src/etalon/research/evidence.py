@@ -153,7 +153,9 @@ def _source(ws, source):
     scope = CURRENT.get()
     # Data-snapshot member paths are resolved during decoding. They must be
     # rebuilt when a source/member symlink moves, even with identical JSON.
-    frozen = source["kind"] == "journal" and source["identity"]["kind"] == "snapshot_sha256"
+    # Explicit artifact manifests retain their original member locators; the
+    # ordinary reader resolves those on access and rechecks projected bytes.
+    frozen = source["kind"] in {"journal", "artifact_manifest"} and source["identity"]["kind"] == "snapshot_sha256"
     key = source_key(ws, source)
     if scope is not None and frozen and key in scope.sources:
         scope.hits += 1
@@ -281,7 +283,7 @@ def _collect(ws, source_ids=None):
         return tuple(json.loads(scope.collections[key]))
     result = _collect_uncached(ws, source_ids)
     if (scope is not None and not result[2]
-            and all(c["status"] == "complete" and ws.source(c["source_id"])["kind"] == "journal"
+            and all(c["status"] == "complete" and ws.source(c["source_id"])["kind"] in {"journal", "artifact_manifest"}
                     and ws.source(c["source_id"])["identity"]["kind"] == "snapshot_sha256" for c in result[1])):
         raw = canonical(result)
         size = len(raw.encode("utf-8"))

@@ -11,6 +11,7 @@ from typing import Any
 from etalon.boundary.infra import load
 from etalon.boundary.quarry import DataBudget, Quarry
 from etalon.data.artifacts import digest, file_hash, new_run, read_snapshot, seal, write_json
+from etalon.data.source_archive import public_descriptor, public_page
 
 _FIELDS = {
     "query": {"source", "operation", "parameters", "max_pages"},
@@ -125,7 +126,8 @@ def plan_data(request: dict[str, Any], *, budget: DataBudget | None = None) -> d
         return {"plan_id": digest(body), **body}
 
 
-def _query_pages(client: Any, request: dict[str, Any], output: Path) -> dict[str, Any]:
+def _query_pages(client: Any, request: dict[str, Any], output: Path, *,
+                 archive: Any = None) -> dict[str, Any]:
     load("molquarry")
     from molquarry.errors import MolQuarryError
 
@@ -140,10 +142,13 @@ def _query_pages(client: Any, request: dict[str, Any], output: Path) -> dict[str
             page = (client.local_search(**parameters) if request["kind"] == "search_catalog"
                     else client.query(request["source"], request["operation"], **parameters))
         except MolQuarryError as error:
-            errors.append(error.as_dict()["error"])
+            errors.append(public_descriptor(error.as_dict()["error"]))
             break
-        value = page.model_dump()
-        write_json(output / f"page-{index + 1:04d}.json", value)
+        value = public_page(page.model_dump())
+        path = output / f"page-{index + 1:04d}.json"
+        write_json(path, value)
+        if archive:
+            archive.link_page(path, value)
         pages.append(value)
         if page.next_parameters is None:
             break
@@ -171,7 +176,7 @@ def run_data(request: dict[str, Any], workspace: Path, *, run_id: str,
     plan = plan_data(request, budget=budget)
     if expected_plan_id is not None and expected_plan_id != plan["plan_id"]:
         raise ValueError("data request, budget, inputs or infrastructure changed since planning")
-    root = new_run(workspace, run_id, plan)
+    root = new_run(workspace, run_id, public_descriptor(plan))
     request = copy.deepcopy(plan["request"])
     quarry = None
     try:
@@ -197,7 +202,8 @@ def run_data(request: dict[str, Any], workspace: Path, *, run_id: str,
             if read_snapshot(collection)["snapshot_id"] != plan["source_snapshot"]["snapshot_id"]:
                 raise ValueError("collection changed while freezing bundle inputs")
             request["curation_path"] = replacements[str(Path(request["curation_path"]).resolve())]
-        with Quarry(Path(workspace).resolve() / ".molquarry", budget, transport=transport) as quarry:
+        with Quarry(Path(workspace).resolve() / ".molquarry", budget, transport=transport,
+                    archive_root=root, source=request.get("source")) as quarry:
             output = root / "payload"
             kind = request["kind"]
             if kind in {"query", "search_catalog", "import_catalog"}:
@@ -211,7 +217,7 @@ def run_data(request: dict[str, Any], workspace: Path, *, run_id: str,
                                             "snapshot_id": imported["snapshot_id"]}}
                 else:
                     query = request
-                result = _query_pages(quarry.client, query, output)
+                result = _query_pages(quarry.client, query, output, archive=quarry.archive)
             elif kind == "collect":
                 from molquarry.workflows.inhibitors import (
                     InhibitorSearch,
@@ -244,10 +250,11 @@ def run_data(request: dict[str, Any], workspace: Path, *, run_id: str,
                 result = {**result, "upstream_status": result.get("status"), "status": "partial",
                           "budget_exhausted": usage["exhausted"]}
             write_json(root / "result.json", result)
+            source_archive = quarry.archive.finalize()
             return seal(root, kind=kind, result=result, infrastructure=quarry.infra.provenance(),
                         plan_id=plan["plan_id"], budget=budget.as_dict(), usage=usage,
-                        inputs=plan["inputs"])
+                        inputs=plan["inputs"], source_archive=source_archive)
     except Exception as error:
-        write_json(root / "failure.json", {"type": type(error).__name__, "message": str(error),
+        write_json(root / "failure.json", {"type": type(error).__name__, "message": public_descriptor(str(error)),
                    "budget": budget.as_dict(), "usage": quarry.usage() if quarry else None})
         raise

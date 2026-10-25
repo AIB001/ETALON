@@ -1,7 +1,7 @@
 """Bounded, request-local reuse of verified frozen sources.
 
-Only decoding/projection work is shared. Every outer read revalidates original
-source/projected bytes and mapped locations before returning. Live sources are
+Only decoding/projection and path resolution work is shared. Every outer read
+revalidates original source/projected bytes and mapped locations before returning. Live sources are
 never cached. An optional disposable cross-event cache must be checksum-bound by
 its host receipt, and is revalidated against originals before any reuse.
 """
@@ -38,6 +38,7 @@ class ReadScope:
         self.workspaces = {}
         self.sources = {}
         self.collections = {}
+        self.locations = {}
         self.bytes = 0
         self.hits = 0
         self.reused_sources = 0
@@ -94,9 +95,17 @@ class ReadScope:
             raise EvidenceError("entry, workspace or authority changed during read")
         self.observed_files[key] = identity
 
+    def remember_location(self, key, path):
+        # Request-local path resolution only, never a reusable hash verdict.
+        # Charge the existing cache budget and re-resolve links before return.
+        size = sum(len(str(value).encode("utf-8")) for value in (*key, path))
+        if len(self.locations) < 8192 and self.bytes + size <= MAX_CACHE_BYTES:
+            self.locations[key] = path
+            self.bytes += size
+
     def verify(self):
         from .evidence_refs import load_workspace
-        from .evidence_refs import file_identity, EvidenceError
+        from .evidence_refs import file_identity, EvidenceError, _local
         from .continuation import _check_frozen_view
         # CURRENT is reset: validation cannot accidentally consult this cache.
         for workspace in self.workspaces.values():
@@ -107,6 +116,9 @@ class ReadScope:
         for path, expected in self.observed_files.items():
             if file_identity(path) != expected:
                 raise EvidenceError("entry, workspace or authority changed during read")
+        for (base, location, confined), expected in self.locations.items():
+            if _local(Path(base), location, confined=confined) != expected:
+                raise EvidenceError("evidence location changed during read")
 
 
 @contextmanager

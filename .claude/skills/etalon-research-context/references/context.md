@@ -1,5 +1,69 @@
 # Context access
 
+## Decision-directed reading
+
+The optional thin SDK view selects declared structure and produces a paged
+reading plan. The host supplies the question and exact branch/root selection;
+natural language does not classify relevance.
+
+```python
+from etalon.research.decision_reading import build_decision_reading
+page = build_decision_reading(
+    entry, question="Does the existing branch remain justified?",
+    scope={"branch_id": "existing-branch-id", "ordinary_hops": 0},
+    reading_mode="decision", conditions={"chemical_state": None},
+    max_bytes=16384,
+)
+```
+
+The context/MCP adapter exposes the same read as `view="reading"`, with
+`view_options={"reading_mode": "decision"}`. `scope`, `question`, `conditions`,
+`policy`, `purpose`, `cursor` and `limit` keep their existing meanings. The SDK
+accepts `relevance=[{"ref": exact_ref, "why": "host rationale",
+"affects_decision": "named choice"}]` and `decision_changed=True/False/None`;
+the adapter accepts them inside `view_options`. These are declarations, not
+proof of relevance or changed scientific progress. Reading rejects a purpose
+or policy that differs from the pin. Pass `purpose="evaluation"` explicitly when
+reusing an evaluation context.
+
+Without scope, only the published task's tail step is a starting root, with zero
+ordinary hops. Its explicit dependency boundary remains readable. Status can
+stop earlier; decision and diagnosis retain stronger original-reading obligations.
+To expand, use an item's exact `expand.scope` or select a known root/branch with
+`ordinary_hops=1`. An explicitly requested oversized graph fails; it is never
+silently truncated, and the reading transport cap remains 16 KiB.
+
+Rows are grouped by `section`: current decisions, controls, support,
+counterevidence, experience, optional detail, gaps and source scope. The header
+always gives controls, total counter counts and counter coverage. Pagination is
+not a top-k relevance filter: undelivered rows remain behind `next_cursor`.
+Use the same options and entry/read_context on each call. A row may be fragmented;
+join base64 bytes by item index and fragment offset before decoding its JSON.
+Changing source identities, scope, question, conditions or mode invalidates the
+cursor. A stale read_context requires resolving its explicit entry afresh.
+
+Use each item's `ref` and typed `original_read` with `etalon_evidence_read`, in
+the returned read_context. Follow original `fragment.next_offset` to null before
+claiming full original delivery. A fully delivered plan still says host reading
+and comprehension are not established. `optional_detail` means metadata identity
+was checked at the ordinary-hop boundary; reading its original performs the
+existing original verification. Do not describe it as already read or verified.
+
+Counter incidence covers all permitted published source records, including
+declared cross-branch relations. Hidden records, source restrictions, unavailable
+sources and deliberate dependency boundaries remain explicit gaps. No semantic
+analysis of opaque bodies or global completeness is implied. Same-task or
+explicit shared-capability experience is retained even when conditions conflict;
+`invalid_when` remains a host review and a matching condition does not imply
+activation. Empty conditions or omitted host dimensions leave applicability
+unknown. Discovered experience is conditional; only exact decision basis and
+its challenging counter relations create original-reading obligations. Current
+controls are required metadata, not a demand to reread every checkpoint body.
+A published locator into another workspace requires its own context;
+the reader does not discover or authorize that workspace.
+
+## Existing views
+
 The SDK accepts an entry JSON path or a dictionary with `workspace` and
 `checkpoint_ref`:
 

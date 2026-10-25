@@ -68,6 +68,89 @@ def assert_old_unchanged(case):
     assert {str(p): file_identity(p) for p in case["old"].rglob("*") if p.is_file()} == case["old_identities"]
 
 
+def transition_request(case, *, state="resolved", choice="reuse"):
+    request = json.loads(json.dumps(case["request"]))
+    decision = request["steps"][0]["content"]
+    decision["detail"].update(choice=choice, basis_refs=[{"publication_ref": "result"}],
+                              reconsider_when="New identity-bound evidence changes this condition")
+    request["branch_updates"] = [{"branch_id": "existing", "expected_state": "resolved", "state": state,
+        "basis_refs": decision["detail"]["basis_refs"], "next_read_refs": [{"publication_ref": "result"}],
+        "reconsider_when": decision["detail"]["reconsider_when"], "decision_ref": {"publication_ref": "reuse"}}]
+    return request
+
+
+def test_explicit_branch_transition_keeps_scope_authority_and_counterevidence(case):
+    request = transition_request(case, state="active", choice="reconsider")
+    request["checkpoint_additions"] = {"counter_refs": case["checkpoint"]["branches"][0]["basis_refs"]}
+    prepared = prepare_publication(**request)
+    published = resume_publication(prepared["intent_path"])
+    entry = json.loads(case["entry"].read_text())
+    cp = read_content(entry["workspace"], entry["checkpoint_ref"])
+    branch = cp["branches"][0]
+    assert branch["state"] == "active" and len(branch["basis_refs"]) == 2
+    assert branch["basis_refs"][-1] == cp["step_refs"][-1]
+    assert branch["next_read_refs"] == branch["basis_refs"][:1]
+    for key in ("task_id", "question", "pending_handles", "status_guards", "source_watermarks"):
+        assert cp[key] == case["checkpoint"][key]
+    assert cp["counter_refs"] == case["checkpoint"]["branches"][0]["basis_refs"]
+    resumed = resume_research(entry["workspace"], entry["checkpoint_ref"])
+    assert resumed["authority"]["state"] == "paused" and resumed["execution_permission"] == "not_granted"
+    identities = {str(p): file_identity(p) for p in Path(prepared["intent_path"]).parent.rglob("*") if p.is_file()}
+    assert resume_publication(prepared["intent_path"]) == published
+    assert identities == {str(p): file_identity(p) for p in Path(prepared["intent_path"]).parent.rglob("*") if p.is_file()}
+    assert_old_unchanged(case)
+
+
+@pytest.mark.parametrize("problem", ["prior_state", "unknown_branch", "duplicate", "old_decision", "basis",
+    "reconsider_when", "nondecision", "other_branch", "state_choice", "unbased_read", "authority", "empty"])
+def test_invalid_branch_transition_rejected_before_archival_write(case, problem):
+    request = transition_request(case)
+    update = request["branch_updates"][0]
+    if problem == "prior_state": update["expected_state"] = "waiting"
+    elif problem == "unknown_branch": update["branch_id"] = "unregistered"
+    elif problem == "duplicate": request["branch_updates"].append(dict(update))
+    elif problem == "old_decision": update["decision_ref"] = case["checkpoint"]["step_refs"][0]
+    elif problem == "basis": update["basis_refs"] = case["checkpoint"]["branches"][0]["basis_refs"]
+    elif problem == "reconsider_when": update["reconsider_when"] = "A different condition"
+    elif problem == "nondecision": update["decision_ref"] = {"publication_ref": "result"}
+    elif problem == "other_branch": request["steps"][0]["content"]["branch_id"] = "elsewhere"
+    elif problem == "state_choice": update["state"] = "active"
+    elif problem == "unbased_read": update["next_read_refs"] = case["checkpoint"]["step_refs"]
+    elif problem == "authority": update["status_guards"] = []
+    elif problem == "empty": request["branch_updates"] = []
+    with pytest.raises(EvidenceError):
+        prepare_publication(**request)
+    assert not case["entry"].exists()
+    assert not list(case["entry"].parent.rglob("intent.json"))
+    assert_old_unchanged(case)
+
+
+@pytest.mark.parametrize("phase", ["checkpoint_recorded", "entry_replaced"])
+def test_branch_transition_recovers_without_repeating_native_work(case, phase):
+    request = transition_request(case)
+    prepared = prepare_publication(**request)
+    script = """
+import os,sys
+from etalon.research import publication as p
+stage = p._stage
+def crash(root, phase, payload):
+    result = stage(root, phase, payload)
+    if phase == sys.argv[2]: os._exit(73)
+    return result
+p._stage = crash
+p.resume_publication(sys.argv[1])
+"""
+    process = subprocess.run([sys.executable, "-c", script, prepared["intent_path"], phase], capture_output=True, text=True)
+    assert process.returncode == 73, process.stderr
+    case["result"].unlink()
+    assert resume_publication(prepared["intent_path"])["status"] == "published"
+    entry = json.loads(case["entry"].read_text())
+    cp = read_content(entry["workspace"], entry["checkpoint_ref"])
+    assert cp["branches"][0]["basis_refs"][-1] == cp["step_refs"][-1]
+    assert not CampaignStore(Path(prepared["intent_path"]).parent / "research.sqlite", read_only=True).actions()
+    assert_old_unchanged(case)
+
+
 def test_lossless_publication_and_idempotent_operation(case):
     prepared = prepare_publication(**case["request"])
     assert prepared["status"] == "prepared" and not case["entry"].exists()

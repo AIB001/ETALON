@@ -25,6 +25,22 @@ normal planning. All stored objects reuse ordinary ResearchJournal Artifacts.
   explicit studies, each with decision/update/evaluation-contract/case refs and
   case/family/repeat labels. It replays evaluations and groups scoped evidence;
   it is neither an ability score nor an independence certificate.
+- `etalon.research.revision_guidance.build_revision_input(workspace,
+  decision_ref=..., prediction_id=..., context_ref=..., differences=...,
+  update_ref=None)`: read-only bridge to the existing revision context. A
+  difference selects exact JSON fields from declared diagnostic inputs and states
+  its relation to named alternatives plus uncontrolled factors. Missing/null are
+  distinct from zero/false. Later update observations remain separate.
+  `build_candidate_from_decision` adds an existing opportunity, actual
+  before/after edit, object kind and falsifier; it returns the existing candidate
+  brief with the original observable, normal action and fixed check identities.
+  It does not generate a method, select a candidate or reopen a terminal.
+  Unknown predictions cannot become testable by supplying favorable prose.
+  Existing evaluation/experience links require the exact attributed update.
+  Readiness additionally binds the actual after-content/workflow to the selected
+  action's candidate version and a fixed evaluation subject with the exact base
+  comparator. An unmatched edit remains incomplete instead of borrowing the old
+  action as its execution; verified identical-content aliases remain supported.
 
 Persist supported content via `continuation.record_content`; connect it to
 existing research-step outputs and publish/checkpoint through existing APIs.

@@ -1,0 +1,27 @@
+{
+  "schema": "etalon-runtime-spec/1",
+  "python": "/absolute/fixed-venv/bin/python",
+  "cwd": "/absolute/fixed-etalon",
+  "environment_root": "/absolute/fixed-venv",
+  "pythonpath": ["/absolute/fixed-etalon/src"],
+  "environment": {"PATH": "/usr/bin:/bin", "OMP_NUM_THREADS": "1"},
+  "modules": [
+    {"name": "etalon.data.service", "expected_root": "/absolute/fixed-etalon/src"},
+    {"name": "etalon.boundary.quarry", "expected_root": "/absolute/fixed-etalon/src"},
+    {"name": "etalon.boundary.screen", "expected_root": "/absolute/fixed-etalon/src"},
+    {"name": "molquarry", "loader": "asset", "asset_dir": "/absolute/fixed-assets"},
+    {"name": "molcascade", "loader": "asset", "asset_dir": "/absolute/fixed-assets"},
+    {"name": "rdkit.Chem"},
+    {"name": "posebusters"},
+    {"name": "httpx"}
+  ],
+  "files": [],
+  "checks": [
+    {"id": "data-entry", "argv": ["{python}", "-c", "from etalon.data.service import plan_data; assert callable(plan_data)"], "timeout_seconds": 30},
+    {"id": "screen-verifier", "argv": ["{python}", "-c", "from rdkit import Chem; from posebusters import PoseBusters; assert Chem.MolFromSmiles('C') is not None; assert callable(PoseBusters)"], "timeout_seconds": 60}
+  ],
+  "capabilities": {
+    "data-query": {"modules": ["etalon.data.service", "etalon.boundary.quarry", "molquarry", "httpx"], "files": [], "checks": ["data-entry"]},
+    "cascade-inspect": {"modules": ["etalon.boundary.screen", "molcascade", "rdkit.Chem", "posebusters"], "files": [], "checks": ["screen-verifier"]}
+  }
+}

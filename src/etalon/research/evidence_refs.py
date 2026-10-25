@@ -62,6 +62,11 @@ def _identity(value):
 
 def _local(base, location, *, confined=False):
     _text(location)
+    from .read_scope import CURRENT
+    scope = CURRENT.get()
+    key = (str(base), location, confined)
+    if scope is not None and key in scope.locations:
+        return scope.locations[key]
     win, posix = PureWindowsPath(location), PurePosixPath(location)
     native = Path(location)
     if "://" in location or location.startswith(("\\\\", "//")):
@@ -75,6 +80,8 @@ def _local(base, location, *, confined=False):
     if confined or not native.is_absolute():
         if not path.is_relative_to(base):
             raise EvidenceError("location escapes manifest directory")
+    if scope is not None:
+        scope.remember_location(key, path)
     return path
 
 
