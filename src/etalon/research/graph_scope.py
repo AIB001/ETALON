@@ -7,30 +7,193 @@ from __future__ import annotations
 
 import base64
 from collections import deque
+import json
 
 from etalon.active.schema import canonical, digest
 from .continuation import _exact_refs
 from .evidence import _read_evidence
 from .evidence_refs import EvidenceError, make_ref, validate_ref
 from .method_links import method_links
+from .declared_relations import counter_refs as _counter_refs, checked_row as _checked_row, relation_index, record_identity
 
 SCOPE = "etalon-research-graph-scope/1"
+PAGE = "etalon-research-graph-page/1"
 
 
-def _counter_refs(value):
-    """Explicit declarations, including Artifact bindings; no text heuristics."""
-    if isinstance(value, dict) and value.get("schema") != "etalon-evidence-ref/1":
-        for key, child in value.items():
-            if key == "counter_refs":
-                if not isinstance(child, list):
-                    raise EvidenceError("counter_refs must be explicit references")
-                for ref in child:
-                    yield validate_ref(ref)
-            elif isinstance(child, (dict, list)):
-                yield from _counter_refs(child)
-    elif isinstance(value, list):
-        for child in value:
-            yield from _counter_refs(child)
+def _graph_rows(document):
+    """Keep original values, splitting only collections into indexed rows.
+
+    Oversized single values use the existing UTF-8 fragment transport. Nothing
+    is hidden in an unmetered side channel; these rows reconstruct every field.
+    """
+    rows = []
+    def fields(value, path):
+        rows.append({"path": path, "value": {}})
+        # Keep collection indices in their original order. Scoped traversal
+        # already puts requested roots first, so field order alone can deliver
+        # them before bulk edges, branch history and context bookkeeping.
+        priority = {(): ("graph", "context"),
+            ("graph",): ("schema", "checkpoint_ref", "continuation", "task_id", "nodes", "scope_receipt",
+                "counter_node_ids", "counter_evidence_node_ids", "edges", "branches"),
+            ("graph", "scope_receipt"): ("schema", "requested_scope", "counter_search_complete",
+                "reference_coverage_complete", "global_reference_coverage_complete",
+                "counter_relations", "counter_endpoint_refs")}.get(tuple(path), ())
+        keys = [key for key in priority if key in value] + sorted(set(value) - set(priority))
+        for key in keys:
+            item = value[key]
+            target = path + [key]
+            if isinstance(item, list):
+                rows.append({"path": target, "value": []})
+                rows.extend({"path": target + [i], "value": v} for i, v in enumerate(item))
+            elif key in {"graph", "context", "scope_receipt"} and isinstance(item, dict):
+                fields(item, target)
+            else:
+                rows.append({"path": target, "value": item})
+    fields(document, [])
+    return rows
+
+
+def graph_page(graph, *, cursor=None, limit=20, max_bytes=65536, handoff=None, context=None):
+    """Lossless transport over the existing manifest cursor/fragment convention."""
+    from .continuation_card import _position
+    from .decision_reading import _page
+    from .read_scope import implementation_identity
+    if type(limit) is not int or not 1 <= limit <= 50:
+        raise EvidenceError("graph page limit must be 1..50")
+    document = {"graph": graph, "context": context or {}}
+    rows = _graph_rows(document)
+    projection_digest = digest(document)
+    manifest_digest = digest({"projection_digest": projection_digest,
+        "implementation": implementation_identity(), "read_context": (handoff or {}).get("read_context")})
+    stamp = digest({"manifest_digest": manifest_digest, "section": "scoped_graph"})
+    index, offset = _position(cursor, stamp, len(rows))
+    envelope = {"schema": PAGE, "view": "graph", "section": "scoped_graph",
+        "checkpoint_ref": graph["checkpoint_ref"], "graph_view_id": graph["view_id"],
+        "projection_digest": projection_digest, "manifest_digest": manifest_digest,
+        "projection_bytes": len(canonical(document).encode()), "total_count": len(rows),
+        "page_start": {"index": index, "byte_offset": offset},
+        "coverage": {"delivery": "this_page_only; earlier_and_later_pages_not_attested",
+            "original_bodies_read_by_host": "not_established", "scientific_closure": "not_established",
+            "included_originals_verified_this_call": True,
+            "boundary_verification": "metadata_identity_only",
+            "all_pages_delivered": False},
+        "continuation_obligation": "retain consecutive pages from zero; same selection plus next_cursor; assemble_graph_pages verifies complete delivery",
+        "snapshot_consistency": graph["snapshot_consistency"],
+        "execution_permission": "not_granted", "automatic_retry": False}
+    if handoff is not None:
+        envelope["read_context"] = handoff["read_context"]
+    # Leave the MCP ok envelope inside the caller's unchanged byte budget.
+    page = _page(rows, envelope, stamp=stamp, cursor=cursor, limit=limit, max_bytes=max_bytes - 16)
+    page["context_id"] = "graph-page-" + digest({k: v for k, v in page.items() if k != "context_id"})
+    return page
+
+
+def _graph_transcript(pages, *, require_complete):
+    """Offline validation of saved delivery bytes, not a new original read."""
+    from .continuation_card import _cursor
+    from .graph_memory import validate_research_graph
+    if not isinstance(pages, list) or not pages:
+        raise EvidenceError("graph transcript requires consecutive pages from zero")
+    if any(not isinstance(p, dict) or p.get("ok", True) is not True for p in pages):
+        raise EvidenceError("graph transcript contains an unsuccessful response")
+    pages = [{k: v for k, v in p.items() if k != "ok"} for p in pages]
+    first, index, offset, fragment, rows = pages[0], 0, 0, bytearray(), []
+    stamp = digest({"manifest_digest": first.get("manifest_digest"), "section": "scoped_graph"})
+    identity_fields = ("schema", "manifest_digest", "projection_digest", "projection_bytes",
+        "graph_view_id", "checkpoint_ref", "total_count", "read_context")
+    total = first.get("total_count")
+    if type(total) is not int or total <= 0:
+        raise EvidenceError("invalid graph transcript count")
+    for page in pages:
+        expected = "graph-page-" + digest({k: v for k, v in page.items() if k != "context_id"})
+        if (page.get("schema") != PAGE or page.get("context_id") != expected
+                or any(page.get(k) != first.get(k) for k in identity_fields)
+                or page.get("page_start") != {"index": index, "byte_offset": offset}
+                or not page.get("items")
+                or page.get("coverage", {}).get("included_originals_verified_this_call") is not True):
+            raise EvidenceError("graph transcript identity, order or verification changed")
+        for item in page["items"]:
+            if item.get("index") != index or index >= total:
+                raise EvidenceError("graph transcript skips, repeats or reorders rows")
+            if "value" in item:
+                if offset:
+                    raise EvidenceError("graph transcript drops a partial row")
+                rows.append(item["value"])
+                index += 1
+            elif "fragment" in item:
+                part = item["fragment"]
+                try:
+                    raw = base64.b64decode(part["content"], validate=True)
+                except (ValueError, KeyError):
+                    raise EvidenceError("invalid graph transcript fragment") from None
+                end = offset + len(raw)
+                if (not raw or part.get("offset") != offset
+                        or part.get("next_offset") not in (None, end)):
+                    raise EvidenceError("graph transcript fragment has a gap")
+                fragment.extend(raw)
+                if part["next_offset"] is None:
+                    try:
+                        rows.append(json.loads(fragment.decode("utf-8")))
+                    except (ValueError, UnicodeDecodeError):
+                        raise EvidenceError("invalid graph transcript row") from None
+                    fragment, index, offset = bytearray(), index + 1, 0
+                else:
+                    offset = end
+            else:
+                raise EvidenceError("graph transcript row or fragment required")
+        next_cursor = _cursor(stamp, index, offset) if index < total else None
+        if page.get("next_cursor") != next_cursor or page.get("page_complete") != (next_cursor is None):
+            raise EvidenceError("graph transcript cursor differs from delivered range")
+    complete = index == total and offset == 0
+    if require_complete and not complete:
+        raise EvidenceError("graph transcript is incomplete; follow next_cursor")
+    document = None
+    if complete:
+        try:
+            for row in rows:
+                path, value = row["path"], json.loads(canonical(row["value"]))
+                if not path:
+                    if document is not None:
+                        raise ValueError()
+                    document = value
+                    continue
+                parent = document
+                for key in path[:-1]:
+                    parent = parent[key]
+                key = path[-1]
+                if isinstance(parent, list):
+                    if type(key) is not int or key != len(parent):
+                        raise ValueError()
+                    parent.append(value)
+                else:
+                    if key in parent:
+                        raise ValueError()
+                    parent[key] = value
+            if (digest(document) != first["projection_digest"]
+                    or len(canonical(document).encode()) != first["projection_bytes"]
+                    or document["graph"]["view_id"] != first["graph_view_id"]):
+                raise ValueError()
+            validate_research_graph(document["graph"])
+        except (ValueError, KeyError, TypeError, IndexError):
+            raise EvidenceError("graph transcript projection is missing or changed") from None
+    receipt = {"schema": "etalon-research-graph-delivery/1", "graph_view_id": first["graph_view_id"],
+        "manifest_digest": first["manifest_digest"], "projection_digest": first["projection_digest"],
+        "page_count": len(pages), "delivered_rows": index, "partial_row_bytes": offset,
+        "total_count": total, "all_pages_delivered": complete, "next_cursor": pages[-1]["next_cursor"],
+        "original_bodies_read_by_host": "not_established", "scientific_closure": "not_established",
+        "later_original_reverification": "not_performed_by_transcript_audit",
+        "execution_permission": "not_granted", "automatic_retry": False}
+    return document, receipt
+
+
+def audit_graph_pages(pages):
+    """Summarize recorded consecutive delivery; partial transcripts stay partial."""
+    return _graph_transcript(pages, require_complete=False)[1]
+
+
+def assemble_graph_pages(pages):
+    """Reconstruct the exact graph and context controls from complete saved pages."""
+    return _graph_transcript(pages, require_complete=True)[0]
 
 
 def _unique_refs(refs):
@@ -98,27 +261,8 @@ def build_scoped_graph(ws, *, checkpoint_ref, checkpoint, resumed, collection,
     refs, depths, selected, reads, ordinary = {}, {}, {}, {}, {}
     queue = deque()
     verified_envelopes = set()
-    counter_relations, incidence = {}, {}
-
     def checked_row(ref):
-        ref = validate_ref(ref)
-        row = universe.get((ref["source_id"], ref["record_id"]))
-        if row is None:
-            raise EvidenceError("scoped reference unavailable, hidden or suppressed")
-        if digest(row["record"]) != ref["record_digest"]:
-            raise EvidenceError("scoped reference record identity changed")
-        artifact = row["record"]
-        if "member" in ref:
-            members = row.get("members", artifact.get("members", []))
-            matches = [m for m in members if m.get("member") == ref["member"] and m.get("visibility") == "released"]
-            if len(matches) != 1:
-                raise EvidenceError("scoped reference member is not uniquely published")
-            artifact = matches[0]
-        if "sha256" in ref and (ref["sha256"], ref["bytes"]) != (artifact.get("sha256"), artifact.get("bytes")):
-            raise EvidenceError("scoped reference artifact identity mismatch")
-        if row.get("projection", {}).get("status") == "unavailable":
-            raise EvidenceError("scoped reference content unavailable")
-        return row
+        return _checked_row(universe, ref)
 
     def verify(ref):
         key = canonical(ref)
@@ -146,22 +290,8 @@ def build_scoped_graph(ws, *, checkpoint_ref, checkpoint, resumed, collection,
         if len(refs) > max_nodes:
             raise EvidenceError("scoped closure exceeds graph node bound; choose narrower roots or ordinary_hops")
 
-    # Full authorized-universe incidence, independent of task/home/root ordering.
-    # A record declaring counter_refs says each target refutes that record.
-    for (sid, rid), row in sorted(universe.items()):
-        owner = make_ref(sid, rid, row["record"])
-        declarations = _unique_refs(list(_counter_refs(row["record"])) +
-            list(_counter_refs(row.get("projected_content", {}))))
-        for target in declarations:
-            # Validate before keying incidence: an incorrect digest/member would
-            # otherwise produce a different node ID and silently erase a reverse
-            # counter declaration from an otherwise complete-looking search.
-            checked_row(target)
-            relation = {"from_ref": target, "to_ref": owner, "kind": "refutes", "basis_ref": owner}
-            key = canonical(relation)
-            counter_relations[key] = relation
-            for nid in (node_identity(target), node_identity(owner)):
-                incidence.setdefault(nid, set()).add(key)
+    indexed = relation_index(ws, collection)
+    counter_relations, incidence = indexed["relations"], indexed["incidence"]
 
     control_refs = _unique_refs([checkpoint_ref] + checkpoint["step_refs"][-1:])
     for ref in roots:
@@ -198,7 +328,7 @@ def build_scoped_graph(ws, *, checkpoint_ref, checkpoint, resumed, collection,
                     selected[nid]["summary"] = {"text": excerpt, "truncated": fragment.get("next_offset") is not None}
             except (ValueError, UnicodeDecodeError):
                 pass
-        for key in sorted(incidence.get(nid, ())):
+        for key in sorted(incidence.get(record_identity(ref), ())):
             relation = counter_relations[key]
             included_counters[key] = relation
             for endpoint in (relation["from_ref"], relation["to_ref"]):
@@ -302,6 +432,7 @@ def build_scoped_graph(ws, *, checkpoint_ref, checkpoint, resumed, collection,
         "issues": issues, "truncated": False, "execution_permission": "not_granted", "automatic_retry": False,
         "snapshot_consistency": "per_source_reads_not_global_atomic_snapshot"}
     result["view_id"] = "research-graph-" + digest(result)
-    if len(canonical(result).encode()) > max_bytes:
-        raise EvidenceError("scoped graph and required boundary/counter receipt exceed graph byte bound; choose narrower roots or ordinary_hops")
+    # This is an internal inventory, still subject to the same node, source,
+    # policy, reference and original-byte checks. Public readers own delivery
+    # bounds and page the inventory instead of discarding mandatory context.
     return validate_research_graph(result)

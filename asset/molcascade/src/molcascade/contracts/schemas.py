@@ -359,6 +359,49 @@ SYNTHESIS_SCORE_V1 = DataContract(
 )
 
 
+SYNTHESIS_ROUTES_V1 = DataContract(
+    id="synthesis_routes/v1",
+    schema=_schema("synthesis_routes/v1", [
+        pa.field("parent_id", pa.string(), nullable=False),
+        pa.field("method_id", pa.string(), nullable=False),
+        pa.field("search_id", pa.string(), nullable=False),
+        pa.field("target_index", pa.int64(), nullable=False),
+        pa.field("target_smiles", pa.large_string(), nullable=False),
+        pa.field("status", pa.string(), nullable=False),
+        pa.field("record_json", pa.large_string(), nullable=True),
+    ]),
+    primary_key=("parent_id", "method_id", "search_id"),
+    enums={"status": ("SOLVED", "NOT_FOUND_WITHIN_BUDGET", "FAILED", "TIMEOUT")},
+    invariants={
+        "native_record": "record_json retains every native field including complete returned trees",
+        "bounded_claim": "not found is conditional on this stock, policy and search budget",
+        "failed_alignment": "failed searches do not attribute unverified native rows to targets",
+    },
+)
+
+
+SYNTHESIS_SEARCH_V1 = DataContract(
+    id="synthesis_search/v1",
+    schema=_schema("synthesis_search/v1", [
+        pa.field("search_id", pa.string(), nullable=False),
+        pa.field("method_id", pa.string(), nullable=False),
+        pa.field("status", pa.string(), nullable=False),
+        pa.field("input_bytes", pa.large_binary(), nullable=False),
+        pa.field("config_bytes", pa.large_binary(), nullable=False),
+        pa.field("output_bytes", pa.large_binary(), nullable=True),
+        pa.field("output_sha256", pa.string(), nullable=True),
+        pa.field("log_bytes", pa.large_binary(), nullable=False),
+        pa.field("provenance_json", pa.large_string(), nullable=False),
+    ]),
+    primary_key=("search_id",),
+    enums={"status": ("COMPLETED", "FAILED", "TIMEOUT")},
+    invariants={
+        "native_bytes": "output_bytes preserves exact native file bytes, including partial failures",
+        "one_attempt": "search_id identifies one attempt, not an independent molecular sample",
+    },
+)
+
+
 LIGAND_CONFORMER_V1 = DataContract(
     id="ligand_conformer/v1",
     schema=_schema(
@@ -722,6 +765,8 @@ BUILTIN_CONTRACTS = (
     PREDICTION_V1,
     APPLICABILITY_V1,
     SYNTHESIS_SCORE_V1,
+    SYNTHESIS_ROUTES_V1,
+    SYNTHESIS_SEARCH_V1,
     LIGAND_CONFORMER_V1,
     DOCKING_SCORE_V1,
     DERIVED_METRIC_V1,
@@ -752,4 +797,6 @@ __all__ = [
     "SELECTION_DECISION_V1",
     "SHORTLIST_EXPORT_V1",
     "SYNTHESIS_SCORE_V1",
+    "SYNTHESIS_ROUTES_V1",
+    "SYNTHESIS_SEARCH_V1",
 ]

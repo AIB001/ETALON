@@ -2659,7 +2659,7 @@ CRITERIA: tuple[CriterionSpec, ...] = (
                     "for retrosynthetic planning. J Cheminform. 2020;12:70. "
                     "doi:10.1186/s13321-020-00472-1"
                 ),
-                plugin_ref="synthesis.aizynthfinder@0.1.0",
+                plugin_ref="synthesis.aizynthfinder@0.2.0",
                 gate_plugin="synthesis.numeric_evidence_gate@0.1.0",
                 # Deliberately empty. Every other option lists the packages it
                 # imports, and this one imports nothing: aizynthfinder must *not*

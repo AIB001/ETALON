@@ -11,11 +11,17 @@ from functools import wraps
 import hashlib
 import json
 from pathlib import Path
+from threading import Lock
 
 CURRENT = ContextVar("etalon_evidence_read_scope", default=None)
+VERIFY_LOCATIONS = ContextVar("etalon_verification_locations", default=None)
 MAX_SOURCE_VIEWS = 64
 MAX_CACHE_BYTES = 32 * 1024 * 1024
 CACHE_SCHEMA = "etalon-frozen-read-cache/1"
+# Disposable process-local decode reuse for consecutive graph pages. No graph,
+# visibility decision, counter closure, live state or hash verdict is retained.
+_PAGE_SOURCES = None
+_PAGE_LOCK = Lock()
 
 
 def implementation_identity():
@@ -33,13 +39,31 @@ def source_key(workspace, source):
     return hashlib.sha256(raw.encode()).hexdigest()
 
 
-class ReadScope:
+class _LocationCache:
+    def __init__(self, allowed=None):
+        self.locations = {}
+        self.bytes = 0
+        self.allowed = allowed
+
+    def remember_location(self, key, path):
+        if self.allowed is not None and key not in self.allowed:
+            return
+        size = sum(len(str(value).encode("utf-8")) for value in (*key, path))
+        if len(self.locations) < 8192 and self.bytes + size <= MAX_CACHE_BYTES:
+            self.locations[key] = path
+            self.bytes += size
+
+
+class ReadScope(_LocationCache):
     def __init__(self, previous=None):
+        super().__init__()
         self.workspaces = {}
         self.sources = {}
         self.collections = {}
-        self.locations = {}
-        self.bytes = 0
+        self.relation_indexes = {}
+        self.relation_hits = 0
+        self.relation_builds = 0
+        self.deferred_frozen_checks = 0
         self.hits = 0
         self.reused_sources = 0
         self.fresh_sources = 0
@@ -82,9 +106,35 @@ class ReadScope:
         return {"schema": CACHE_SCHEMA, "implementation": self.code_identity,
                 "sources": {key: value[2] for key, value in self.sources.items()}}
 
+    def defer_frozen_check(self, workspace, records, coverage):
+        """Defer a redundant nested check only for the exact registered view.
+
+        This does not reuse a hash verdict. ``verify`` checks every registered
+        original with CURRENT reset before the outer reader returns. Sources
+        refused by the byte budget, live/partial views, and first cross-event
+        cache admissions retain the ordinary immediate validation path.
+        """
+        if not coverage or any(c.get("status") != "complete" for c in coverage):
+            return False
+        for cov in coverage:
+            source = workspace.source(cov["source_id"])
+            if source["identity"]["kind"] != "snapshot_sha256":
+                return False
+            saved = self.sources.get(source_key(workspace, source))
+            if saved is None:
+                return False
+            rows, observed = json.loads(saved[2])
+            if (rows != records.get(cov["source_id"]) or any(observed.get(key) != cov.get(key)
+                    for key in ("status", "snapshot", "read_watermark"))):
+                return False
+        self.deferred_frozen_checks += 1
+        return True
+
     def stats(self):
         return {"fresh_sources": self.fresh_sources, "reused_sources": self.reused_sources,
                 "within_read_hits": self.hits, "collection_hits": self.collection_hits, "cached_bytes": self.bytes,
+                "relation_index_hits": self.relation_hits, "relation_index_builds": self.relation_builds,
+                "deferred_frozen_checks": self.deferred_frozen_checks,
                 "verification": "original_source_and_projection_bytes_rechecked",
                 "scope": "source_local_decode_only_visibility_and_counter_search_recomputed"}
 
@@ -95,28 +145,30 @@ class ReadScope:
             raise EvidenceError("entry, workspace or authority changed during read")
         self.observed_files[key] = identity
 
-    def remember_location(self, key, path):
-        # Request-local path resolution only, never a reusable hash verdict.
-        # Charge the existing cache budget and re-resolve links before return.
-        size = sum(len(str(value).encode("utf-8")) for value in (*key, path))
-        if len(self.locations) < 8192 and self.bytes + size <= MAX_CACHE_BYTES:
-            self.locations[key] = path
-            self.bytes += size
-
     def verify(self):
         from .evidence_refs import load_workspace
         from .evidence_refs import file_identity, EvidenceError, _local
         from .continuation import _check_frozen_view
         # CURRENT is reset: validation cannot accidentally consult this cache.
-        for workspace in self.workspaces.values():
-            load_workspace(workspace)
-        for workspace, source, raw in self.sources.values():
-            rows, coverage = json.loads(raw)
-            _check_frozen_view(workspace, {source["source_id"]: rows}, [coverage])
+        # Several policy views can share the same mapped locations. Resolve
+        # each once in a NEW final-validation scope, without reusing the paths
+        # seen while building the result. This cache holds no file identities.
+        # Paths declined by the original cache budget have no final path
+        # comparison; leave their validation resolutions uncached as before.
+        token = VERIFY_LOCATIONS.set(_LocationCache(allowed=self.locations))
+        try:
+            for workspace in self.workspaces.values():
+                load_workspace(workspace)
+            for workspace, source, raw in self.sources.values():
+                rows, coverage = json.loads(raw)
+                _check_frozen_view(workspace, {source["source_id"]: rows}, [coverage])
+        finally:
+            VERIFY_LOCATIONS.reset(token)
         for path, expected in self.observed_files.items():
             if file_identity(path) != expected:
                 raise EvidenceError("entry, workspace or authority changed during read")
         for (base, location, confined), expected in self.locations.items():
+            # A final uncached resolution still catches retargeted links.
             if _local(Path(base), location, confined=confined) != expected:
                 raise EvidenceError("evidence location changed during read")
 
@@ -143,5 +195,35 @@ def bounded_read(function):
             return function(*args, **kwargs)
         with verified_read():
             result = function(*args, **kwargs)
+        return result
+    return read
+
+
+def paged_read(function):
+    """Reuse the existing frozen-source cache across scoped page calls.
+
+    One bounded snapshot serves the process; eviction or a fresh host merely
+    causes ordinary decoding. Originals are checked before source reuse and
+    again before return, while policy, counter search and continuation state
+    are rebuilt by the ordinary reader. Nothing is placed in the page cursor.
+    """
+    ordinary = bounded_read(function)
+
+    @wraps(function)
+    def read(*args, **kwargs):
+        global _PAGE_SOURCES
+        if CURRENT.get() is not None or kwargs.get("scope") is None:
+            return ordinary(*args, **kwargs)
+        with _PAGE_LOCK:
+            previous = _PAGE_SOURCES
+        with verified_read(previous) as scope:
+            result = function(*args, **kwargs)
+        # Only successful outer verification can seed a later page. Strings
+        # are immutable and snapshot() never exposes mutable cached records.
+        snapshot = scope.snapshot()
+        if len(json.dumps(snapshot, ensure_ascii=False).encode()) > MAX_CACHE_BYTES:
+            snapshot = None
+        with _PAGE_LOCK:
+            _PAGE_SOURCES = snapshot
         return result
     return read

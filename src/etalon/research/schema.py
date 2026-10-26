@@ -178,8 +178,10 @@ class TaskSplit(Record):
 
     def __post_init__(self):
         tasks = self.development + self.validation + self.transfer
-        if not all((self.development, self.validation, self.transfer)) or len(set(tasks)) != len(tasks):
-            raise ValueError('development/validation/transfer tasks must be nonempty and disjoint')
+        # A task-local improvement need not claim cross-task transfer. Keep the
+        # old wire format and identities; an empty transfer set states no test.
+        if not all((self.development, self.validation)) or len(set(tasks)) != len(tasks):
+            raise ValueError('development/validation tasks must be nonempty and all groups disjoint')
         if set(tasks) != set(self.frozen_initial_configuration):
             raise ValueError('every frozen task needs an initial configuration identity')
         nonempty(self.independent_objective)

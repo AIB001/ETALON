@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import argparse
 import hashlib
+import json
 import os
 from pathlib import Path
 import secrets
@@ -24,6 +25,131 @@ from .publication import _copy, _read, _save
 INTENT = "etalon-native-attempt-intent/1"
 FINISHED = "etalon-native-attempt-finished/1"
 RECEIPT = "etalon-native-attempt-receipt/1"
+
+# A small descriptor beside the existing entry; no second job store. Transport
+# is explicit, and the only remote operation is this package's read-only reader.
+NATIVE_HANDLE = "etalon-native-handle/1"
+
+
+def validate_native_handle(handle):
+    from .evidence_refs import _sha
+    if (not isinstance(handle, dict) or set(handle) != {
+            "schema", "backend", "request_id", "descriptor", "identity"}
+            or handle.get("schema") != NATIVE_HANDLE or handle.get("backend") != "prism"):
+        raise EvidenceError("unsupported native handle")
+    if not isinstance(handle["request_id"], str) or not handle["request_id"]:
+        raise EvidenceError("native request id required")
+    if not isinstance(handle["descriptor"], str) or not Path(handle["descriptor"]).is_absolute():
+        raise EvidenceError("native descriptor must be an absolute path")
+    identity = handle["identity"]
+    if not isinstance(identity, dict) or set(identity) != {"sha256", "bytes"}:
+        raise EvidenceError("native descriptor identity required")
+    _sha(identity["sha256"])
+    if type(identity["bytes"]) is not int or not 0 < identity["bytes"] <= 1024 * 1024:
+        raise EvidenceError("native descriptor exceeds bound")
+    return handle
+
+
+def bind_native_handle(directory, *, native, profile, transport, reader_files):
+    """Bind an already-created PRISM job and fixed profile, without dispatch.
+
+    reader_files names deployed copies of boundary/native_result.py and
+    boundary/runtime_profile.py (path/sha256/bytes). A local or SSH transport is
+    selected explicitly; neither discovery nor a default environment is used.
+    """
+    from etalon.boundary import native_result, runtime_profile
+    # Paths belong to the target OS; validate its manifest here, full spec there.
+    if (profile.get("schema") != runtime_profile.PROFILE_SCHEMA
+            or profile.get("manifest_digest") != digest({k: v for k, v in profile.items() if k != "manifest_digest"})):
+        raise EvidenceError("fixed runtime manifest digest mismatch")
+    if native.get("schema") != "prism-gromacs-job-handle/1" or native.get("python") != profile["spec"]["python"]:
+        raise EvidenceError("native handle requires its exact fixed runtime")
+    if native.get("source") not in profile["spec"]["pythonpath"]:
+        raise EvidenceError("native source absent from fixed runtime")
+    if set(reader_files) != {"native_result", "runtime_profile"}:
+        raise EvidenceError("both fixed reader modules required")
+    for name, module in (("native_result", native_result), ("runtime_profile", runtime_profile)):
+        item = reader_files[name]
+        if set(item) != {"path", "sha256", "bytes"} or {k: item[k] for k in ("sha256", "bytes")} != file_identity(module.__file__):
+            raise EvidenceError("deployed reader must match this package")
+    if transport != {"kind": "local"}:
+        import re
+        if (set(transport) != {"kind", "host"} or transport["kind"] != "ssh"
+                or not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_.@-]{0,253}", transport["host"])):
+            raise EvidenceError("explicit local transport or SSH alias required")
+    descriptor = {"schema": "etalon-native-descriptor/1", "native": native,
+                  "profile": profile, "transport": transport, "reader_files": reader_files}
+    root = Path(directory).absolute()
+    root.mkdir(parents=True, exist_ok=True)
+    path = root / (digest(descriptor) + ".json")
+    _save(path, descriptor)
+    return validate_native_handle({"schema": NATIVE_HANDLE, "backend": "prism",
+        "request_id": native["request_id"], "descriptor": str(path), "identity": file_identity(path)})
+
+
+# Fixed bootstrap, never an argv or shell command taken from research prose.
+# Modules are checked before import, including before runtime profile checks.
+_NATIVE_READER = '''import hashlib,importlib.util,json,pathlib,sys
+d=json.load(sys.stdin)
+modules={}
+for name in ('runtime_profile','native_result'):
+ p=d['reader_files'][name]; data=pathlib.Path(p['path']).read_bytes()
+ if len(data)!=p['bytes'] or hashlib.sha256(data).hexdigest()!=p['sha256']: raise ValueError('reader source changed')
+for name in ('runtime_profile','native_result'):
+ p=d['reader_files'][name]
+ s=importlib.util.spec_from_file_location(name,p['path']); m=importlib.util.module_from_spec(s); s.loader.exec_module(m); modules[name]=m
+r=modules['native_result'].read_prism_result(d['native'],d['profile'],modules['runtime_profile'])
+print(json.dumps(r,allow_nan=False))
+'''
+
+
+def _transport_environment():
+    """Windows OpenSSH needs CommonAppData even in a minimal MCP environment."""
+    environment = os.environ.copy()
+    if os.name == "nt" and "PROGRAMDATA" not in environment:
+        import ctypes
+        directory = ctypes.create_unicode_buffer(32768)
+        if ctypes.windll.shell32.SHGetFolderPathW(None, 0x0023, None, 0, directory) != 0:
+            raise EvidenceError("Windows CommonAppData unavailable for SSH transport")
+        environment["PROGRAMDATA"] = directory.value
+    return environment
+
+
+def read_native_result(handle, *, timeout=60):
+    """Inspect the original handle and verify bytes. Never resume native work."""
+    import shlex
+    validate_native_handle(handle)
+    path = Path(handle["descriptor"])
+    if file_identity(path) != handle["identity"]:
+        raise EvidenceError("native descriptor bytes changed")
+    descriptor = _read(path)
+    if descriptor["native"]["request_id"] != handle["request_id"]:
+        raise EvidenceError("native descriptor/request mismatch")
+    argv = [descriptor["native"]["python"], "-P", "-B", "-c", _NATIVE_READER]
+    transport = descriptor["transport"]
+    if transport["kind"] == "ssh":
+        argv = ["ssh", "-o", "BatchMode=yes", "-o", "ConnectTimeout=10", transport["host"], shlex.join(argv)]
+    elif transport != {"kind": "local"}:
+        raise EvidenceError("unsupported native transport")
+    start = time.monotonic()
+    try:
+        completed = subprocess.run(argv, input=canonical(descriptor), capture_output=True,
+            text=True, encoding="utf-8", timeout=timeout, check=False, env=_transport_environment())
+    except (OSError, subprocess.TimeoutExpired) as exc:
+        raise EvidenceError("native read unavailable: " + type(exc).__name__) from exc
+    if completed.returncode:
+        raise EvidenceError(f"native read failed (exit {completed.returncode}): "
+                            + (completed.stderr or completed.stdout)[-1200:])
+    result = json.loads(completed.stdout)
+    if (result.get("schema") != "etalon-native-action-result/1"
+            or result.get("request_id") != handle["request_id"]
+            or result.get("profile_digest") != descriptor["profile"]["manifest_digest"]):
+        raise EvidenceError("native reader returned a different request/profile")
+    if file_identity(path) != handle["identity"]:
+        raise EvidenceError("native descriptor changed during read")
+    result["read_cost"] = {"wall_seconds": time.monotonic() - start,
+                           "scope": "transport_profile_checks_and_native_original_verification"}
+    return result
 
 
 def process_identity(pid):

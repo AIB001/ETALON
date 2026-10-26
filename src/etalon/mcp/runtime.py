@@ -32,6 +32,8 @@ def register(mcp: Any) -> None:
     def etalon_action_result(handle: dict[str, Any]) -> str:
         """FREE. Read execution, verification, admission and accounting as separate existing facts.
 
+        Also accepts a fixed PRISM handle from execution_recovery.bind_native_handle;
+        it verifies the original job/profile and never restarts scientific work.
         Pass the complete handle object returned by etalon_action_submit unchanged. A campaign
         action ID or an offline etalon_active_replay result is not a runtime action handle.
         Inspect replay outcomes through campaign status and campaign events instead.

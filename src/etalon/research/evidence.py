@@ -309,6 +309,22 @@ def _collect_uncached(ws, source_ids=None):
     requested = known if source_ids is None else set(source_ids)
     pending = [sid for sid in sources if sid in requested]
     scheduled = set(pending)
+    # Discovery and transitive visibility inspect the same explicit references.
+    # Extract once per row in this collection, not once per pruning iteration.
+    # The optional bounded memo contains targets only, never a visibility verdict.
+    target_cache, target_bytes = {}, 0
+    def targets(sid, rid, row):
+        nonlocal target_bytes
+        key = sid, rid
+        if key in target_cache:
+            return target_cache[key]
+        value = tuple((ref.get("source_id"), ref.get("record_id")) for ref in _relationships(row)
+            if isinstance(ref, dict) and ref.get("schema") == "etalon-evidence-ref/1")
+        size = len(canonical(value).encode("utf-8")) + len(sid.encode()) + len(rid.encode())
+        if target_bytes + size <= MAX_SOURCE_BYTES:
+            target_cache[key] = value
+            target_bytes += size
+        return value
     for sid in pending:
         source = sources[sid]
         if source.get("visibility", "released") != "released":
@@ -324,9 +340,8 @@ def _collect_uncached(ws, source_ids=None):
             if cov["projection_failures"]:
                 warnings.append({"source_id": sid, "code": "content_projection_unavailable",
                                  "count": len(cov["projection_failures"])})
-            dependencies = {ref["source_id"] for row in rows.values() for ref in _relationships(row)
-                            if isinstance(ref, dict) and ref.get("schema") == "etalon-evidence-ref/1"
-                            and ref.get("source_id") in known}
+            dependencies = {source_id for rid, row in rows.items() for source_id, _ in targets(sid, rid, row)
+                            if source_id in known}
             for dependency in sorted(dependencies - scheduled):
                 if len(scheduled - requested) >= MAX_DEPENDENCY_SOURCES:
                     raise EvidenceError("dependency source bound exceeded; publish a smaller workspace")
@@ -346,9 +361,8 @@ def _collect_uncached(ws, source_ids=None):
         removed = []
         for sid, rows in records.items():
             for rid, row in rows.items():
-                if any(isinstance(ref, dict) and ref.get("schema") == "etalon-evidence-ref/1"
-                       and ref.get("record_id") not in records.get(ref.get("source_id"), {})
-                       for ref in _relationships(row)):
+                if any(record_id not in records.get(source_id, {})
+                       for source_id, record_id in targets(sid, rid, row)):
                     removed.append((sid, rid))
         if not removed:
             break

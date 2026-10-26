@@ -12,7 +12,7 @@ from .continuation import CHECKPOINT, MAX_RESUME_RECORDS, _exact_refs, _status, 
 from .evidence import MAX_RECORDS, _collect, _read_evidence, _relationships
 from .evidence_refs import EvidenceError, make_ref, validate_ref
 from .graph_memory import _ids, restrict_workspace
-from .graph_scope import _counter_refs
+from .declared_relations import checked_row as _checked_row, relation_index, record_identity
 from .read_scope import bounded_read, implementation_identity
 
 
@@ -41,40 +41,10 @@ def _closure_inventory(workspace, checkpoint_ref, *, policy, purpose, handoff):
         issues.append({"reason": "counter_search_source_coverage_incomplete"})
 
     def checked_row(ref):
-        ref = validate_ref(ref)
-        row = universe.get((ref["source_id"], ref["record_id"]))
-        if row is None or digest(row["record"]) != ref["record_digest"]:
-            raise EvidenceError("closure reference unavailable, restricted or identity changed")
-        if row.get("projection", {}).get("status") == "unavailable":
-            raise EvidenceError("closure referenced content projection unavailable")
-        body = row["record"]
-        if "member" in ref:
-            members = [m for m in row.get("members", body.get("members", []))
-                if m.get("member") == ref["member"] and m.get("visibility") == "released"]
-            if len(members) != 1:
-                raise EvidenceError("closure reference member is not uniquely published")
-            body = members[0]
-        if "sha256" in ref and (ref["sha256"], ref["bytes"]) != (body.get("sha256"), body.get("bytes")):
-            raise EvidenceError("closure reference artifact identity mismatch")
-        return row
+        return _checked_row(universe, ref)
 
-    # Counter direction is target -> declaring owner. Match record identity, so
-    # a member/hash-qualified envelope cannot erase a reverse declaration.
-    def identity(ref):
-        return ref["source_id"], ref["record_id"], ref["record_digest"]
-
-    incidence, all_counters = {}, {}
-    for (sid, rid), row in sorted(universe.items()):
-        owner = make_ref(sid, rid, row["record"])
-        for target in [*_counter_refs(row["record"]), *_counter_refs(row.get("projected_content", {}))]:
-            checked_row(target)
-            relation = {"kind": "refutes", "from_ref": target, "to_ref": owner, "basis_ref": owner}
-            key = canonical(relation)
-            all_counters[key] = relation
-            if len(all_counters) > MAX_RECORDS:
-                raise EvidenceError("closure counter index exceeds existing record index bound")
-            for ref in (owner, target):
-                incidence.setdefault(identity(ref), set()).add(key)
+    indexed = relation_index(ws, collection)
+    incidence, all_counters = indexed["incidence"], indexed["relations"]
 
     refs, queue, edges, counters = {}, deque(), {}, {}
     def enqueue(ref):
@@ -93,7 +63,7 @@ def _closure_inventory(workspace, checkpoint_ref, *, policy, purpose, handoff):
     while queue:
         ref = queue.popleft()
         row = checked_row(ref)
-        for key in sorted(incidence.get(identity(ref), ())):
+        for key in sorted(incidence.get(record_identity(ref), ())):
             relation = counters[key] = all_counters[key]
             enqueue(relation["from_ref"])
             enqueue(relation["to_ref"])

@@ -66,7 +66,58 @@ branch_updates=[{
 
 The decision's `basis_refs` and `reconsider_when` must match the transition. Next reads must belong to that evidence. The resulting branch also links the decision itself. `resolved` accepts `reuse`, `stop`, or `merge`; `waiting` requires `defer`; `stopped` requires `stop`; `open`/`active` require the corresponding explicit reconsideration/proceed/fork choice. Reopening a terminal branch always requires `reconsider`. This records a host decision, not automatic scientific judgment. A missing, stale, duplicate or cross-branch update fails during preflight before archival writes. The transition is included in immutable intent equality and replayed through the same crash-safe publication stages.
 
-Task/question, authority guards, pending action handles, watermarks and existing counterevidence cannot be replaced through this option. A branch marked active does not grant execution permission or relax a pause. Legacy external jobs without an ETALON runtime handle remain explicitly linked producer receipts on a research node; do not fabricate a runtime handle or interpret an empty `pending_handles` list as a global idle-machine assertion. This API does not poll jobs, launch work, select a method or certify scientific results. Native receipt reconciliation remains an explicit producer read followed by a reviewed publication.
+Task/question, authority guards, watermarks and existing counterevidence cannot be replaced through this option. A branch marked active does not grant execution permission or relax a pause. Legacy producer receipts remain valid historical evidence. Native PRISM jobs can now be attached explicitly using `execution_recovery.bind_native_handle`; do not fabricate runtime handles. Empty `pending_handles` is not a global idle-machine assertion.
+
+`handle_update={"expected": old_handles, "replacement": selected_handles}` is a
+separate exact pending-set update. Removed handles must remain on a result step
+and be terminal; completed jobs require passed native verification. Paused or
+interrupted jobs remain unresolved. Prepare and resume freshly read retired
+handles; successful publication replay verifies saved evidence without repeating
+native execution. No update settles scientific charges or starts/resumes a job.
+
+## Compact result publication and fixed native jobs
+
+`prepare_result_publication` accepts explicit results, existing typed
+experiment/observation/method refs and a host-authored decision, compiles the
+ordinary steps/branch update, and calls `prepare_publication`. It does not create
+observations from untyped JSON or decide whether a method is better. Its CLI is
+`examples/research_publication.py prepare-result REQUEST.json`. Use the same
+`resume_publication` after interruption. Exact replay compiles against the saved
+parent checkpoint, not the already advanced entry.
+
+The decision fields are `choice`, `state`, `reason`, `reconsider_when`, and
+`basis_refs`; results retain the six explicit provenance fields shown above.
+`experiment_refs`, `observation_refs`, `method_refs`, `accounting_refs`, and
+`input_refs` link existing records. `counter_refs` only adds to inherited
+counterevidence. `pending_handles=None` leaves jobs unchanged; an explicit list
+tracks or settles jobs while preserving result lineage. No new records, stages
+or reference limits are required.
+
+For native continuation, capture `boundary.runtime_profile.capture(spec)` on the
+execution machine with capability `prism.inspect`. Pin the PRISM import, its
+source root and a check for `GromacsJob.inspect`. Deploy the two stdlib-loadable
+files `boundary/native_result.py` and `boundary/runtime_profile.py` together in
+an immutable version directory. `bind_native_handle(directory, native=handle,
+profile=profile, transport={"kind":"ssh","host":"alias"}, reader_files=files)`
+binds both reader hashes and the original PRISM handle. Each `files` member is
+`{path,sha256,bytes}`, keyed by `native_result` and `runtime_profile`.
+
+`runtime.api.read_action_result(handle)` (also the existing MCP result tool)
+uses that descriptor, verifies actual imports/checks in the fixed Python, and
+calls PRISM `inspect()`. That call rechecks the job contract and all completed
+output hashes. The descriptor is a small immutable sidecar, not a job store;
+keep it available or republish an explicitly relocated handle when moving hosts.
+Remote errors remain unavailable, not completion. No polling daemon or scheduler
+is installed. Results distinguish execution, original verification, unknown
+scientific admission and accounting not resettled.
+
+For *new* PRISM jobs, `GromacsJob.create(..., execution=config)` pins native
+backends, checkpoint interval, reproducibility/PME switches, GPU ID, maximum
+hours and optional explicit CPU/device placement in the existing contract.
+`mdrun_command` compiles it; no task-specific argv-rewriting wrapper is needed.
+TPR scientific parameters remain separate. Omission retains legacy CPU argv.
+Execution profiles still bind the actual interpreter, imports and environment.
+Existing jobs keep their original supervisor snapshot and configuration.
 
 ## Durable sequence and recovery
 

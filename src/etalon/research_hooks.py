@@ -94,7 +94,7 @@ def _refs(value):
 def _build_context(entry, *, policy, max_bytes, conditions=None):
     from etalon.research.research_context import build_research_context
     return build_research_context(entry, purpose="research", policy=policy,
-                                  max_bytes=max_bytes, view="summary", conditions=conditions)
+                                  max_bytes=max_bytes, view="card", conditions=conditions)
 
 
 def _envelope(payload):
@@ -155,17 +155,67 @@ def _source_complete(context):
                for source in context.get("source_watermarks", []))
 
 
+def _impact_navigation(context, previous, config):
+    """Offer an optional exact read after newly visible refs; never run a review.
+
+    New to this delivery does not mean new science. Workset switches require the
+    full baseline, not a comparison of unrelated tasks. Navigation is disposable;
+    authoritative evidence and controls remain in the ordinary context.
+    """
+    if (not previous or not previous.get("usable") or previous.get("config") != config
+            or not isinstance(context.get("read_context"), dict)):
+        return None
+    old = previous["context"]
+    if (old.get("task_id"), old.get("task_workset", {}).get("digest")) != (
+            context.get("task_id"), context.get("task_workset", {}).get("digest")):
+        return None
+    before = _refs(old)
+    added = [r for r in _refs(context) if r not in before]
+    if not added:
+        return None
+    value = {"status": "exact_selection_required", "newly_listed_ref_count": len(added),
+             "meaning": "delivery_reference_change_not_new_scientific_evidence",
+             "automatic_review": False, "automatic_retry": False}
+    if len(added) <= 8:
+        recipe = {"tool": "etalon_research_context", "arguments": {
+            "entry": context["read_context"], "view": "impact", "purpose": "research",
+            "view_options": {"changed_refs": [{"schema": "etalon-evidence-ref/1", **r} for r in added]},
+            "max_bytes": min(config["max_bytes"], 16384)}}
+        if len(_bytes(recipe)) <= 2048:
+            value.update(status="optional_exact_read", read=recipe)
+    return value
+
+
 def _delivery_payload(context, previous, *, event_name, entry, config):
     current_hash = _digest(context)
     recovery = {"entry": entry, "tool": "etalon_research_context",
-        "arguments": {"entry": entry, "purpose": "research", "view": "summary",
+        "arguments": {"entry": entry, "purpose": "research", "view": "card",
                       "policy": config["policy"], "max_bytes": config["max_bytes"],
                       "conditions": config["conditions"]},
         "basis": "read_current_entry_if_base_missing_or_delivery_uncertain"}
     common = {"delivery": {"mode": "baseline", "context_sha256": current_hash,
         "context_id": context.get("context_id"), "consumption_verified": False,
         "recovery": recovery, "replaces_previous_context": True}}
+    if event_name == "PreToolUse":
+        navigation = _impact_navigation(context, previous, config)
+        if navigation is not None:
+            common["delivery"]["impact_review"] = navigation
     baseline = {**common, "context": context}
+    # A partial source view still replaces the previous task's workset. Keep
+    # that declared selection transition visible while withholding delta reuse.
+    # This does not certify the scientific applicability of either selection.
+    if (event_name != "SessionStart" and previous and previous.get("config") == config
+            and isinstance(previous.get("context"), dict)):
+        old_context = previous["context"]
+        old, new = old_context.get("task_workset", {}), context.get("task_workset", {})
+        if (old_context.get("task_id"), old.get("digest")) != (context.get("task_id"), new.get("digest")):
+            old_parts = old.get("enabled_versions", old.get("enabled", []))
+            new_parts = new.get("enabled_versions", new.get("enabled", []))
+            baseline["delivery"]["workset_transition"] = {
+                "previous_digest": old.get("digest"), "current_digest": new.get("digest"),
+                "deactivated": [part for part in old_parts if part not in new_parts],
+                "activated": [part for part in new_parts if part not in old_parts],
+                "context_erasure": False}
     reason = "session_start" if event_name == "SessionStart" else "no_complete_baseline"
     if not _source_complete(context):
         reason = "source_coverage_incomplete"
@@ -175,15 +225,6 @@ def _delivery_payload(context, previous, *, event_name, entry, config):
         elif (previous["context"].get("task_id"), previous["context"].get("task_workset", {}).get("digest")) != (
                 context.get("task_id"), context.get("task_workset", {}).get("digest")):
             reason = "task_or_workset_changed"
-            old = previous["context"].get("task_workset", {})
-            new = context.get("task_workset", {})
-            old_parts = old.get("enabled_versions", old.get("enabled", []))
-            new_parts = new.get("enabled_versions", new.get("enabled", []))
-            baseline["delivery"]["workset_transition"] = {
-                "previous_digest": old.get("digest"), "current_digest": new.get("digest"),
-                "deactivated": [part for part in old_parts if part not in new_parts],
-                "activated": [part for part in new_parts if part not in old_parts],
-                "context_erasure": False}
         else:
             old = previous["context"]
             changed = {key: value for key, value in context.items()
@@ -302,7 +343,7 @@ def handle_event(entry, event, *, host, state_dir, policy=None, max_bytes=16384,
     entry_identity = str(_root(entry)) if isinstance(entry, (str, Path)) else entry
     scope = {"host": host, "session_id": session_id, "entry": entry_identity}
     config = {"handler_version": VERSION, "policy": policy, "max_bytes": max_bytes,
-              "conditions": conditions, "view": "summary"}
+              "conditions": conditions, "view": "card"}
     event_key = {"scope": scope, "event": event_name, "identity": identity}
     payload_hash = _digest(event)
     root = _root(state_dir) / _digest(scope)

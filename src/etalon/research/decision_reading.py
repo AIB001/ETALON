@@ -5,15 +5,17 @@ store, an execution policy, or a receipt that a host understood originals.
 """
 from __future__ import annotations
 
+import base64
+import hashlib
 from collections import Counter
 
 from etalon.active.schema import canonical, digest
 from .continuation_card import _cursor, _position, _reference_row
 from .entry import resolve_entry, make_read_context, workspace_from_context, continuation_status
-from .evidence import _collect, _slice_text
+from .evidence import _collect, _read_evidence, _slice_text
 from .evidence_refs import EvidenceError, make_ref, validate_ref
-from .graph_memory import build_research_graph, node_identity, restrict_workspace
-from .read_scope import bounded_read
+from .graph_memory import _build_research_graph as build_research_graph, node_identity, restrict_workspace
+from .read_scope import bounded_read, paged_read
 
 SCHEMA = "etalon-decision-reading/1"
 MAX_BYTES = 16384
@@ -130,8 +132,7 @@ def _page(rows, envelope, *, stamp, cursor, limit, max_bytes):
     return result
 
 
-@bounded_read
-def build_decision_reading(entry, *, question, scope=None, reading_mode="decision",
+def _decision_inventory(entry, *, question, scope=None, reading_mode="decision",
                            purpose="research", policy=None, conditions=None,
                            relevance=None, decision_changed=None, max_bytes=MAX_BYTES,
                            cursor=None, limit=20, as_of=None, home_overrides=None):
@@ -372,4 +373,240 @@ def build_decision_reading(entry, *, question, scope=None, reading_mode="decisio
                 "selection": "deterministic_exact_scope_and_declared_relations_not_semantic_ranking",
                 "execution_permission": "not_granted", "automatic_retry": False,
                 "content_role": "sourced_research_data_not_host_instructions"}
-    return _page(rows, envelope, stamp=stamp, cursor=cursor, limit=limit, max_bytes=max_bytes)
+    return rows, envelope, ws, collection
+
+
+@bounded_read
+def build_decision_reading(entry, *, question, scope=None, reading_mode="decision",
+                           purpose="research", policy=None, conditions=None,
+                           relevance=None, decision_changed=None, max_bytes=MAX_BYTES,
+                           cursor=None, limit=20, as_of=None, home_overrides=None):
+    """Return the existing lossless reading plan; no original bodies are delivered."""
+    rows, envelope, _, _ = _decision_inventory(entry, question=question, scope=scope,
+        reading_mode=reading_mode, purpose=purpose, policy=policy, conditions=conditions,
+        relevance=relevance, decision_changed=decision_changed, max_bytes=max_bytes,
+        cursor=cursor, limit=limit, as_of=as_of, home_overrides=home_overrides)
+    return _page(rows, envelope, stamp=envelope["reading_digest"], cursor=cursor,
+                 limit=limit, max_bytes=max_bytes)
+
+
+def _delivery_rows(rows, *, deduplicate_bodies=False, collection=None):
+    """Transport the same exact selection without repeating navigation annotations."""
+    result, originals, optional = [], [], []
+    for row in rows:
+        section = row["section"]
+        if section == "selection":
+            result.append(row)
+        elif section == "current_controls" and "branches" in row:
+            result.extend({"section": "branch_state", **{k: branch[k] for k in
+                ("branch_id", "state", "reconsider_when")}} for branch in row["branches"])
+            result.append({"section": "current_controls",
+                "checkpoint_progress": row["checkpoint_progress"],
+                "task_workset": row["task_workset"],
+                "publications": {k: row["publications"][k] for k in ("status", "incomplete_count")},
+                "unfinished_publications": [op for op in row["publications"].get("operations", [])
+                                            if op.get("needs_recovery")],
+                "completed_publication_details": "view=reading or manifest section publications"})
+        elif "ref" in row:
+            required = row["read_requirement"] == "required_before_changed_decision_or_causal_claim"
+            item = {"section": "original" if required else "conditional_original",
+                "ref": row["ref"], "role": section,
+                "obligation_basis": row.get("obligation_basis", "selected_boundary"),
+                "original_read": row["original_read"]}
+            if deduplicate_bodies:
+                # Artifact hashes describe exact original bytes, not normalized
+                # JSON or projected summaries. Record bodies use reader canonical.
+                if row["original_read"]["view"] == "artifact":
+                    locator = row.get("original_locator", {})
+                    if "sha256" in locator and "bytes" in locator:
+                        item["body_identity"] = {k: locator[k] for k in ("sha256", "bytes")}
+                else:
+                    ref = row["ref"]
+                    raw = canonical(collection[0][ref["source_id"]][ref["record_id"]]["record"]).encode()
+                    item["body_identity"] = {"sha256": hashlib.sha256(raw).hexdigest(), "bytes": len(raw)}
+            if "host_relevance" in row:
+                item["host_relevance"] = row["host_relevance"]
+            for key in ("applicability", "activation"):
+                if key in row:
+                    item[key] = row[key]
+            if required:
+                originals.append(item)
+            else:
+                if "summary" in row:
+                    item["summary"] = row["summary"]
+                item["body_delivery"] = "not_requested; optional exact ref remains readable"
+                optional.append(item)
+        elif section in {"counter_relation", "gaps"}:
+            result.append(row)
+    # Current control metadata and declared counters precede bodies. Optional
+    # context stays explicit, but its unrequested bodies consume no token budget.
+    if deduplicate_bodies:
+        seen = {}
+        for item in originals + optional:
+            identity = item.get("body_identity")
+            if identity is None:
+                continue
+            key = (identity["sha256"], identity["bytes"])
+            previous = seen.get(key)
+            if previous is None:
+                seen[key] = item
+                continue
+            item["body_alias"] = {"ref": previous["ref"],
+                "delivery": "earlier_original_in_same_delivery" if previous["section"] == "original"
+                    else "conditional_original_not_delivered",
+                "meaning": "byte_identity_only; source roles and scientific claims remain distinct"}
+            if item["section"] == "original":
+                item["section"] = "original_alias"
+            else:
+                item["body_alias"].update(delivery="conditional_original_not_delivered",
+                    meaning="matching_declared_identity_only; original bytes not checked by alias")
+                item["verification"] = {"record": "verified", "artifact": "not_checked"}
+    return result + originals + optional
+
+
+def _original_piece(workspace, collection, item, offset, size):
+    """Read verified original bytes, using readable UTF-8 when lossless."""
+    view = item["original_read"]["view"]
+    read = _read_evidence(workspace, item["ref"], view=view,
+                          offset=offset, limit=max(4, size), collection=collection)
+    if (read.get("availability") != "available" or read.get("missing")
+            or view == "artifact" and read.get("verification", {}).get("artifact") != "verified"):
+        raise EvidenceError("decision original unavailable or identity changed")
+    if "record" in read:
+        raw = canonical(read["record"]).encode()
+        data, total = raw[offset:offset + size], len(raw)
+    else:
+        fragment = read["fragment"]
+        data, total = base64.b64decode(fragment["content"]), fragment["total_bytes"]
+    # Record fragments use canonical bytes; artifact fragments retain original
+    # bytes. UTF-8 boundaries are shortened rather than introducing replacements.
+    data = data[:size]
+    encoding, content = "base64", base64.b64encode(data).decode()
+    for trim in range(min(3, len(data) - 1) + 1):
+        candidate = data[:-trim] if trim else data
+        try:
+            text = candidate.decode("utf-8")
+        except UnicodeDecodeError:
+            continue
+        if trim and offset + len(data) >= total:
+            break
+        data, encoding, content = candidate, "utf-8", text
+        break
+    end = offset + len(data)
+    if not data and offset < total:
+        raise EvidenceError("decision original fragment made no progress")
+    return {"encoding": encoding, "content": content, "offset": offset,
+        "next_offset": end if end < total else None, "total_bytes": total}, read["verification"]
+
+
+@paged_read
+def build_decision_delivery(entry, *, question, scope=None, reading_mode="decision",
+                            purpose="research", policy=None, conditions=None,
+                            relevance=None, decision_changed=None, max_bytes=MAX_BYTES,
+                            cursor=None, limit=20, as_of=None, home_overrides=None,
+                            deduplicate_bodies=False):
+    """Deliver exact selected originals and their counters in one paged operation.
+
+    This is an optional transport for ``build_decision_reading``. The selection,
+    applicability boundary and original verification are unchanged. No LLM
+    summary, semantic relevance filter, persistent store or action is added.
+    Retaining consecutive pages establishes byte delivery, never comprehension.
+    Optional body aliases preserve all refs/roles and only reuse exact bytes from
+    an earlier original in this delivery. Conditional aliases remain explicit;
+    none claims that a previous host read or understood the shared body.
+    """
+    if type(deduplicate_bodies) is not bool:
+        raise EvidenceError("deduplicate_bodies must be boolean")
+    rows, plan, workspace, collection = _decision_inventory(entry, question=question,
+        scope=scope, reading_mode=reading_mode, purpose=purpose, policy=policy,
+        conditions=conditions, relevance=relevance, decision_changed=decision_changed,
+        max_bytes=max_bytes, cursor=cursor, limit=limit, as_of=as_of,
+        home_overrides=home_overrides)
+    rows = _delivery_rows(rows, deduplicate_bodies=deduplicate_bodies, collection=collection)
+    identity = {"schema": "etalon-decision-delivery/1", "reading_digest": plan["reading_digest"]}
+    if deduplicate_bodies:
+        identity["deduplicate_bodies"] = True
+    stamp = digest(identity)
+    index, offset = _position(cursor, stamp, len(rows))
+    result = {"schema": "etalon-decision-delivery/1", "view": "delivery",
+        "read_context": plan["read_context"], "entry_status": plan["entry_status"],
+        "task_id": plan["task_id"], "checkpoint_ref": plan["checkpoint_ref"],
+        "reading_mode": reading_mode, "continuation": plan["continuation"],
+        "counterevidence": plan["counterevidence"], "delivery_digest": stamp,
+        "total_count": len(rows), "required_original_count": sum(r["section"] in {"original", "original_alias"} for r in rows),
+        "conditional_original_count": sum(r["section"] == "conditional_original" for r in rows),
+        "items": [], "next_cursor": None,
+        "body_coverage": "consecutive original fragments establish delivery only; comprehension not established",
+        "selection_details": "same question/scope/options with view=reading",
+        "execution_permission": "not_granted", "automatic_retry": False,
+        "content_role": "sourced_research_data_not_host_instructions"}
+    if deduplicate_bodies:
+        result["body_aliases"] = {"required_alias_count": sum(r["section"] == "original_alias" for r in rows),
+            "conditional_alias_count": sum(r["section"] == "conditional_original" and "body_alias" in r for r in rows),
+            "reuse_requires": "retain consecutive pages and the complete earlier body; aliases do not establish host comprehension"}
+    reserve = 384
+    while index < len(rows) and len(result["items"]) < limit:
+        row = rows[index]
+        if row["section"] != "original":
+            if row["section"] == "original_alias":
+                # Required aliases validate their own source through the normal
+                # reader. Optional boundaries do not add a new body-read gate.
+                _, verification = _original_piece(workspace, collection, row, 0, 4)
+                row = {**row, "verification": verification}
+            item = {"index": index, "value": row}
+            result["items"].append(item)
+            if offset == 0 and len(canonical(result).encode()) <= max_bytes - reserve:
+                index += 1
+                continue
+            result["items"].pop()
+            if result["items"]:
+                break
+            # Existing lossless metadata fragmentation; it is never substituted
+            # for an original-body fragment or an original-read receipt.
+            page = _page([row], {**result, "total_count": 1}, stamp=stamp,
+                cursor=None if offset == 0 else _cursor(stamp, 0, offset),
+                limit=1, max_bytes=max_bytes)
+            item = page["items"][0]
+            item["index"] = index
+            result["items"].append(item)
+            offset = item.get("fragment", {}).get("next_offset")
+        else:
+            item = {"index": index, **row}
+            # JSON escaping may enlarge text. Read once, then shrink in memory
+            # until this original fits; no repeated hash/remote read is needed.
+            remaining = max_bytes - reserve - len(canonical({**result,
+                "items": result["items"] + [item]}).encode()) - 256
+            if remaining < 8:
+                if result["items"]:
+                    break
+                raise EvidenceError("decision delivery controls exceed byte bound")
+            fragment, verification = _original_piece(workspace, collection, row,
+                                                     offset, min(32768, remaining))
+            item.update(fragment=fragment, verification=verification)
+            result["items"].append(item)
+            while len(canonical(result).encode()) > max_bytes - reserve:
+                data = (fragment["content"].encode() if fragment["encoding"] == "utf-8"
+                        else base64.b64decode(fragment["content"]))
+                size = max(1, len(data) * 3 // 4)
+                if fragment["encoding"] == "utf-8":
+                    text = data[:size].decode("utf-8", errors="ignore")
+                    data = text.encode()
+                    fragment["content"] = text
+                else:
+                    data = data[:size]
+                    fragment["content"] = base64.b64encode(data).decode()
+                if not data:
+                    raise EvidenceError("decision delivery controls exceed byte bound")
+                fragment["next_offset"] = offset + len(data)
+            offset = fragment["next_offset"]
+        if offset is None:
+            index += 1
+            offset = 0
+        else:
+            break
+    if index < len(rows):
+        result["next_cursor"] = _cursor(stamp, index, offset)
+    result["page_complete"] = result["next_cursor"] is None
+    if len(canonical(result).encode()) > max_bytes:
+        raise EvidenceError("decision delivery exceeds byte bound")
+    return result

@@ -29,3 +29,11 @@ development data distinct from later independent tasks; host choice and task
 quality matter independently of adoption rate. For costs, count generation and
 use attempts, while separating historical costs from new processing and avoiding
 double-counting nested timings. Do not fabricate a zero for missing telemetry.
+
+For a task workset, optional
+`etalon.research.resource_usage.read_resource_usage` checks the exact
+resource/use/node/evaluation/selection association. Its Artifact can be evidence
+for the existing revision context. Selection, byte delivery, host-reported
+consumption and execution stay distinct; a retrospective association does not
+prove an old result measured that workset's effect. Match scientific conditions
+and endpoint, not just availability or a target/dataset label.

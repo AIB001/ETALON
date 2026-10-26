@@ -14,7 +14,7 @@ from .entry import (continuation_status, make_read_context, resolve_entry,
 from .evidence import query_evidence
 from .evidence_refs import EvidenceError, validate_ref
 from .continuation import read_content
-from .graph_memory import build_research_graph, node_identity, restrict_workspace
+from .graph_memory import _build_research_graph as build_research_graph, node_identity, restrict_workspace
 from .improvement import read_material, validate_content as validate_experience
 from .meta_context import read_task_workset, workset_resource_part
 from .read_scope import bounded_read

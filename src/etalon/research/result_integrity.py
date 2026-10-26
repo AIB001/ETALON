@@ -136,6 +136,104 @@ def top1_observation(verifier, rank, expected_pose_count, *, check_contract, exp
     return out
 
 
+def validate_endpoint_verifier(verifier, *, check_contract, expected_inputs,
+                              expected_pose_count, qualification_refs, workspace):
+    """Validate the opt-in endpoint report without rerunning physical calculations.
+
+    Original qualification claims are independently re-read. Report integrity and
+    endpoint availability are separate: a valid report can explicitly retain an
+    unknown RMSD and joint endpoint. This never promotes a historical result.
+    """
+    from .scientific_handoff import qualification_for_pose
+    validate_check_contract(check_contract)
+    issues, observations = [], {name: {"observed": 0, "unknown": 0} for name in ("physical", "rmsd", "joint")}
+    if not isinstance(verifier, dict):
+        verifier = {}
+    if verifier.get("schema") != "etalon-pose-endpoint-verification/1":
+        issues.append("endpoint_schema_mismatch")
+    for key, expected in (("inputs", expected_inputs), ("expected_pose_count", expected_pose_count),
+            ("qualification_refs", qualification_refs), ("check_contract_digest", digest(check_contract)),
+            ("posebusters_version", check_contract["version"]), ("threshold_A", 2.0),
+            ("historical_results_modified", False)):
+        if verifier.get(key) != expected:
+            issues.append(key + "_mismatch")
+    actual = verifier.get("actual_pose_count")
+    if (type(expected_pose_count) is not int or not 1 <= expected_pose_count <= 100
+            or type(actual) is not int or not 0 <= actual <= 100):
+        issues.append("invalid_pose_counts")
+        actual = 0
+    if actual != expected_pose_count or verifier.get("slot_coverage_complete") is not True:
+        issues.append("slot_coverage_incomplete")
+    rows = verifier.get("rows")
+    if not isinstance(rows, list) or any(not isinstance(row, dict) for row in rows):
+        rows = []
+        issues.append("malformed_rows")
+    count = max(expected_pose_count, actual) if type(expected_pose_count) is int else actual
+    indices = [row.get("pose_index") for row in rows]
+    if any(type(i) is not int for i in indices) or len(indices) != count or set(indices) != set(range(count)):
+        issues.append("row_coverage_mismatch")
+    required = set(check_contract["required_checks"])
+    for row in rows:
+        index = row.get("pose_index")
+        prefix = "row_" + str(index) + "_"
+        if type(index) is not int:
+            continue
+        if row.get("slot_present") is not (index < actual):
+            issues.append(prefix + "slot_presence_mismatch")
+        qualification, qualified = row.get("qualification"), False
+        ref = qualification_refs.get(str(index))
+        if qualification is not None:
+            try:
+                if ref is None:
+                    raise ValueError("qualification has no declared exact ref")
+                checked = qualification_for_pose(ref, workspace=workspace,
+                    predicted_identity=expected_inputs["predicted"], reference_identity=expected_inputs["reference"], pose_index=index)
+                if qualification != checked:
+                    raise ValueError("qualification claim mismatch")
+                qualified = checked["eligibility"]["identity_comparable"] is True
+            except Exception:
+                issues.append(prefix + "qualification_unverified")
+        endpoints = {}
+        for name in observations:
+            endpoint = row.get(name)
+            if not isinstance(endpoint, dict) or endpoint.get("status") not in {"observed", "unknown"}:
+                issues.append(prefix + name + "_malformed")
+                continue
+            endpoints[name] = endpoint
+            observations[name][endpoint["status"]] += 1
+            value = endpoint.get("value")
+            if not endpoint.get("reason"):
+                issues.append(prefix + name + "_reason_missing")
+            if endpoint["status"] == "unknown":
+                if value is not None:
+                    issues.append(prefix + name + "_unknown_has_value")
+            elif not row.get("slot_present"):
+                issues.append(prefix + name + "_missing_slot_observation")
+            elif name == "rmsd":
+                if not qualified or type(value) not in (int, float) or not math.isfinite(value) or value < 0:
+                    issues.append(prefix + "rmsd_ineligible_or_invalid")
+            elif type(value) is not bool:
+                issues.append(prefix + name + "_nonboolean")
+        physical, rmsd, joint = (endpoints.get(name, {}) for name in ("physical", "rmsd", "joint"))
+        if physical.get("status") == "observed":
+            checks = row.get("checks")
+            if (not isinstance(checks, dict) or set(checks) != required
+                    or any(type(v) is not bool for v in checks.values())
+                    or physical.get("value") != all(checks.values())):
+                issues.append(prefix + "physical_check_coverage_or_value_mismatch")
+        available = physical.get("status") == rmsd.get("status") == "observed"
+        if available:
+            value = rmsd.get("value")
+            if type(value) in (int, float) and (joint.get("status") != "observed"
+                    or joint.get("value") is not (physical.get("value") is True and value <= 2.0)):
+                issues.append(prefix + "joint_inconsistent")
+        elif joint.get("status") != "unknown" or joint.get("value") is not None:
+            issues.append(prefix + "joint_requires_all_endpoints")
+    return {"schema": "etalon-pose-endpoint-integrity/1", "status": "complete" if not issues else "unknown",
+            "issues": issues, "endpoint_availability": observations,
+            "scientific_truth": "not_certified", "historical_results_modified": False}
+
+
 def validate_native_receipt(receipt, request, *, compiled, stage, protocol, pool, output, identity_reader=identity):
     """Reuse existing native artifact hashes and verify their request binding."""
     key = digest({'compiled': compiled, 'stage': stage, 'freeze': protocol})

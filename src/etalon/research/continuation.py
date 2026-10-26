@@ -61,6 +61,10 @@ def _watermarks(value):
 
 
 def _handle(value):
+    if isinstance(value, dict) and value.get("schema") == "etalon-native-handle/1":
+        from .execution_recovery import validate_native_handle
+        validate_native_handle(value)
+        return
     _fields(value, ("schema", "backend", "workspace", "request_id", "job_id", "plan_id", "node_id"), ("state",))
     if (value["schema"], value["backend"], value["node_id"]) != ("etalon-action-handle/1", "runtime", "action"):
         raise EvidenceError("unsupported pending action handle")
@@ -315,6 +319,14 @@ def record_content(journal, payload, directory, *, source_id, source_kind, role=
     if handles:
         from etalon.runtime.api import read_action_result
         for handle in handles:
+            if handle.get("schema") == "etalon-native-handle/1":
+                # Recording a reference is not a remote read. Actual status is
+                # obtained by resume_research/read_action_result on demand.
+                from .execution_recovery import validate_native_handle
+                validate_native_handle(handle)
+                if file_identity(handle["descriptor"]) != handle["identity"]:
+                    raise EvidenceError("native descriptor bytes changed")
+                continue
             read_action_result(handle)  # Existing handle only, never submit/reconcile.
     data = (canonical(content) + "\n").encode()
     directory = Path(directory).absolute()
@@ -434,6 +446,10 @@ def _status(ws, guards, *, source_id):
 
 def _check_frozen_view(ws, records, coverage):
     """Recheck source and projected bytes before returning a reused frozen view."""
+    from .read_scope import CURRENT
+    scope = CURRENT.get()
+    if scope is not None and scope.defer_frozen_check(ws, records, coverage):
+        return  # The outer verified read still verifies these exact originals.
     for cov in coverage:
         source = ws.source(cov["source_id"])
         path = _local(ws.base, source["location"])

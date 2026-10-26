@@ -51,3 +51,15 @@ Scientific input standards and method parameter contracts remain authoritative
 for actual execution. This skill adds decision structure, not execution rights,
 new resource allocation or a fixed Probe. R4b remains paused unless explicitly
 resumed by the user.
+
+For selected rule/experience → action → normal-result comparisons, use the
+optional [action-learning adapter](action-learning.md). It complements the
+decision/update and candidate bridge; it does not replace scientific execution.
+
+When interpreting a comparison, keep declared, compiled, executed and admitted
+checks distinct. A known starting pose remains known information even if copied
+as a reference. A restraint penalty and an unrestrained energy are different
+objectives. Numerical convergence, physical validity and the task's external
+quality endpoint require their own evidence. The capability profile groups exact
+versions and declared case families; repeated seeds and copied summaries do not
+establish independent transfer.

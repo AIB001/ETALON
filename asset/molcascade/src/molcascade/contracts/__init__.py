@@ -28,6 +28,8 @@ from molcascade.contracts.schemas import (
     MD_SYSTEM_INPUT_V1,
     SHORTLIST_EXPORT_V1,
     SYNTHESIS_SCORE_V1,
+    SYNTHESIS_ROUTES_V1,
+    SYNTHESIS_SEARCH_V1,
 )
 from molcascade.contracts.validation import (
     ContractValidationReport,
@@ -58,6 +60,8 @@ __all__ = [
     "MD_SYSTEM_INPUT_V1",
     "SHORTLIST_EXPORT_V1",
     "SYNTHESIS_SCORE_V1",
+    "SYNTHESIS_ROUTES_V1",
+    "SYNTHESIS_SEARCH_V1",
     "ContractRegistry",
     "ContractValidationReport",
     "DataContract",

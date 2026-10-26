@@ -56,9 +56,12 @@ import io
 import json
 import math
 import os
+import shutil
 import stat
 import subprocess
 import tempfile
+import time
+import uuid
 from pathlib import Path
 from typing import Any, ClassVar
 
@@ -69,7 +72,9 @@ from pydantic import Field, ValidationError, field_validator, model_validator
 from molcascade.chemistry.datasets import iter_contract_batches, require_single_input
 from molcascade.config.canonical import canonical_json, canonical_sha256
 from molcascade.config.models import StrictFrozenModel
-from molcascade.contracts import PARENT_V1, SYNTHESIS_SCORE_V1
+from molcascade.contracts import (
+    PARENT_V1, SYNTHESIS_ROUTES_V1, SYNTHESIS_SCORE_V1, SYNTHESIS_SEARCH_V1,
+)
 from molcascade.errors import PluginError
 from molcascade.plugins.api import PendingOutput, StageContext, StageRequest, StageResponse
 from molcascade.plugins.builtin._machine_paths import (
@@ -79,6 +84,9 @@ from molcascade.plugins.builtin._machine_paths import (
     conda_environment,
     engine_path,
     fill_machine_paths,
+)
+from molcascade.plugins.builtin.aizynth_evidence import (
+    ROUTES_PATH, SEARCH_PATH, file_identity, retain_failure, write_evidence,
 )
 from molcascade.plugins.manifest import (
     Cardinality,
@@ -90,7 +98,7 @@ from molcascade.plugins.manifest import (
 _PARENT_PATH = Path("datasets/parents/part-00000.parquet")
 _SCORE_PATH = Path("datasets/synthesis_scores/part-00000.parquet")
 
-_IMPLEMENTATION_VERSION = 1
+_IMPLEMENTATION_VERSION = 2
 
 #: The configuration file names policies and stocks; it is not a data file.  A
 #: megabyte is already several orders of magnitude more YAML than one needs.
@@ -230,6 +238,14 @@ class AiZynthFinderConfig(StrictFrozenModel):
     #: tmpfs, because the output carries every route it found.
     scratch_dir: str | None = Field(default=None, max_length=4096)
 
+    #: Explicit file identities for policy, templates, stock, and runtime manifest.
+    #: These files are hashed before and after the search, never downloaded here.
+    dependency_files: dict[str, str] = Field(default_factory=dict)
+
+    #: Failure evidence is not a successful artifact. Its locator is persisted
+    #: through the runtime's existing ErrorInfo.context. Unset means system temp.
+    failure_evidence_dir: str | None = Field(default=None, max_length=4096)
+
     @model_validator(mode="before")
     @classmethod
     def _fill_machine_paths(cls, data: Any) -> Any:
@@ -245,10 +261,19 @@ class AiZynthFinderConfig(StrictFrozenModel):
     def _config_is_absolute(cls, value: str) -> str:
         return engine_path(value, field="config_path", engine_id=cls.engine_id)
 
-    @field_validator("scratch_dir")
+    @field_validator("scratch_dir", "failure_evidence_dir")
     @classmethod
     def _scratch_is_absolute(cls, value: str | None) -> str | None:
         return None if value is None else absolute_path(value, field="scratch_dir")
+
+    @field_validator("dependency_files")
+    @classmethod
+    def _dependencies_are_absolute(cls, value: dict[str, str]) -> dict[str, str]:
+        for name, path in value.items():
+            if not name.strip():
+                raise ValueError("dependency role must not be blank")
+            absolute_path(path, field="dependency_files")
+        return value
 
     @field_validator("policy", "filter", "stocks", mode="before")
     @classmethod
@@ -292,6 +317,10 @@ def _prepare_outputs(context: StageContext) -> tuple[Path, Path]:
                 context={"path": relative.as_posix()},
             )
         destination.parent.mkdir(parents=True, exist_ok=True)
+    for relative in (ROUTES_PATH, SEARCH_PATH):
+        if (context.staging_root / relative).exists():
+            raise PluginError("route evidence output already exists",
+                              code="PLUGIN_STAGING_NOT_EMPTY")
     return destinations
 
 
@@ -504,13 +533,16 @@ class AiZynthFinderRoutePlugin:
 
     descriptor = PluginDescriptor(
         id="synthesis.aizynthfinder",
-        version="0.1.0",
+        version="0.2.0",
         kind=PluginKind.SYNTHESIS,
         inputs=(PARENT_V1.id,),
-        outputs=(PARENT_V1.id, SYNTHESIS_SCORE_V1.id),
+        outputs=(PARENT_V1.id, SYNTHESIS_SCORE_V1.id,
+                 SYNTHESIS_ROUTES_V1.id, SYNTHESIS_SEARCH_V1.id),
         output_ports={
             "primary": PARENT_V1.id,
             "synthesis_scores": SYNTHESIS_SCORE_V1.id,
+            "synthesis_routes": SYNTHESIS_ROUTES_V1.id,
+            "synthesis_search": SYNTHESIS_SEARCH_V1.id,
         },
         cardinality=Cardinality.ONE_TO_ONE,
         # Monte-Carlo tree search under a wall-clock budget: two runs of the
@@ -534,6 +566,8 @@ class AiZynthFinderRoutePlugin:
         # costs nothing rather than costing a pass over the shortlist.
         executable = _resolved_executable(config.executable)
         config_file, config_sha256 = _config_digest(config.config_path)
+        dependencies = {name: file_identity(Path(path))
+                        for name, path in sorted(config.dependency_files.items())}
 
         parent_destination, score_destination = _prepare_outputs(context)
         method_id = "synthesis-route:sha256:" + canonical_sha256(
@@ -544,6 +578,7 @@ class AiZynthFinderRoutePlugin:
                 "method": "AiZynthFinder Monte-Carlo tree search",
                 "doi": "10.1186/s13321-020-00472-1",
                 "config_sha256": config_sha256,
+                "dependency_identities": dependencies,
                 "policy": list(config.policy),
                 "filter": list(config.filter),
                 "stocks": list(config.stocks),
@@ -552,18 +587,41 @@ class AiZynthFinderRoutePlugin:
             }
         )
 
+        search_id = "aizynth-search:" + uuid.uuid4().hex
+        scratch: Path | None = None
+        provenance = {
+            "search_id": search_id, "method_id": method_id,
+            "adapter": file_identity(Path(__file__)),
+            "evidence_writer": file_identity(Path(__file__).with_name("aizynth_evidence.py")),
+            "executable": file_identity(executable),
+            "backend_version_declared": config.backend_version,
+            "config_sha256": config_sha256, "dependencies": dependencies,
+            "dependency_scope": "explicit_files_only" if dependencies else "unresolved",
+            "input_ref": stage_input.ref.model_dump(mode="json"),
+            "adapter_config": config.model_dump(mode="json"),
+        }
         try:
             parent_ids, canonical = self._write_parents(
                 stage_input,
                 parent_destination,
                 config=config,
             )
+            scratch = Path(tempfile.mkdtemp(prefix="molcascade-aizynth-", dir=config.scratch_dir))
+            (scratch / "targets.smi").write_text("\n".join(canonical) + "\n", encoding="utf-8")
+            (scratch / "config.original.yml").write_bytes(config_file.read_bytes())
             records = self._search(
                 canonical,
                 config=config,
                 executable=executable,
                 config_file=config_file,
+                scratch=scratch,
+                provenance=provenance,
             )
+            after_dependencies = {name: file_identity(Path(path))
+                                  for name, path in sorted(config.dependency_files.items())}
+            if dependencies != after_dependencies or _config_digest(config.config_path)[1] != config_sha256:
+                raise PluginError("search dependency bytes changed during execution",
+                                  code="AIZYNTHFINDER_DEPENDENCY_CHANGED")
             solved_count = self._write_scores(
                 score_destination,
                 parent_ids=parent_ids,
@@ -572,10 +630,32 @@ class AiZynthFinderRoutePlugin:
                 config=config,
                 method_id=method_id,
             )
-        except BaseException:
+            write_evidence(context.staging_root, scratch, parent_ids=parent_ids,
+                           canonical=canonical, method_id=method_id, search_id=search_id,
+                           provenance=provenance, records=records, status="COMPLETED")
+        except BaseException as error:
+            if scratch is not None and isinstance(error, PluginError):
+                provenance["error"] = error.as_dict()
+                status = "TIMEOUT" if error.code == "AIZYNTHFINDER_TIMEOUT" else "FAILED"
+                try:
+                    write_evidence(context.staging_root, scratch, parent_ids=parent_ids,
+                                   canonical=canonical, method_id=method_id, search_id=search_id,
+                                   provenance=provenance, records=None, status=status)
+                    error.context["route_evidence"] = retain_failure(
+                        context.staging_root, destination_root=config.failure_evidence_dir)
+                except Exception as retention_error:
+                    # Preserve the native directory if durable packaging itself fails.
+                    error.context["route_evidence_retention_error"] = str(retention_error)
+                    error.context["native_scratch_retained"] = str(scratch)
+                    scratch = None
             parent_destination.unlink(missing_ok=True)
             score_destination.unlink(missing_ok=True)
+            for relative in (ROUTES_PATH, SEARCH_PATH):
+                (context.staging_root / relative).unlink(missing_ok=True)
             raise
+        finally:
+            if scratch is not None:
+                shutil.rmtree(scratch)
 
         input_count = len(parent_ids)
         return StageResponse(
@@ -589,6 +669,14 @@ class AiZynthFinderRoutePlugin:
                     SYNTHESIS_SCORE_V1.id,
                     (_SCORE_PATH.as_posix(),),
                     {"row_count": input_count, "method_id": method_id},
+                ),
+                "synthesis_routes": PendingOutput(
+                    SYNTHESIS_ROUTES_V1.id, (ROUTES_PATH.as_posix(),),
+                    {"row_count": input_count, "search_id": search_id},
+                ),
+                "synthesis_search": PendingOutput(
+                    SYNTHESIS_SEARCH_V1.id, (SEARCH_PATH.as_posix(),),
+                    {"row_count": 1, "search_id": search_id},
                 ),
             },
             metadata={
@@ -604,6 +692,9 @@ class AiZynthFinderRoutePlugin:
                 "backend_version": config.backend_version,
                 "config_sha256": config_sha256,
                 "nproc": config.nproc,
+                "search_id": search_id,
+                "route_evidence_complete": True,
+                "dependency_scope": provenance["dependency_scope"],
             },
         )
 
@@ -662,92 +753,99 @@ class AiZynthFinderRoutePlugin:
         config: AiZynthFinderConfig,
         executable: Path,
         config_file: Path,
+        scratch: Path,
+        provenance: dict[str, Any],
     ) -> list[dict[str, Any]]:
         """Run ``aizynthcli`` once over the whole shortlist."""
 
         lanes = config.nproc or 1
         timeout = math.ceil(len(canonical) / lanes) * config.timeout_per_molecule_seconds
-        with tempfile.TemporaryDirectory(
-            prefix="molcascade-aizynth-",
-            dir=config.scratch_dir,
-        ) as scratch_name:
-            scratch = Path(scratch_name)
-            smiles_file = scratch / "targets.smi"
-            output_file = scratch / "results.json"
-            smiles_file.write_text("\n".join(canonical) + "\n", encoding="utf-8")
+        smiles_file = scratch / "targets.smi"
+        output_file = scratch / "results.json"
+        smiles_file.write_text("\n".join(canonical) + "\n", encoding="utf-8")
 
-            command = [
-                str(executable),
-                "--config",
-                str(config_file),
-                "--smiles",
-                str(smiles_file),
-                "--output",
-                str(output_file),
-            ]
-            for flag, names in (
-                ("--policy", config.policy),
-                ("--filter", config.filter),
-                ("--stocks", config.stocks),
-            ):
-                if names:
-                    command.append(flag)
-                    command.extend(names)
-            if config.nproc is not None:
-                command.extend(["--nproc", str(config.nproc)])
+        command = [
+            str(executable),
+            "--config",
+            str(config_file),
+            "--smiles",
+            str(smiles_file),
+            "--output",
+            str(output_file),
+        ]
+        for flag, names in (
+            ("--policy", config.policy),
+            ("--filter", config.filter),
+            ("--stocks", config.stocks),
+        ):
+            if names:
+                command.append(flag)
+                command.extend(names)
+        if config.nproc is not None:
+            command.extend(["--nproc", str(config.nproc)])
 
-            try:
-                # An argv list, never a shell string: nothing the user configures
-                # is ever parsed by /bin/sh, and the flag values are validated as
-                # bare names so no setting can smuggle in an extra argument.
-                completed = subprocess.run(
-                    command,
-                    cwd=scratch,
-                    stdin=subprocess.DEVNULL,
-                    stdout=subprocess.PIPE,
-                    stderr=subprocess.STDOUT,
-                    env=_isolated_environment(),
-                    timeout=timeout,
-                    check=False,
-                )
-            except subprocess.TimeoutExpired as error:
-                raise PluginError(
-                    "aizynthcli did not finish within the configured budget",
-                    code="AIZYNTHFINDER_TIMEOUT",
-                    hint=(
-                        "Either the search budget in your AiZynthFinder configuration "
-                        "is larger than 'timeout_per_molecule_seconds' here, or the "
-                        "policy model is loading from cold storage on every worker."
-                    ),
-                    context={
-                        "timeout_seconds": timeout,
-                        "molecules": len(canonical),
-                        "nproc": config.nproc,
-                    },
-                ) from error
-            except OSError as error:
-                raise PluginError(
-                    "aizynthcli could not be started",
-                    code="AIZYNTHFINDER_RUN_FAILED",
-                    context={"executable": str(executable), "error_type": type(error).__name__},
-                ) from error
+        provenance["command"] = command
+        provenance["timeout_seconds"] = timeout
+        started = time.perf_counter()
+        try:
+            # An argv list, never a shell string: nothing the user configures
+            # is ever parsed by /bin/sh, and the flag values are validated as
+            # bare names so no setting can smuggle in an extra argument.
+            completed = subprocess.run(
+                command,
+                cwd=scratch,
+                stdin=subprocess.DEVNULL,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.STDOUT,
+                env=_isolated_environment(),
+                timeout=timeout,
+                check=False,
+            )
+        except subprocess.TimeoutExpired as error:
+            (scratch / "console.log").write_bytes(error.stdout or b"")
+            provenance["returncode"] = None
+            raise PluginError(
+                "aizynthcli did not finish within the configured budget",
+                code="AIZYNTHFINDER_TIMEOUT",
+                hint=(
+                    "Either the search budget in your AiZynthFinder configuration "
+                    "is larger than 'timeout_per_molecule_seconds' here, or the "
+                    "policy model is loading from cold storage on every worker."
+                ),
+                context={
+                    "timeout_seconds": timeout,
+                    "molecules": len(canonical),
+                    "nproc": config.nproc,
+                },
+            ) from error
+        except OSError as error:
+            raise PluginError(
+                "aizynthcli could not be started",
+                code="AIZYNTHFINDER_RUN_FAILED",
+                context={"executable": str(executable), "error_type": type(error).__name__},
+            ) from error
 
-            if completed.returncode != 0:
-                log = completed.stdout.decode("utf-8", errors="replace")
-                raise PluginError(
-                    f"aizynthcli exited with status {completed.returncode}",
-                    code="AIZYNTHFINDER_RUN_FAILED",
-                    hint=(
-                        "The message below comes from AiZynthFinder, not MolCascade. "
-                        "A missing policy or stock file named in the configuration is "
-                        "the usual cause; MolCascade does not fetch either."
-                    ),
-                    context={
-                        "returncode": completed.returncode,
-                        "output_tail": log[-_MAX_LOG_TAIL:],
-                    },
-                )
-            return _read_output(output_file)
+        finally:
+            provenance["wall_seconds"] = time.perf_counter() - started
+
+        (scratch / "console.log").write_bytes(completed.stdout)
+        provenance["returncode"] = completed.returncode
+        if completed.returncode != 0:
+            log = completed.stdout.decode("utf-8", errors="replace")
+            raise PluginError(
+                f"aizynthcli exited with status {completed.returncode}",
+                code="AIZYNTHFINDER_RUN_FAILED",
+                hint=(
+                    "The message below comes from AiZynthFinder, not MolCascade. "
+                    "A missing policy or stock file named in the configuration is "
+                    "the usual cause; MolCascade does not fetch either."
+                ),
+                context={
+                    "returncode": completed.returncode,
+                    "output_tail": log[-_MAX_LOG_TAIL:],
+                },
+            )
+        return _read_output(output_file)
 
     def _write_scores(
         self,
@@ -769,6 +867,8 @@ class AiZynthFinderRoutePlugin:
             )
 
         unpinned: tuple[str, ...] = () if config.backend_version else (_UNPINNED_WARNING,)
+        if not config.dependency_files:
+            unpinned += ("ROUTE_DEPENDENCIES_UNPINNED",)
         solved_count = 0
         rows: list[dict[str, Any]] = []
         for index, (parent_id, target, record) in enumerate(

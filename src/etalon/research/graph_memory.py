@@ -15,7 +15,8 @@ import sqlite3
 from etalon.active.schema import canonical, digest
 from .continuation import CHECKPOINT, STEP, _exact_refs, resume_research
 from .evidence import _collect, _read_evidence
-from .read_scope import bounded_read
+from .read_scope import bounded_read, paged_read
+from .declared_relations import relation_index, record_identity
 from .evidence_refs import (EvidenceError, EvidenceWorkspace, _local, file_identity,
                             load_workspace, make_ref, validate_ref)
 
@@ -248,10 +249,32 @@ def _project_node(ref, row, *, task_id, home_overrides):
     return node
 
 
-@bounded_read
+@paged_read
 def build_research_graph(workspace, *, checkpoint_ref, policy=None, purpose="research",
                          home_overrides=None, max_nodes=64, max_bytes=65536, as_of=None,
-                         scope=None):
+                         scope=None, cursor=None, limit=20):
+    """Return the existing small graph or a lossless page of an oversized scope.
+
+    Continue pages with the same selection and next_cursor. A final cursor does
+    not attest delivery of earlier pages or consumption of original bodies.
+    """
+    if scope is None and (cursor is not None or limit != 20):
+        raise EvidenceError("graph cursor/limit require an explicit scope")
+    if type(limit) is not int or not 1 <= limit <= 50:
+        raise EvidenceError("graph page limit must be 1..50")
+    graph = _build_research_graph(workspace, checkpoint_ref=checkpoint_ref, policy=policy,
+        purpose=purpose, home_overrides=home_overrides, max_nodes=max_nodes,
+        max_bytes=max_bytes, as_of=as_of, scope=scope)
+    if scope is not None and (cursor is not None or len(canonical(graph).encode()) > max_bytes - 16):
+        from .graph_scope import graph_page
+        return graph_page(graph, cursor=cursor, limit=limit, max_bytes=max_bytes)
+    return graph
+
+
+@bounded_read
+def _build_research_graph(workspace, *, checkpoint_ref, policy=None, purpose="research",
+                          home_overrides=None, max_nodes=64, max_bytes=65536, as_of=None,
+                          scope=None):
     """Project reachable records without changing a journal or executing work.
 
     Legacy nodes default to Quick when resource mode was never recorded. Deep
@@ -291,12 +314,7 @@ def build_research_graph(workspace, *, checkpoint_ref, policy=None, purpose="res
                    for key, row in universe.items()}
     selected, queue, issues = {}, deque(), []
     queued = set()
-    reverse_counters = {}
-    for (sid, rid), candidate in universe.items():
-        payload = candidate.get("projected_content", candidate["record"])
-        for target in payload.get("counter_refs", []):
-            if isinstance(target, dict):
-                reverse_counters.setdefault(node_identity(target), []).append((sid, rid))
+    indexed = relation_index(ws, (records, coverage, warnings))
     counter_ids, counter_context_ids = set(), set()
     def enqueue(ref):
         validate_ref(ref)
@@ -371,7 +389,7 @@ def build_research_graph(workspace, *, checkpoint_ref, policy=None, purpose="res
                 enqueue(target)
                 edge(nid, node_identity(target), "depends_on", ref, relation)
         for key, kind in (("input_refs", "depends_on"), ("output_refs", "derived_from"),
-                          ("support_refs", "supports"), ("counter_refs", "refutes"), ("supersedes", "supersedes")):
+                          ("support_refs", "supports"), ("supersedes", "supersedes")):
             for target in content.get(key, []):
                 enqueue(target)
                 tid = node_identity(target)
@@ -379,8 +397,6 @@ def build_research_graph(workspace, *, checkpoint_ref, policy=None, purpose="res
                     edge(tid, nid, kind, ref)
                 else:
                     edge(nid, tid, kind, ref)
-                if key == "counter_refs":
-                    counter_ids.add(tid)
         for target in detail.get("hypothesis_refs", []):
             enqueue(target); edge(nid, node_identity(target), "tests", ref)
         for target in _exact_refs(content):
@@ -390,10 +406,12 @@ def build_research_graph(workspace, *, checkpoint_ref, policy=None, purpose="res
                 edge(nid, node_identity(target), "depends_on", ref)
         # Include cross-home/cross-task explicit counterclaims of this record.
         # This bounded universe is the authorized workspace, not a global search.
-        for sid, rid in reverse_counters.get(nid, []):
-            other = make_ref(sid, rid, universe[(sid, rid)]["record"])
-            enqueue(other)
-            edge(nid, node_identity(other), "refutes", other)
+        for key in indexed["incidence"].get(record_identity(ref), []):
+            relation = indexed["relations"][key]
+            source, target = relation["from_ref"], relation["to_ref"]
+            enqueue(source); enqueue(target)
+            counter_ids.add(node_identity(source))
+            edge(node_identity(source), node_identity(target), "refutes", relation["basis_ref"])
     # Workflow template edges are attached only to instances with the same exact
     # workflow ref. Do not infer chronological order from artifact hashes.
     workflow_nodes = {}

@@ -153,7 +153,8 @@ def _frozen_sources(workspace):
 
 def prepare_publication(entry, directory=None, operation_id=None, expected_entry_identity=None, *,
                         parent_entry=None, results=(), steps=(), checkpoint_additions=None,
-                        corrects_intent=None, correction_reason=None, branch_updates=None):
+                        corrects_intent=None, correction_reason=None, branch_updates=None,
+                        handle_update=None):
     """Persist explicit publication intent; do not write results or change entry.
 
     A missing destination entry requires ``parent_entry`` and expected identity
@@ -163,6 +164,8 @@ def prepare_publication(entry, directory=None, operation_id=None, expected_entry
     Steps are {name,content}; {publication_ref: name} binds earlier named records.
     Optional branch_updates bind existing branch transitions to a new decision
     step. They never change authority, pending handles or task scope.
+    A separate explicit handle_update tracks jobs or retires verified terminal
+    handles while retaining them on a result step; no scientific work starts.
     """
     from .research_context import load_entry
     entry = Path(entry).resolve()
@@ -176,6 +179,8 @@ def prepare_publication(entry, directory=None, operation_id=None, expected_entry
     request = {"entry": str(entry), "parent_entry": str(parent), "operation_id": operation_id,
                "expected_entry_identity": expected_entry_identity, "results": list(results),
                "steps": list(steps), "checkpoint_additions": checkpoint_additions or {}}
+    if handle_update is not None:
+        request["handle_update"] = handle_update
     if branch_updates is not None:
         request["branch_updates"] = branch_updates
     # Keep absent optional fields absent: old intent requests remain byte-for-byte
@@ -221,6 +226,7 @@ def prepare_publication(entry, directory=None, operation_id=None, expected_entry
         checkpoint = read_content(ws, checkpoint_ref)
         if checkpoint["schema"] != CHECKPOINT:
             raise EvidenceError("publication parent must be a checkpoint")
+        _check_handle_update(request, checkpoint)
         for guard in checkpoint["status_guards"]:
             if not Path(guard["location"]).is_absolute():
                 raise EvidenceError("publication requires absolute authority locations")
@@ -351,6 +357,92 @@ def _verify_external(content, source_id, ws, *, collection=None):
                 raise EvidenceError("external publication reference has the wrong content schema")
 
 
+def _check_handle_update(request, parent):
+    """Explicit pending-set CAS; retirement requires a same-request result step.
+
+    A paused/interrupted job remains pending. Reading it never grants permission
+    to restart it. Failed jobs may be closed with their actual failure preserved.
+    """
+    update = request.get("handle_update")
+    if update is None:
+        return
+    from .continuation import _handle
+    from etalon.runtime.api import read_action_result
+    if (not isinstance(update, dict) or set(update) != {"expected", "replacement"}
+            or update["expected"] != parent["pending_handles"]
+            or not isinstance(update["replacement"], list)):
+        raise EvidenceError("pending handle update requires the exact prior set")
+    for handle in update["replacement"]:
+        _handle(handle)
+    keys = [canonical(h) for h in update["replacement"]]
+    if len(keys) != len(set(keys)) or len(keys) > 64:
+        raise EvidenceError("pending handles must be distinct and bounded")
+    carried = [h for step in request["steps"] if step["content"].get("operation") == "result"
+               for h in step["content"]["detail"]["action_handles"]]
+    for handle in update["expected"]:
+        if handle in update["replacement"]:
+            continue
+        if handle not in carried:
+            raise EvidenceError("settled handle must remain linked to a result step")
+        result = read_action_result(handle)
+        if result["execution_state"] not in {"completed", "failed", "cancelled"}:
+            raise EvidenceError("cannot settle a nonterminal native handle")
+        if result["execution_state"] == "completed" and result["verification"]["state"] != "passed":
+            raise EvidenceError("cannot settle an unverified completion")
+
+
+def prepare_result_publication(entry, *, operation_id, branch_id, decision,
+                               results, expected_entry_identity=None, parent_entry=None,
+                               directory=None, input_refs=(), method_refs=(), accounting_refs=(),
+                               counter_refs=(), experiment_refs=(), observation_refs=(),
+                               action_handles=(), pending_handles=None):
+    """Compile host-selected results/decision into the existing publication API.
+
+    Results keep prepare_publication's explicit file identities/provenance. Typed
+    Experiment/Observation/MethodUse refs are reused, never fabricated from JSON.
+    decision is {choice,state,reason,reconsider_when,basis_refs}. Science remains
+    the host's choice. Existing claims/counters/guards and failure refs survive.
+    Replays use the saved parent, avoiding dependence on the advanced entry.
+    """
+    from .research_context import load_entry
+    entry = Path(entry).resolve()
+    directory = Path(directory or entry.parent / ".etalon" / "publications").resolve()
+    root = directory / digest({"entry": str(entry), "operation_id": operation_id})[:24]
+    intent_path = root / "intent.json"
+    if intent_path.exists():
+        parent = _read(intent_path)["parent_checkpoint"]
+    else:
+        ws, ref = load_entry(parent_entry or entry)
+        parent = read_content(ws, ref)
+    if set(decision) != {"choice", "state", "reason", "reconsider_when", "basis_refs"}:
+        raise EvidenceError("explicit scientific decision and basis required")
+    branch = next((b for b in parent["branches"] if b["branch_id"] == branch_id), None)
+    if branch is None:
+        raise EvidenceError("result must belong to an existing research branch")
+    common = {"schema": STEP, "task_id": parent["task_id"], "question": parent["question"],
+        "branch_id": branch_id, "reason": decision["reason"], "input_refs": list(input_refs),
+        "method_refs": list(method_refs), "accounting_refs": list(accounting_refs),
+        "source_watermarks": [], "supersedes": []}
+    outputs = [{"publication_ref": item["name"]} for item in results]
+    steps = []
+    if experiment_refs or observation_refs or action_handles:
+        steps.append({"name": "_result_step", "content": {**common, "operation": "result",
+            "output_refs": outputs, "detail": {"experiment_refs": list(experiment_refs),
+            "observation_refs": list(observation_refs), "action_handles": list(action_handles)}}})
+    steps.append({"name": "_decision_step", "content": {**common, "operation": "decision",
+        "output_refs": outputs, "detail": {"choice": decision["choice"], "alternatives": [],
+        "basis_refs": decision["basis_refs"], "reconsider_when": decision["reconsider_when"]}}})
+    update = None if pending_handles is None else {
+        "expected": parent["pending_handles"], "replacement": list(pending_handles)}
+    return prepare_publication(entry, directory, operation_id, expected_entry_identity,
+        parent_entry=parent_entry, results=results, steps=steps,
+        checkpoint_additions={"method_refs": list(method_refs), "counter_refs": list(counter_refs)},
+        handle_update=update, branch_updates=[{"branch_id": branch_id,
+            "expected_state": branch["state"], "state": decision["state"],
+            "basis_refs": decision["basis_refs"], "next_read_refs": decision["basis_refs"],
+            "reconsider_when": decision["reconsider_when"], "decision_ref": {"publication_ref": "_decision_step"}}])
+
+
 def _advance_checkpoint(request, parent, parent_ref, refs, step_refs):
     """Apply only explicit, evidence-bound updates; no interpretation of output prose.
 
@@ -358,6 +450,8 @@ def _advance_checkpoint(request, parent, parent_ref, refs, step_refs):
     A decision changes research state, never execution authority or runtime state.
     """
     checkpoint = json.loads(canonical(parent))
+    if "handle_update" in request:
+        checkpoint["pending_handles"] = request["handle_update"]["replacement"]
     checkpoint["step_refs"].extend(ref for ref in step_refs if ref not in checkpoint["step_refs"])
     for key, additions in request["checkpoint_additions"].items():
         for ref in _resolve_aliases(additions, refs):
@@ -649,6 +743,7 @@ def resume_publication(intent_path):
         if state["status"] == "conflict":
             raise EvidenceError("entry compare-and-swap conflict; preserved publication requires explicit rebase")
         ws = _verify_parent(intent)
+        _check_handle_update(request, intent["parent_checkpoint"])
         refs = {}
         saved_results = []
         for item in request["results"]:

@@ -95,3 +95,48 @@ its actual use. Keep any default-selection change separate from immutable
 historical records. Stop when the local question is answered, the evidence is
 insufficient, or the trial budget is reached; no automatic science retry or
 background self-improvement follows.
+
+## Reusing normal execution
+
+For task-local algorithm trials, `etalon.research.method_reuse.execute_or_reuse`
+retains exact completed requests. The caller supplies the complete implementation,
+environment, input and transitive dependency identity. A cache hit reuses a result;
+it is not a new confirmation replicate. Changed dependencies require examining
+which prior checks still apply, not automatically repeating every check.
+
+`examples/research_discovery.py` archives pinned executions, verifier reports,
+evaluation, scoped experience and a resumable entry without running science.
+The optional [action-learning adapter](../../etalon-research-decision/references/action-learning.md)
+instead compares selected pre-action expectations with an already produced normal
+result. Use its differences to inform the next choice; neither helper supplies a
+predictor, chooses a method or proves quality benefit by itself.
+
+## Saving the part that can guide the next choice
+
+Keep task results, exact sources and failures in the existing journal and
+published entry. A useful conditional lesson states which observed difference
+changes an operation or branch, with its counterexample and unresolved endpoint.
+Choose conditions that a future host can actually observe and use, such as the
+input chemical state, operation and endpoint. A target name alone may locate an
+example but cannot explain why its selection rule applies.
+
+For an existing method patch, `improvement.record_experience` copies `task_id`,
+`scope`, `conditions` and `method_refs` from that patch; it has no conditions
+override. Save feedback for a changed endpoint under the corresponding new
+context/patch only when an actual method revision is being recorded. Link the
+old experience as evidence without rewriting its scope. Ordinary new results
+can instead remain a decision/step plus Artifact; they need no artificial patch.
+
+Preserve each outcome that changes the next choice rather than collapsing mixed
+cases into one success flag. A shared fragment may be reusable while a changed
+partner or final operation is still unknown. Exact output and feedback refs can
+support the measured component; the lesson explains what to use, retain or
+investigate next. Use `supersedes` for a revised lesson within its scope, not to
+erase valid experience from a different endpoint.
+
+Promote only the reusable part into a skill: the operation/API binding or a
+selection distinction that removes demonstrated work. Keep molecule-specific
+results, source conditions and current hypotheses in published experience. A
+changed executable operation belongs to S; changed selection guidance belongs
+to U. Revise G only when the improvement procedure itself changed. None requires
+rewriting all three or claiming an unmeasured speed benefit.

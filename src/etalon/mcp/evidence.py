@@ -91,7 +91,7 @@ def register(mcp: Any) -> None:
                                 purpose: str = "research", policy: dict | None = None,
                                 max_bytes: Annotated[int, Field(ge=4096, le=65536)] = 16384,
                                 conditions: dict | None = None,
-                                view: Literal["summary", "node", "full", "resources", "branch", "card", "manifest", "reading"] = "full",
+                                view: Literal["summary", "node", "full", "resources", "branch", "card", "manifest", "reading", "delivery", "impact"] = "full",
                                 branch_id: str | None = None,
                                 cursor: str | None = None,
                                 limit: Annotated[int, Field(ge=1, le=50)] = 20,
@@ -125,6 +125,17 @@ def register(mcp: Any) -> None:
         natural-language relevance nor certifies that the host read or understood a
         body. Use the same options and returned read_context/next_cursor to continue.
         reading supports the existing 4096..16384 byte range; no budget expansion.
+        delivery uses the same exact selection and options, and includes verified
+        selected original bodies and related counters directly in bounded pages.
+        Original fragments use UTF-8 where lossless, otherwise base64. Follow
+        next_cursor with the same question/scope/options and read_context; retain
+        consecutive fragments. Conditional originals remain explicit unread refs.
+        This avoids separately fetching each required original; delivery does not
+        establish comprehension or grant permission to execute or change science.
+        impact follows declared dependencies from exact changed_refs supplied in
+        view_options; max_nodes is optional. It returns review paths and open
+        boundaries, not causal conclusions or permission to repeat work. Select
+        a smaller explicit changed set when the bounded report cannot fit.
         Index completeness does not establish that original bodies were read.
         max_bytes is 4096..65536. Expand returned refs with etalon_evidence_read; question
         is descriptive and does not perform semantic ranking.
@@ -140,22 +151,39 @@ def register(mcp: Any) -> None:
         summary/node/full may take an explicit scope with root_refs or branch_id,
         and ordinary_hops 0 or 1. Its coverage receipt concerns that neighborhood,
         not the whole archive; counter relations are checked separately from excerpts.
+        If mandatory scoped context exceeds the cap, returns graph-page rows using
+        the existing cursor and UTF-8 fragment convention. Continue with the same
+        view/scope/options and read_context plus next_cursor. Retain all pages;
+        a final page alone does not establish delivery or original-body reading.
         """
         from etalon.research.evidence_refs import EvidenceError
         options = {} if view_options is None else view_options
         if not isinstance(options, dict):
             raise EvidenceError("view_options must be an object")
-        if view == "reading":
+        if view == "impact":
+            if (node_id is not None or question is not None or branch_id is not None
+                    or scope is not None or conditions is not None or cursor is not None or limit != 20):
+                raise EvidenceError("impact uses exact changed_refs, without implicit selection or pagination")
+            if set(options) - {"changed_refs", "max_nodes"} or not options.get("changed_refs"):
+                raise EvidenceError("impact requires exact changed_refs and optional max_nodes")
+            from etalon.research.research_impact import build_research_impact
+            return _context_page(build_research_impact(_entry_argument(entry),
+                policy=policy, purpose=purpose, max_bytes=max_bytes, **options), max_bytes)
+        if view in {"reading", "delivery"}:
             if node_id is not None:
                 raise EvidenceError("reading uses exact scope.root_refs or branch_id; resolve node refs through manifest")
-            if set(options) - {"reading_mode", "relevance", "decision_changed", "as_of"}:
+            allowed_options = {"reading_mode", "relevance", "decision_changed", "as_of"}
+            if view == "delivery":
+                allowed_options.add("deduplicate_bodies")
+            if set(options) - allowed_options:
                 raise EvidenceError("unknown reading view option")
             if branch_id is not None:
                 if scope is not None:
                     raise EvidenceError("reading takes branch_id or scope, not both")
                 scope = {"branch_id": branch_id, "ordinary_hops": 1}
-            from etalon.research.decision_reading import build_decision_reading
-            return _context_page(build_decision_reading(_entry_argument(entry),
+            from etalon.research.decision_reading import build_decision_reading, build_decision_delivery
+            build = build_decision_delivery if view == "delivery" else build_decision_reading
+            return _context_page(build(_entry_argument(entry),
                 question=question, scope=scope, purpose=purpose, policy=policy,
                 conditions=conditions, max_bytes=max_bytes, cursor=cursor, limit=limit,
                 **options), max_bytes)
@@ -190,12 +218,13 @@ def register(mcp: Any) -> None:
             return _context_page(build_research_context(_entry_argument(entry), purpose=purpose,
                 policy=policy, max_bytes=max_bytes, view=view, node_id=node_id,
                 cursor=cursor, limit=limit, **options), max_bytes)
-        if branch_id is not None or cursor is not None or options or limit != 20:
-            raise EvidenceError("branch_id/cursor/limit/view_options require resources or branch view")
+        if branch_id is not None or options or scope is None and (cursor is not None or limit != 20):
+            raise EvidenceError("branch_id/view_options require resources or branch; cursor/limit also support scoped context")
         from etalon.research.research_context import build_research_context
-        return ok(**build_research_context(_entry_argument(entry),
+        result = build_research_context(_entry_argument(entry),
             node_id=node_id, question=question, purpose=purpose, policy=policy,
-            max_bytes=max_bytes, conditions=conditions, view=view, scope=scope))
+            max_bytes=max_bytes, conditions=conditions, view=view, scope=scope, cursor=cursor, limit=limit)
+        return _context_page(result, max_bytes) if scope is not None else ok(**result)
 
     @mcp.tool()
     @tool(Cost.FREE)
@@ -203,7 +232,8 @@ def register(mcp: Any) -> None:
                               purpose: str = "research", policy: dict | None = None,
                               max_nodes: Annotated[int, Field(ge=1, le=128)] = 64,
                               max_bytes: Annotated[int, Field(ge=4096, le=262144)] = 65536,
-                              scope: dict | None = None) -> str:
+                              scope: dict | None = None, cursor: str | None = None,
+                              limit: Annotated[int, Field(ge=1, le=50)] = 20) -> str:
         """FREE. Project Search/Judge/Quick/Deep from existing research records.
 
         Nodes keep evidence identity and cross-workspace references; failed and skipped
@@ -211,11 +241,15 @@ def register(mcp: Any) -> None:
         Bounds: 1..128 nodes, 4096..262144 serialized bytes.
         Optional scope selects exact root_refs or a checkpoint branch_id, with
         ordinary_hops 0 or 1. Scoped coverage never certifies the whole archive.
+        Oversized scoped projections return graph-page rows; preserve all pages
+        and continue with the same selection and next_cursor. Single large rows
+        use base64 UTF-8 byte fragments, exactly as continuation manifests do.
         """
         from etalon.research.graph_memory import build_research_graph
-        return ok(**build_research_graph(absolute_path(workspace, label="workspace"),
+        result = build_research_graph(absolute_path(workspace, label="workspace"),
             checkpoint_ref=checkpoint_ref, purpose=purpose, policy=policy,
-            max_nodes=max_nodes, max_bytes=max_bytes, scope=scope))
+            max_nodes=max_nodes, max_bytes=max_bytes, scope=scope, cursor=cursor, limit=limit)
+        return _context_page(result, max_bytes) if scope is not None else ok(**result)
 
     @mcp.tool()
     @tool(Cost.FREE)

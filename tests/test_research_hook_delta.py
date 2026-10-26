@@ -35,6 +35,29 @@ def payload(result):
     return json.loads(result["host_output"]["hookSpecificOutput"]["additionalContext"].split("\n", 1)[1])
 
 
+def test_partial_source_workset_switch_still_reports_deactivation_without_delta(tmp_path, context):
+    shared = {"resource_id": "index", "part_id": "SKILL.md", "resource_digest": "same"}
+    old = {"resource_id": "target-method", "part_id": "settings", "resource_digest": "old"}
+    new = {"resource_id": "template", "part_id": "baseline", "resource_digest": "new"}
+    context.update(task_id="old-task", task_workset={"digest": "old", "enabled_versions": [shared, old]})
+    call(tmp_path, "start", "SessionStart")
+    context.update(task_id="new-task", task_workset={"digest": "new", "enabled_versions": [shared, new]},
+                   source_issues=[{"code": "reference_walk_truncated"}])
+    changed = payload(call(tmp_path, "partial-switch"))
+    assert changed["delivery"]["mode"] == "baseline"
+    assert changed["delivery"]["reason"] == "source_coverage_incomplete"
+    assert changed["context"]["source_issues"] == context["source_issues"]
+    transition = changed["delivery"]["workset_transition"]
+    assert transition["deactivated"] == [old] and transition["activated"] == [new]
+    assert not transition["context_erasure"] and "impact_review" not in changed["delivery"]
+    context.update(task_id="old-task", task_workset={"digest": "old", "enabled_versions": [shared, old]})
+    context.pop("source_issues")
+    returned = payload(call(tmp_path, "return"))
+    assert returned["delivery"]["mode"] == "baseline"
+    assert returned["delivery"]["workset_transition"]["deactivated"] == [new]
+    assert returned["delivery"]["workset_transition"]["activated"] == [old]
+
+
 def test_unchanged_is_small_but_retains_controls_and_exact_recovery(tmp_path, context):
     first = call(tmp_path, "start", "SessionStart")
     second = call(tmp_path, "read")
@@ -47,7 +70,8 @@ def test_unchanged_is_small_but_retains_controls_and_exact_recovery(tmp_path, co
     assert data["current_controls"]["checkpoint_progress"] == context["checkpoint_progress"]
     assert data["current_controls"]["counterevidence"] == context["counterevidence"]
     assert data["delivery"]["recovery"]["arguments"]["entry"] == str(tmp_path / "entry.json")
-    assert data["delivery"]["recovery"]["arguments"]["view"] == "summary"
+    assert data["delivery"]["recovery"]["arguments"]["view"] == "card"
+    assert second["receipt"]["config"]["view"] == "card"
     assert data["delivery"]["base_receipt"] == first["receipt_path"]
     assert data["delivery"]["consumption_verified"] is False
 

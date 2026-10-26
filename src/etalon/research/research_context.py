@@ -10,9 +10,9 @@ from pathlib import Path
 
 from etalon.active.schema import canonical, digest
 from .evidence_refs import EvidenceError, validate_ref
-from .graph_memory import build_research_graph, node_identity
+from .graph_memory import _build_research_graph as build_research_graph, node_identity
 from .entry import resolve_entry, make_read_context, continuation_status, workspace_from_context
-from .read_scope import bounded_read
+from .read_scope import paged_read
 
 CONTEXT = "etalon-research-context/1"
 STRATEGY = "node-neighborhood-explicit-counterevidence/1"
@@ -385,7 +385,7 @@ def load_entry(entry):
     return resolve_entry(entry)[:2]
 
 
-@bounded_read
+@paged_read
 def build_research_context(entry, *, node_id=None, question=None, purpose="research",
                            policy=None, max_bytes=16384, as_of=None, home_overrides=None,
                            conditions=None, view="full", scope=None, section="references",
@@ -402,8 +402,10 @@ def build_research_context(entry, *, node_id=None, question=None, purpose="resea
         raise EvidenceError("context view must be summary, node, full, card or manifest")
     if view in {"card", "manifest"} and scope is not None:
         raise EvidenceError("card and manifest use the pinned checkpoint; graph scope belongs to summary, node or full")
-    if view != "manifest" and (section != "references" or cursor is not None or limit != 20):
-        raise EvidenceError("section/cursor/limit require manifest context view")
+    if view != "manifest" and (section != "references" or scope is None and (cursor is not None or limit != 20)):
+        raise EvidenceError("section/cursor/limit require manifest or scoped context view")
+    if type(limit) is not int or not 1 <= limit <= 50:
+        raise EvidenceError("context page limit must be 1..50")
     if view == "manifest" and (question is not None or conditions is not None):
         raise EvidenceError("manifest uses exact navigation, without question or conditions selection")
     if view == "node" and scope is None and (not isinstance(node_id, str) or not node_id):
@@ -436,7 +438,10 @@ def build_research_context(entry, *, node_id=None, question=None, purpose="resea
                             cursor=cursor, limit=limit, max_bytes=max_bytes)
     graph_options = {} if scope is None else {"scope": scope}
     graph, metadata_overflow = None, None
-    if view != "manifest":
+    # Explicit cards already use the checked continuation inventory below.
+    # Building a full display graph first repeats resume/original reads merely
+    # to discard its nodes. Summary fallback retains its existing graph path.
+    if view not in {"manifest", "card"}:
         try:
             graph = build_research_graph(workspace, checkpoint_ref=checkpoint_ref, policy=policy,
                 purpose=purpose, home_overrides=home_overrides, max_nodes=128, max_bytes=131072, as_of=as_of,
@@ -456,10 +461,15 @@ def build_research_context(entry, *, node_id=None, question=None, purpose="resea
         handoff["task_workset"] = workset_summary(visible_workspace, checkpoint_ref, conditions=conditions)
     except (ValueError, OSError, KeyError) as exc:
         handoff["task_workset"] = {"status": "unavailable", "reason": str(exc)[:500]}
-        if graph is not None:
+        if graph is not None and scope is None:
             graph["issues"].append({"code": "task_workset_unavailable", "message": str(exc)[:500]})
     def card_or_manifest(reason=None):
         from .continuation_card import _inventory, continuation_card, manifest_page
+        if view == "card":
+            from .graph_memory import HOMES
+            if home_overrides is not None and (not isinstance(home_overrides, dict)
+                    or any(not isinstance(k, str) or v not in HOMES for k, v in home_overrides.items())):
+                raise EvidenceError("home overrides require node identities and Search/Judge/Quick/Deep")
         data = _inventory(workspace, checkpoint_ref, policy=policy, purpose=purpose,
             publications=publications, handoff=handoff, graph=graph, as_of=as_of, home_overrides=home_overrides,
             neutral_workset=handoff["task_workset"] if conditions is None else None)
@@ -470,7 +480,9 @@ def build_research_context(entry, *, node_id=None, question=None, purpose="resea
             max_bytes=max_bytes, view=view, question=question, node_id=node_id, fallback_reason=reason)
     if view in {"card", "manifest"} or metadata_overflow is not None:
         return card_or_manifest(metadata_overflow)
-    nodes = {n["node_id"]: n for n in graph["nodes"]}
+    # Applicability annotations belong to this context, not the immutable
+    # projection whose identity binds a possible lossless continuation.
+    nodes = {n["node_id"]: n for n in (json.loads(canonical(graph["nodes"])) if scope is not None else graph["nodes"])}
     if node_id is not None and node_id not in nodes:
         # Accept a unique original workflow-node ID for convenience, but never
         # silently choose among repeated executions of the same logical node.
@@ -478,6 +490,15 @@ def build_research_context(entry, *, node_id=None, question=None, purpose="resea
         if len(matches) != 1:
             raise EvidenceError("context node is unavailable or logical node identity is ambiguous")
         node_id = matches[0]
+    def scoped_page():
+        from .graph_scope import graph_page
+        return graph_page(graph, cursor=cursor, limit=limit, max_bytes=max_bytes, handoff=handoff,
+            context={"requested_view": view, "node_id": node_id, "question": question,
+                "purpose": purpose, "conditions": conditions, "scope": scope,
+                "publications": publications,
+                "handoff": {k: v for k, v in handoff.items() if k != "read_context"}})
+    if scope is not None and cursor is not None:
+        return scoped_page()
     priority = []
     def add(nid, reason):
         if nid in nodes and all(item[0] != nid for item in priority):
@@ -492,9 +513,17 @@ def build_research_context(entry, *, node_id=None, question=None, purpose="resea
             add(nid, "current_task_experience" if conditions is None else "matched_experience" if not unmet else "experience_counterexample_to_transfer")
     if view != "full" or scope is not None:
         try:
-            return _focused_context(graph, nodes, workspace=visible_workspace, node_id=node_id, question=question,
-                                    purpose=purpose, max_bytes=max_bytes, view=view, publications=publications, handoff=handoff)
+            result = _focused_context(graph, nodes, workspace=visible_workspace, node_id=node_id, question=question,
+                                      purpose=purpose, max_bytes=max_bytes, view=view, publications=publications, handoff=handoff)
+            if scope is not None and len(canonical(result).encode()) > max_bytes - 16:
+                return scoped_page()
+            return result
         except EvidenceError as exc:
+            if scope is not None and str(exc) in {
+                    "scoped checkpoint and counter metadata exceeds context bound; choose narrower roots or ordinary_hops, or read exact originals",
+                    "selected node and scoped controls exceed context bound; read its exact original with etalon_evidence_read",
+                    "scoped context receipt exceeds byte bound; choose narrower roots or ordinary_hops, or read exact originals"}:
+                return scoped_page()
             if view != "summary" or scope is not None or str(exc) not in {
                     "checkpoint and counter control metadata exceeds context bound; increase max_bytes",
                     "context receipt exceeds byte bound; increase max_bytes"}:

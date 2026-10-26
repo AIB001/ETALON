@@ -111,6 +111,7 @@ def _local(journal, ref, source_id, schema=None):
     return body
 
 
+@bounded_read
 def read_material(workspace, ref):
     """Read a record or generic JSON artifact without guessing a typed schema.
 
@@ -138,6 +139,7 @@ def read_material(workspace, ref):
             'complete': complete, 'fragment': fragment if content is None else None}
 
 
+@bounded_read
 def build_revision_context(workspace, *, task_id, scope, conditions, target_ref, problem_refs, evidence_refs=()):
     """Read an explicit evidence set. No task replay and no implicit full scan."""
     _conditions(conditions)
@@ -414,6 +416,7 @@ def record_experience(journal, *, patch_ref, outcome, lesson, invalid_when, capa
     return journal_ref(journal, rid, source_id=source_id)
 
 
+@bounded_read
 def retrieve_experience(workspace, *, source_ids, capability_id, conditions, limit=10, cursor=None,
                         related_condition_keys=()):
     """Bounded exact-condition retrieval; retain negative/conflicting entries for host review."""

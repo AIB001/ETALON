@@ -44,9 +44,18 @@ a probe name. A returned branch is a suggestion requiring an explicit next plann
 
 `policy_version` stores phi's concrete search configuration, parent and development evidence.
 Task splits preserve disjoint development/validation/transfer tasks and initial workflow
-identities. Validation/transfer evidence cannot train the same policy lineage. Recorded
+identities. A task-local evaluation may leave `transfer` empty; this explicitly
+claims no transfer test and does not manufacture an unused placeholder task.
+Existing nonempty splits keep their identities. Validation/transfer evidence cannot train the same policy lineage. Recorded
 held-out comparisons do not automatically certify transfer superiority. No actual T4
 transfer split, learned phi improvement or RSI result is claimed by the CPU fixture tests.
+
+`examples/research_discovery.py` joins explicitly pinned completed executions to
+the existing method/evaluation/experience/checkpoint interfaces. It performs no
+science or automatic method selection. Include the full verifier reports among
+its artifacts, not only summary claims or paths nested inside a cost report, so
+the next reader can page the actual checks through the evidence API. Large use
+sets are linked through bounded attribution steps for one MethodEvaluation.
 
 ## Producer diagnostic integration
 

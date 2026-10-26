@@ -112,7 +112,17 @@ def test_invalid_scope_fails_explicitly(graph_case, scope):
 
 def test_required_scope_cannot_succeed_by_omitting_counter_to_fit_cap(graph_case):
     c = graph_case
-    for bounds in ({"max_nodes": 1, "max_bytes": 131072}, {"max_nodes": 128, "max_bytes": 4096}):
-        with pytest.raises(EvidenceError, match="bound"):
-            build_research_graph(c["workspace"], checkpoint_ref=c["checkpoint"],
-                scope={"root_refs": [c["decision"]], "ordinary_hops": 0}, **bounds)
+    with pytest.raises(EvidenceError, match="bound"):
+        build_research_graph(c["workspace"], checkpoint_ref=c["checkpoint"],
+            scope={"root_refs": [c["decision"]], "ordinary_hops": 0}, max_nodes=1)
+    from etalon.research.graph_scope import assemble_graph_pages
+    pages, cursor = [], None
+    while True:
+        page = build_research_graph(c["workspace"], checkpoint_ref=c["checkpoint"],
+            scope={"root_refs": [c["decision"]], "ordinary_hops": 0}, max_bytes=4096, cursor=cursor)
+        assert len(canonical(dict(page, ok=True)).encode()) <= 4096
+        pages.append(page)
+        cursor = page["next_cursor"]
+        if cursor is None:
+            break
+    assert assemble_graph_pages(pages)["graph"] == scoped(c)

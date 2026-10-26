@@ -62,8 +62,8 @@ def _identity(value):
 
 def _local(base, location, *, confined=False):
     _text(location)
-    from .read_scope import CURRENT
-    scope = CURRENT.get()
+    from .read_scope import CURRENT, VERIFY_LOCATIONS
+    scope = CURRENT.get() or VERIFY_LOCATIONS.get()
     key = (str(base), location, confined)
     if scope is not None and key in scope.locations:
         return scope.locations[key]

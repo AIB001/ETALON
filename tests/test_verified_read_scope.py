@@ -362,7 +362,9 @@ def test_growing_checkpoint_summary_omits_tail_body_but_preserves_exact_refs_and
         "session_id": "small-budget-fixture", "event_id": "grown-checkpoint"}, host="codex",
         state_dir=c["entry"].parent / "bounded-hook-receipts", max_bytes=budget)
     assert delivered["ok"]
-    assert _controls(delivered)["selection"]["tail_details_omitted"] > 0
+    assert _controls(delivered)["view"] == "card"
+    assert _controls(delivered)["continuation_card"]["reading_is_new_progress"] is False
+    assert delivered["receipt"]["injection"]["context_bytes"] <= budget
     assert _controls(delivered)["checkpoint_progress"]["tail_step_refs"] == [steps[-1]]
     assert _controls(delivered)["continuation"]["authority_state"] == "paused"
     assert file_identity(c["store"].path) == source_identity and not c["store"].actions()

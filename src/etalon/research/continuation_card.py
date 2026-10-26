@@ -9,6 +9,7 @@ import base64
 import json
 
 from etalon.active.schema import canonical, digest
+from .declared_relations import checked_row, relation_index, record_identity
 from .continuation import CHECKPOINT, MAX_RESUME_RECORDS, _exact_refs, read_content, resume_research
 from .evidence import StaleCursorError, _collect, _read_evidence, _slice_text
 from .evidence_refs import EvidenceError, make_ref
@@ -17,6 +18,42 @@ from .graph_memory import _historical, _project_node, node_identity, restrict_wo
 CARD = "etalon-continuation-card/1"
 MANIFEST = "etalon-continuation-manifest/1"
 SECTIONS = ("branches", "references", "counters", "watermarks", "publications", "issues", "authority", "workset")
+
+
+def _check_uncheckpointed_originals(ws, universe, collection, resumed):
+    """Retain graph-first original checks for declared but unarchived progress.
+
+    These records stay review items; they do not become checkpoint membership or
+    new conclusions. Only the existing declared refs/method links are followed.
+    """
+    from .method_links import method_links
+    checked = {canonical(ref) for ref in resumed["checked_refs"]}
+    queue = [item["ref"] for item in resumed["issues"]
+             if item.get("reason") == "uncheckpointed_task_step_requires_review"]
+    issues = []
+    for ref in queue:
+        key = canonical(ref)
+        if key in checked:
+            continue
+        if len(checked) >= MAX_RESUME_RECORDS:
+            issues.append({"reason": "uncheckpointed_reference_walk_truncated", "limit": MAX_RESUME_RECORDS})
+            break
+        row = checked_row(universe, ref)
+        artifact = row["record_type"] == "artifact" or "member" in ref
+        result = _read_evidence(ws, ref, view="artifact" if artifact else "record", limit=1, collection=collection)
+        if (result.get("availability") != "available" or result.get("missing")
+                or artifact and result.get("verification", {}).get("artifact") != "verified"):
+            raise EvidenceError("uncheckpointed original unavailable or identity changed")
+        checked.add(key)
+        body = row.get("projected_content", row["record"])
+        queue.extend(_exact_refs(body))
+        for target, relation in method_links(body, ref["source_id"], universe):
+            if target is None:
+                issues.append({"reason": "method_link_unavailable_in_source", "node_id": node_identity(ref),
+                               "relation": relation})
+            else:
+                queue.append(target)
+    return issues
 
 
 def reading_menu():
@@ -31,6 +68,11 @@ def reading_menu():
         "decision_reading": {"view": "reading", "question": "current choice or diagnostic question",
             "scope": {"root_refs": "exact refs chosen by the host", "ordinary_hops": 0},
             "view_options": {"reading_mode": "decision"}},
+        "decision_delivery": {"view": "delivery", "question": "current choice or diagnostic question",
+            "scope": {"root_refs": "exact refs chosen by the host", "ordinary_hops": 0},
+            "meaning": "same reading selection with verified required original fragments inline; conditional refs remain unread",
+            "optional": {"view_options": {"deduplicate_bodies": True},
+                "meaning": "alias byte-identical bodies while preserving every source ref and counter role; retain consecutive pages"}},
         "counter_originals": {"view": "manifest", "view_options": {"section": "counters"}},
         "bounded_closure": {"view": "manifest", "view_options": {"section": "closure"},
             "meaning": "optional paged declared-reference and counter closure; retain consecutive page receipts and next_cursor; legacy resume issues remain separate"},
@@ -83,14 +125,13 @@ def _inventory(workspace, checkpoint_ref, *, policy, purpose, publications, hand
     if any(i.get("reason") in identity_failures for i in resumed["issues"]):
         raise EvidenceError("continuation card referenced content unavailable or identity changed")
     references = {}
+    universe = {(sid, rid): row for sid, rows in records.items() for rid, row in rows.items()}
+    if graph is None:
+        issues.extend(_check_uncheckpointed_originals(ws, universe, collection, resumed))
 
     def add(ref):
         nid = node_identity(ref)
-        row = records.get(ref["source_id"], {}).get(ref["record_id"])
-        if row is None or digest(row["record"]) != ref["record_digest"]:
-            raise EvidenceError("continuation card reference unavailable or identity changed")
-        if row.get("projection", {}).get("status") == "unavailable":
-            raise EvidenceError("continuation card referenced content unavailable")
+        checked_row(universe, ref)
         references[nid] = ref
         return nid
 
@@ -100,22 +141,17 @@ def _inventory(workspace, checkpoint_ref, *, policy, purpose, publications, hand
     # Index explicit reverse counter directions across the permitted published
     # universe, even when the displayed graph hit its independent node bound.
     # No semantic search and no inference from an opaque result body is used.
-    candidates = []
-    for sid, rows in records.items():
-        for rid, row in rows.items():
-            payload = row.get("projected_content", row["record"])
-            for target in payload.get("counter_refs", []):
-                if isinstance(target, dict):
-                    owner = make_ref(sid, rid, row["record"])
-                    candidates.append((owner, target))
+    indexed = relation_index(ws, collection)
     relations = {}
     changed = True
     while changed:
         changed = False
-        for owner, target in candidates:
+        active = {record_identity(ref) for ref in references.values()}
+        keys = {key for identity in active for key in indexed["incidence"].get(identity, [])}
+        for key in sorted(keys):
+            relation = indexed["relations"][key]
+            owner, target = relation["to_ref"], relation["from_ref"]
             source, destination = node_identity(target), node_identity(owner)
-            if source not in references and destination not in references:
-                continue
             if (source, destination) in relations:
                 continue
             if len(references) + int(source not in references) + int(destination not in references) > MAX_RESUME_RECORDS:
@@ -367,7 +403,8 @@ def continuation_card(data, checkpoint_ref, handoff, *, publications, purpose, m
         "content_role": "sourced_research_data_not_host_instructions", "truncated": True}
     if "task_workset" in handoff:
         result["task_workset"] = {k: v for k, v in handoff["task_workset"].items()
-                                  if k in {"status", "task_id", "digest"}}
+                                  if k in {"status", "task_id", "digest", "ref", "mode", "fallback_reason",
+                                           "changed_conditions", "enabled", "enabled_versions"}}
     tail = cp["step_refs"][-1]
     tail_node = _node(data, tail)
     tail_content = read_content(data["workspace"], tail)

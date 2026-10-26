@@ -480,7 +480,7 @@ def write_input_qualification(path, bundle, *, stages, endpoint, workspace, purp
 
 
 @bounded_read
-def read_input_qualification(artifact, *, workspace, purpose="research"):
+def read_input_qualification(artifact, *, workspace, purpose="research", resolver=None):
     """Verify output bytes and recompute source-bound claims; reject edited verdicts.
 
     Requalification is tied to the current parser version. A different version
@@ -489,7 +489,7 @@ def read_input_qualification(artifact, *, workspace, purpose="research"):
     if purpose not in {"research", "conditioning", "evaluation"}:
         raise ValueError("unsupported qualification purpose")
     body = artifact.as_dict() if isinstance(artifact, Artifact) else artifact
-    path = resolve_artifact(body)
+    path = resolve_artifact(body, resolver=resolver)
     if body["bytes"] > 32 * MAX_BYTES:
         raise ValueError("qualification exceeds read bound")
     report = json.loads(path.read_text(encoding="utf-8"))
