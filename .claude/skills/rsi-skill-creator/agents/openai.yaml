@@ -1,0 +1,4 @@
+interface:
+  display_name: "RSI Skill Creator"
+  short_description: "Create task-adapted skills for improving research"
+  default_prompt: "用 $rsi-skill-creator 为当前课题创建一份第二层 RSI skill，明确改进机会、候选形成、收益评价和经验使用，兼顾发现效率与可靠性。"
