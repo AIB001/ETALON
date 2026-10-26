@@ -56,6 +56,25 @@ def test_physical_relocation_needs_no_old_source_paths(graph_case, tmp_path):
         verify_research_handoff(second)  # default cannot silently skip missing originals
 
 
+def test_guard_also_recorded_as_artifact_has_one_relocatable_location(graph_case, tmp_path):
+    from etalon.research import Artifact
+    from etalon.research.evidence_refs import make_ref
+    c = graph_case
+    path = tmp_path / "STATUS.md"
+    item = Artifact(str(path), **file_identity(path), source_kind="fixture", role="diagnostic", bindings={})
+    c["journal"].record(item)
+    ref = make_ref("science", item.id, c["journal"].get(item.id))
+    c["publish"]()
+    plan = plan_research_handoff(c["entry"])
+    mappings = [m for m in plan["workspace"]["location_map"] if m["original"] == str(path)]
+    assert len(mappings) == 1 and mappings[0]["location"].startswith("authority/")
+    target = tmp_path / "guard-copy"
+    export_research_handoff(plan, target)
+    workspace, checkpoint, _, _ = resolve_entry(target / "entry.json")
+    assert read_evidence(workspace, ref, view="artifact")["verification"]["artifact"] == "verified"
+    assert resume_research(workspace, checkpoint)["authority"]["state"] == "paused"
+
+
 @pytest.mark.parametrize("key,value", [("max_files", 1), ("max_bytes", 10), ("max_records", 1)])
 def test_bounds_fail_without_a_partial_plan(graph_case, key, value):
     with pytest.raises(EvidenceError, match="limit"):

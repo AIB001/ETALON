@@ -404,8 +404,10 @@ def plan_research_handoff(entry, *, publication_intents=(), skill_bundles=(), li
                     identity = {k: body[k] for k in ("sha256", "bytes")}
                     key = sid, body["path"]
                     artifact_path = resolver.resolve(body["path"], **identity)
+                    target = ("authority/" + digest([sid, body["path"]])[:24]
+                              if body["path"] in guards else maps[key]["location"] if key in maps else None)
                     mapping(sid, body["path"], artifact_path, identity,
-                            target=maps[key]["location"] if key in maps else None)
+                            target=target)
                     artifacts += 1
                     workset_resources.extend(_record_workset_pins(row, resolver, artifact_path))
                 else:
