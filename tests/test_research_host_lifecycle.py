@@ -13,7 +13,7 @@ from test_research_publication import case
 from test_research_notes import case as note_case
 from etalon.research.notes import save_progress
 from etalon.runtime.files import file_identity
-from etalon.runtime.host_wait import inspect_wait
+from etalon.runtime.host_wait import inspect_host_process, inspect_wait
 
 spec = importlib.util.spec_from_file_location("research_host_lifecycle", Path(__file__).parents[1] / "examples/research_host_lifecycle.py")
 lifecycle = importlib.util.module_from_spec(spec)
@@ -343,3 +343,292 @@ def test_conflicting_exact_usage_is_unknown_not_arbitrarily_selected(tmp_path):
         "cached_input_tokens": 3, "output_tokens": 4}]}]
     result = lifecycle.usage_summary(records, tmp_path)
     assert result["input_tokens"] is None and result["coverage"] == "partial"
+
+
+def continuation():
+    return {"objective": "Resolve the fixture scientific question",
+        "completion_condition": "All fixture counterevidence has been interpreted",
+        "authorized_actions": ["Read fixture outputs and continue this scoped interpretation"],
+        "resume_after_host_exit": True}
+
+
+def test_segment_completion_continues_lasting_objective_with_existing_authority(tmp_path):
+    path, capsule, calls, fixture_host = setup(tmp_path, ["segment_complete", "complete"])
+    capsule["continuation"] = continuation()
+    lifecycle.save(path, capsule)
+    prompt = lifecycle.prompt_for(capsule, tmp_path / "turn-001", None)
+    assert "completion_condition describes this local segment" in prompt
+    assert "without asking for\nthe same permission again" in prompt
+    assert capsule["continuation"]["authorized_actions"][0] in prompt
+    result = lifecycle.run_lifecycle(path, tmp_path / "run", turn_runner=fixture_host)
+    assert calls == [None, "fixture-session"]
+    assert result["objective_complete"] is True
+    assert result["completion_scope"] == "continuation_objective"
+    assert result["stop_reason"] == "host_complete"
+    assert lifecycle.run_lifecycle(path, tmp_path / "run", turn_runner=fixture_host)["objective_complete"]
+    assert len(calls) == 2
+
+
+def test_natural_goal_preserves_explicit_continuation_profile(case, tmp_path):
+    _, profile, _, _ = setup(tmp_path, [])
+    profile["continuation"] = continuation()
+    body = lifecycle.capsule_from_goal("Finish this local segment", case["parent"], profile)
+    assert body["continuation"] == profile["continuation"]
+    assert body["completion_condition"] == profile["completion_condition"]
+    profile["continuation"]["resume_after_host_exit"] = "yes"
+    with pytest.raises(EvidenceError, match="continuation"):
+        lifecycle.capsule_from_goal("goal", case["parent"], profile)
+
+
+def abandoned_host(tmp_path, capsule):
+    """Real owned subprocess, synthetic host artifacts; never a native Codex claim."""
+    from etalon.runtime.native import process_identity
+    folder = tmp_path / "run" / "turn-001"
+    folder.mkdir(parents=True)
+    process = subprocess.Popen([sys.executable, "-c", "import sys;sys.stdin.read()"], stdin=subprocess.PIPE)
+    identity = process_identity(process.pid)
+    assert identity and identity["alive"]
+    started = lifecycle.stamp()
+    lifecycle.save(folder / "process.json", {"pid": process.pid, "identity": identity, "started_at": started})
+    lifecycle.save(folder / "session.json", {"session_id": "fixture-session"})
+    # run_lifecycle creates its immutable capsule before inspecting this folder.
+    lifecycle.save(folder.parent / "capsule.json", capsule)
+    lifecycle.save(folder.parent / "started.json", {"started_at": started})
+    lifecycle.save(folder / "intent.json", {"schema": "etalon-host-turn-intent/1", "started_at": started,
+        "argv": lifecycle.native_argv(capsule, folder, None), "resumed_session_id": None,
+        "capsule_identity": file_identity(folder.parent / "capsule.json")})
+    (folder / "prompt.txt").write_text("synthetic fixture prompt")
+    (folder / "events.jsonl").write_text(json.dumps({"type": "thread.started", "thread_id": "fixture-session"}) + "\n")
+    lifecycle.save(capsule["entry"], {"fixture": "prior work remains available"})
+    return folder, process
+
+
+def test_proven_host_exit_resumes_judgment_once_without_repeating_science(tmp_path):
+    path, capsule, calls, fixture_host = setup(tmp_path, ["complete"])
+    capsule["continuation"] = continuation()
+    lifecycle.save(path, capsule)
+    folder, process = abandoned_host(tmp_path, capsule)
+    try:
+        running = lifecycle.run_lifecycle(path, tmp_path / "run", turn_runner=fixture_host)
+        assert running["stop_reason"] == "host_still_running" and not calls
+        process.stdin.close()
+        assert process.wait(timeout=10) == 0
+        assert inspect_host_process(lifecycle.read(folder / "process.json"))["state"] == "exited"
+
+        def resume(body, turn, session):
+            assert session == "fixture-session"
+            prompt = lifecycle.prompt_for(body, turn, session)
+            assert "scientific outcome is unresolved" in prompt
+            assert "Do not resubmit" in prompt
+            assert '"scientific_retry": false' in prompt
+            assert lifecycle.read(capsule["entry"])["fixture"] == "prior work remains available"
+            return fixture_host(body, turn, session)
+
+        result = lifecycle.run_lifecycle(path, tmp_path / "run", turn_runner=resume)
+        assert calls == ["fixture-session"] and result["stop_reason"] == "host_complete"
+        recovered = lifecycle.read(folder / "receipt.json")
+        assert recovered["checkpoint"] is None and recovered["exit_code"] is None
+        assert recovered["wall_seconds"] is None and recovered["reconciliation_required"]
+        assert result["host_wall_seconds"] is None and result["known_host_wall_seconds"] == 0.25
+        assert result["unknown_host_wall_turns"] == 1
+        assert result["usage"]["coverage"] == "partial"
+        assert result["usage"]["unknown_usage_records_or_turns"] == 1
+        assert lifecycle.run_lifecycle(path, tmp_path / "run", turn_runner=resume)["host_turns"] == 2
+        assert calls == ["fixture-session"]
+    finally:
+        if process.poll() is None:
+            process.stdin.close()
+            process.wait(timeout=10)
+
+
+@pytest.mark.parametrize("change", ["unauthorized", "session", "intent", "entry"])
+def test_dead_host_does_not_resume_without_authority_or_consistent_evidence(tmp_path, change):
+    path, capsule, calls, fixture_host = setup(tmp_path, ["complete"])
+    if change != "unauthorized":
+        capsule["continuation"] = continuation()
+    lifecycle.save(path, capsule)
+    folder, process = abandoned_host(tmp_path, capsule)
+    process.stdin.close()
+    process.wait(timeout=10)
+    if change == "session":
+        lifecycle.save(folder / "session.json", {"session_id": "different-session"})
+    elif change == "intent":
+        intent = lifecycle.read(folder / "intent.json")
+        intent["capsule_identity"]["sha256"] = "0" * 64
+        lifecycle.save(folder / "intent.json", intent)
+    elif change == "entry":
+        Path(capsule["entry"]).unlink()
+    result = lifecycle.run_lifecycle(path, tmp_path / "run", turn_runner=fixture_host)
+    assert result["stop_reason"] == "unknown_host_outcome" and not calls
+    assert not (folder / "receipt.json").exists()
+    assert not result["objective_complete"]
+
+
+def test_unreadable_process_identity_is_not_evidence_of_exit(tmp_path, monkeypatch):
+    from etalon.runtime import native
+    _, capsule, _, _ = setup(tmp_path, [])
+    folder, process = abandoned_host(tmp_path, capsule)
+    try:
+        monkeypatch.setattr(native, "process_identity", lambda pid: None)
+        observed = inspect_host_process(lifecycle.read(folder / "process.json"))
+        assert observed["state"] == "unknown"
+    finally:
+        process.stdin.close()
+        process.wait(timeout=10)
+
+
+@pytest.mark.parametrize("exit_code, write_checkpoint", [(7, True), (0, False)])
+def test_recorded_interruption_keeps_original_receipt_and_resumes_exact_session(tmp_path, monkeypatch, exit_code, write_checkpoint):
+    """Real local processes simulate Codex transport; no scientific job is retried."""
+    path, capsule, _, _ = setup(tmp_path, [])
+    capsule["native"]["usage_scope"] = "turn_delta"  # This fixture emits per-process deltas.
+    capsule["continuation"] = continuation()
+    lifecycle.save(path, capsule)
+    lifecycle.save(capsule["entry"], {"result": "already computed"})
+    code = ("import sys,pathlib,json;sys.stdin.read();"
+        "print(json.dumps({'type':'thread.started','thread_id':'fixture-session'}));"
+        "print(json.dumps({'type':'turn.completed','usage':{'input_tokens':9,'cached_input_tokens':2,'output_tokens':3}}));"
+        "pathlib.Path(sys.argv[1]).write_text(sys.argv[2],encoding='utf-8') if sys.argv[3]=='yes' else None;"
+        "sys.exit(int(sys.argv[4]))")
+
+    def argv(body, folder, session):
+        first = folder.name == "turn-001"
+        checkpoint = {"schema": lifecycle.CHECKPOINT, "task_id": body["task_id"],
+            "state": "continue" if first else "complete", "entry": body["entry"],
+            "summary": "synthetic transport", "basis_refs": [], "wake_after_seconds": 0}
+        return [sys.executable, "-c", code, str(folder / "checkpoint.json"), json.dumps(checkpoint),
+                "yes" if not first or write_checkpoint else "no", str(exit_code if first else 0)]
+
+    monkeypatch.setattr(lifecycle, "native_argv", argv)
+    originals, calls = [], []
+
+    def host(body, folder, session):
+        calls.append(session)
+        if folder.name == "turn-002":
+            assert "scientific outcome is unresolved" in lifecycle.prompt_for(body, folder, session)
+            assert lifecycle.read(capsule["entry"]) == {"result": "already computed"}
+        receipt = lifecycle.host_turn(body, folder, session)
+        originals.append(file_identity(folder / "receipt.json"))
+        return receipt
+
+    result = lifecycle.run_lifecycle(path, tmp_path / "run", turn_runner=host)
+    first = tmp_path / "run" / "turn-001"
+    assert calls == [None, "fixture-session"] and result["stop_reason"] == "host_complete"
+    assert file_identity(first / "receipt.json") == originals[0]
+    assert lifecycle.read(first / "receipt.json")["exit_code"] == exit_code
+    recovery = lifecycle.read(first / "recovery.json")
+    assert recovery["receipt_identity"] == originals[0]
+    assert not recovery["host_recovery"]["scientific_retry"]
+    assert result["host_wall_seconds"] > 0 and result["unknown_host_wall_turns"] == 0
+    assert result["usage"]["input_tokens"] == 18 and result["usage"]["coverage"] == "partial"
+    assert result["usage"]["unknown_usage_records_or_turns"] == 1
+    assert lifecycle.run_lifecycle(path, tmp_path / "run", turn_runner=host)["host_turns"] == 2
+    assert calls == [None, "fixture-session"]
+
+
+def test_recorded_failure_without_native_session_never_manufactures_resume(tmp_path, monkeypatch):
+    path, capsule, _, _ = setup(tmp_path, [])
+    capsule["continuation"] = continuation()
+    lifecycle.save(path, capsule)
+    lifecycle.save(capsule["entry"], {"result": "existing"})
+    monkeypatch.setattr(lifecycle, "native_argv", lambda *args: [sys.executable, "-c", "import sys;sys.stdin.read();sys.exit(7)"])
+    result = lifecycle.run_lifecycle(path, tmp_path / "run")
+    assert result["host_turns"] == 1 and result["stop_reason"] == "host_error_or_invalid_checkpoint"
+    assert not (tmp_path / "run" / "turn-001" / "recovery.json").exists()
+
+
+def test_recovery_respects_original_host_admission_bound_even_with_complete_checkpoint(tmp_path):
+    path, capsule, calls, fixture_host = setup(tmp_path, ["complete"])
+    capsule["continuation"] = continuation()
+    capsule["bounds"]["max_host_turns"] = 1
+    lifecycle.save(path, capsule)
+    folder, process = abandoned_host(tmp_path, capsule)
+    lifecycle.save(folder / "checkpoint.json", {"schema": lifecycle.CHECKPOINT,
+        "task_id": capsule["task_id"], "entry": capsule["entry"], "state": "complete",
+        "summary": "unconfirmed terminal checkpoint", "basis_refs": [], "wake_after_seconds": 0})
+    process.stdin.close()
+    process.wait(timeout=10)
+    result = lifecycle.run_lifecycle(path, tmp_path / "run", turn_runner=fixture_host)
+    assert not calls and result["host_turns"] == 1 and result["stop_reason"] == "host_turn_bound"
+    assert result["last_checkpoint"]["state"] == "complete" and not result["objective_complete"]
+    assert result["host_recovery"]["scientific_outcome"] == "unresolved"
+
+
+def usage_record(session, count, cached, output, *, resumed=None, scope="thread_cumulative", **extra):
+    return {"session_id": session, "resumed_session_id": resumed, "usage_scope": scope,
+            "usage": [{"input_tokens": count, "cached_input_tokens": cached, "output_tokens": output}], **extra}
+
+
+def test_explicit_native_cumulative_usage_counts_session_once_and_raw_values_stay_intact(tmp_path):
+    records = [usage_record("one", 100, 70, 20), usage_record("one", 160, 100, 30, resumed="one")]
+    raw = json.dumps(records)
+    result = lifecycle.usage_summary(records, tmp_path)
+    assert result["input_tokens"] == 160 and result["cached_input_tokens"] == 100
+    assert result["uncached_input_tokens"] == 60 and result["output_tokens"] == 30
+    assert result["coverage"] == "declared_records_complete"
+    assert result["model_response_count"] is None
+    assert json.dumps(records) == raw
+
+
+def test_explicit_usage_scopes_separate_fresh_sessions_and_preserve_legacy_deltas(tmp_path):
+    first = usage_record("one", 100, 70, 20)
+    second = usage_record("two", 160, 100, 30)
+    assert lifecycle.usage_summary([first, second], tmp_path)["input_tokens"] == 260
+    legacy = [{k: v for k, v in r.items() if k != "usage_scope"} for r in (
+        first, usage_record("one", 160, 100, 30, resumed="one"))]
+    assert lifecycle.usage_summary(legacy, tmp_path)["input_tokens"] == 260
+    assert lifecycle.usage_summary(legacy, tmp_path, native_usage_scope="thread_cumulative")["input_tokens"] == 160
+
+
+def test_cumulative_counter_regression_is_unknown_not_negative_or_rebased(tmp_path):
+    result = lifecycle.usage_summary([usage_record("one", 100, 70, 20),
+        usage_record("one", 80, 50, 10, resumed="one"),
+        usage_record("one", 140, 80, 25, resumed="one")], tmp_path)
+    assert result["input_tokens"] == 100 and result["coverage"] == "partial"
+    assert result["unknown_usage_records_or_turns"] == 2
+    assert any("regressed" in item["error"] for item in result["issues"])
+
+
+def test_resumed_cumulative_counter_requires_known_run_origin_and_preserves_interruption_unknown(tmp_path):
+    resumed = usage_record("one", 160, 100, 30, resumed="one")
+    unknown = lifecycle.usage_summary([resumed], tmp_path)
+    assert unknown["input_tokens"] is None and unknown["coverage"] == "partial"
+    missing = {"session_id": "one", "resumed_session_id": None, "usage_scope": "thread_cumulative",
+               "usage": [], "usage_incomplete": True}
+    later = lifecycle.usage_summary([missing, resumed], tmp_path)
+    assert later["input_tokens"] == 160 and later["coverage"] == "partial"
+    assert later["unknown_usage_records_or_turns"] == 1
+    partial = lifecycle.usage_summary([usage_record("one", 100, 70, 20),
+        {**missing, "resumed_session_id": "one"}], tmp_path)
+    assert partial["input_tokens"] == 100 and partial["coverage"] == "partial"
+
+
+def test_exact_usage_id_deduplicates_cumulative_snapshot_and_response_count_is_explicit(tmp_path):
+    first = usage_record("one", 100, 70, 20)
+    first["usage"][0]["usage_id"] = "turn-1"
+    duplicate = {**first, "resumed_session_id": "one"}
+    result = lifecycle.usage_summary([first, duplicate], tmp_path)
+    assert result["input_tokens"] == 100 and result["measured_usage_records"] == 1
+    response = usage_record("one", 100, 70, 20, scope="turn_delta")
+    response["usage"][0].update(usage_id="response-1", response_id="response-1")
+    result = lifecycle.usage_summary([response, response], tmp_path)
+    assert result["model_response_count"] == 1 and result["input_tokens"] == 100
+
+
+def test_mixed_scopes_for_same_session_do_not_double_count(tmp_path):
+    result = lifecycle.usage_summary([usage_record("one", 100, 70, 20),
+        usage_record("one", 60, 30, 10, scope="turn_delta")], tmp_path)
+    assert result["input_tokens"] is None and result["coverage"] == "partial"
+    assert any("mixed" in item["error"] for item in result["issues"])
+
+
+def test_real_interruption_counter_gap_stays_unknown_despite_complete_resumed_turn(tmp_path):
+    # Native acceptance observed one billed response missing from the resumed
+    # CLI counter; exact response records totaled 208055 / 177024 / 2758.
+    failed = {"session_id": "real-session", "resumed_session_id": None,
+              "usage_scope": "thread_cumulative", "usage": [], "usage_incomplete": True}
+    complete = usage_record("real-session", 185187, 154752, 2126, resumed="real-session")
+    result = lifecycle.usage_summary([failed, complete], tmp_path)
+    assert result["input_tokens"] == 185187 and result["uncached_input_tokens"] == 30435
+    assert result["coverage"] == "partial" and result["unknown_usage_records_or_turns"] == 1
+    assert result["model_response_count"] is None and result["cost_usd"] is None

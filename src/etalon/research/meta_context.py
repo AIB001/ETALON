@@ -536,7 +536,8 @@ def note_workset_summary(entry, *, task_id, conditions=None, definitions=None):
     return result
 
 
-def publish_task_workset(entry, workset, *, operation_id, directory, parent_entry=None, expected_entry_identity=None):
+def publish_task_workset(entry, workset, *, operation_id, directory, parent_entry=None, expected_entry_identity=None,
+                         method_resolution=None):
     """Use existing recoverable publication; no mutation of a source journal."""
     from .entry import resolve_entry
     from .continuation import read_content, STEP
@@ -549,7 +550,7 @@ def publish_task_workset(entry, workset, *, operation_id, directory, parent_entr
     marker = root / ("workset-operation-" + digest({"entry": str(Path(entry).absolute()), "operation_id": operation_id}) + ".json")
     if marker.exists():
         request = json.loads(marker.read_text(encoding="utf-8"))
-        if request["workset_digest"] != workset["digest"]:
+        if request["workset_digest"] != workset["digest"] or request.get("method_resolution") != method_resolution:
             raise EvidenceError("operation id reused for a different workset")
         return prepare_publication(**request["request"])
     ws, cp_ref, _, _ = resolve_entry(parent_entry or entry)
@@ -563,9 +564,28 @@ def publish_task_workset(entry, workset, *, operation_id, directory, parent_entr
     path = root / (workset["digest"] + ".json")
     _save(path, workset)
     basis = [previous["activation_ref"]] if previous["status"] == "active" else [cp_ref]
+    methods = []
+    if method_resolution is not None:
+        selected = method_resolution["selected_method_ref"]
+        resolution = read_content(ws, method_resolution["step_ref"])
+        use = _record(ws, method_resolution["use_ref"])
+        enabled = {p["resource_id"] for p in workset["enabled"]}
+        if (method_resolution["outcome"] not in {"adopt", "retain", "rollback"}
+                or resolution.get("operation") != "decision" or resolution["task_id"] != cp["task_id"]
+                or method_resolution["use_ref"] not in resolution["output_refs"]
+                or selected not in resolution["method_refs"]
+                or use.get("schema") != "etalon-method-use/1"
+                or not any(s["method_version_ref"] == selected["record_id"] for s in use["selected_methods"])
+                or not any(r["resource_id"] in enabled and r["kind"] == "method" and r["content_ref"] == selected
+                           for r in workset["index"]["resources"])):
+            raise EvidenceError("workset activation must select the resolved method in this task")
+        if not any(a.get("disposition") == method_resolution["outcome"] for a in resolution["detail"]["alternatives"]):
+            raise EvidenceError("method outcome differs from its recorded resolution")
+        basis += [method_resolution["step_ref"], method_resolution["use_ref"]]
+        methods = [selected]
     step = dict(schema=STEP, task_id=cp["task_id"], question=cp["question"], branch_id=cp["branches"][0]["branch_id"],
         operation="decision", reason=workset["review"]["rationale"], input_refs=basis,
-        output_refs=[{"publication_ref": "task_workset"}], method_refs=[], accounting_refs=[], source_watermarks=[],
+        output_refs=[{"publication_ref": "task_workset"}], method_refs=methods, accounting_refs=[], source_watermarks=[],
         supersedes=[previous["activation_ref"]] if previous["status"] == "active" else [],
         detail=dict(choice="reuse", alternatives=[], basis_refs=basis, reconsider_when="Task conditions, resource versions or counterevidence change"))
     request = dict(entry=str(Path(entry).absolute()), operation_id=operation_id, directory=str(root / "publications"),
@@ -574,5 +594,10 @@ def publish_task_workset(entry, workset, *, operation_id, directory, parent_entr
             role="diagnostic", bindings={"schema": WORKSET, "meta_activation": WORKSET, "task_id": cp["task_id"],
                 "evidence_refs": _dependencies(workset)})],
         steps=[dict(name="workset_activation", content=step)])
-    _save(marker, {"workset_digest": workset["digest"], "request": request})
+    if methods:
+        request["checkpoint_additions"] = {"method_refs": methods}
+    saved = {"workset_digest": workset["digest"], "request": request}
+    if method_resolution is not None:
+        saved["method_resolution"] = method_resolution
+    _save(marker, saved)
     return prepare_publication(**request)

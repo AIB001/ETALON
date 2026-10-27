@@ -124,6 +124,11 @@ def decision_packet(result, *, previous=None):
         'history':{'completed_ref_count':len(work['completed_refs']),
                    'read_via_work_ref':current['work_ref']},
         'execution_permission':'not_granted','new_RSI_proposal':False}
+    # Deliver the producer's current actionable contrast/choice, not the full
+    # lineage. Earlier work stays available through its pinned ordinary file.
+    for key in ('feedback','previous_work'):
+        if key in work:
+            packet[key]=work[key]
     stable=lambda value:json.dumps(value,sort_keys=True,ensure_ascii=False,separators=(',',':')).encode()
     digest=hashlib.sha256(stable(packet)).hexdigest()
     envelope={'packet':packet,'sha256':digest}

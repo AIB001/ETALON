@@ -6,6 +6,15 @@ explicit `recover` callback; native handles live in `etalon.runtime.native`.
 Neither depends on a research graph or publication. A recovery reads the saved
 handle/output and does not dispatch the original callback a second time.
 
+Continue from each result toward the scientific objective. A completed phase or
+retain/no-change decision does not by itself complete it. Known methods and
+understood conditional followups run as code batches, with matching completed
+requests reused; the host handles new residuals that could change the next action.
+Paths may be reordered, omitted or replaced by cheaper methods when exact reasoning
+or scoped evidence preserves the required decision and external quality. Keep the
+conditions and fallback, and leave omitted outcomes unmeasured. Task notes retain
+learned conditions and opportunities; skills retain the reusable procedure.
+
 Save a significant finding with `research.notes.record_note(journal, note, directory)`
 and advance its entry with `publish_note(entry, journal, record_id)`. One immutable
 note in the existing journal contains `task_id`, `branch_id`, `question`, `summary`,
@@ -15,6 +24,18 @@ Superseding notes name prior record IDs; entry replacement is atomic. Failed
 recording leaves completed science intact. Existing context MCP and hook delivery
 read this entry directly. `find_notes` returns scoped negative/positive records and
 explicit condition gaps; selection and adoption belong to the host.
+
+Use `notes.resolve_method(entry, pointer)` to resolve a published callable's
+existing description and pinned source without loading its implementation into
+the conversation. Call it in the bound environment using its declared inputs and
+conditions. `notes.open_original(entry, pointer)` opens one verified result;
+inside that context, `saved.array(name)` loads and reuses only the named NPZ
+member. Do numeric analysis in code and return decision-relevant differences and
+exceptions. `notes.read_original(..., selector={"json": ["/counts"]})` gives
+bounded exact fields; an omitted selector gives metadata. The same entry paths
+are available through `etalon research method` and `etalon research original`.
+Descriptors remain ordinary note fields; these helpers neither select methods
+nor add a registry, execution stage or global cache.
 
 For one-call recording and entry replacement, prefer `notes.save_progress`.
 It checks original bytes before recording and immediately before entry replacement;
@@ -75,6 +96,28 @@ has schema `etalon-host-task-capsule/1` and these fields:
 | `native` | `codex_executable`, `cwd`, `model`, `reasoning_effort`; paths are absolute |
 | `bounds` | Positive `max_host_turns` and `max_wall_seconds` |
 
+For a continuing scientific question, the same profile may add:
+
+```json
+{
+  "continuation": {
+    "objective": "Explain the residual discrepancy under the declared conditions",
+    "completion_condition": "The remaining explanations have a discriminating result or an explicit unresolved limit",
+    "authorized_actions": ["Interpret existing receipts and run the already authorized task-local CPU controls within the saved budget"],
+    "resume_after_host_exit": true
+  }
+}
+```
+
+These are ordinary scoped instructions from existing authorization, not an action
+router. The top-level `completion_condition` then describes a local segment;
+`continuation.completion_condition` defines completion of the lasting question.
+The host chooses useful next actions, methods and whether to improve them. No
+mandatory probe, phase order or improvement is introduced. Existing pause and
+resource constraints remain applicable. Without `continuation`, old profiles keep
+their existing completion behavior. Neither profile expands permission inferred
+from a natural-language goal.
+
 `native.cwd` may be a narrow task workspace instead of the whole source repository;
 absolute entry and method paths remain in the capsule. For a non-Git workspace,
 explicit `native.skip_git_repo_check=true` supplies the CLI flag. This does not
@@ -100,8 +143,9 @@ Each native turn ends with a structured `etalon-host-checkpoint/1`: `task_id`,
 | State | Next behavior |
 | --- | --- |
 | `continue` | Resume the same native session for authorized remaining work |
+| `segment_complete` | Continue after a local segment; the lasting question remains open |
 | `waiting` | Wait the stated interval, then inspect existing work on resume |
-| `complete` | The capsule's scientific completion condition was met |
+| `complete` | The continuation completion condition, or the original capsule condition when absent, was met |
 | `needs_user` | A concrete dependency requires information or new authority |
 
 When an existing external handle is pending, the host may write `wait.json` in its
@@ -115,6 +159,23 @@ Native token usage and exact-ID linked child receipts are counted once. Missing
 usage or prices remain unknown. A fresh host receives the latest note and previous
 checkpoint; a resumed-session claim requires an observed matching native session ID.
 
+Native Codex `turn.completed.usage` contains cumulative thread counters on resume.
+New native receipts tag `usage_scope="thread_cumulative"` and retain those raw
+values. The summary charges successive monotone differences for each exact session,
+then sums distinct sessions. A counter regression, missing resumed-session baseline
+or mixed cumulative/delta scope remains unknown; it is not rebased to zero. After
+abnormal interruption, a resumed CLI cumulative counter can omit an already billed
+response from the interrupted tool call. A later complete snapshot therefore does
+not clear that turn's unknown usage: coverage remains partial. Independently linked
+exact response IDs can establish a separate measured total; the adapter does not
+guess or manufacture the missing contribution.
+`native.usage_scope` can explicitly select `thread_cumulative` or `turn_delta` for a
+known transport. That explicit profile also interprets older untagged receipts;
+otherwise untagged custom/legacy receipts retain their old delta semantics. No
+counter-value heuristic or historical receipt rewrite is used. `model_response_count`
+is available only for complete explicitly identified response records; host turns
+and cumulative snapshots are not model response counts.
+
 The adapter retains process/session identity, usage and output receipts and uses
 native `exec resume` after normal exit. A fresh independent session can instead
 receive the current entry and a new capsule; it must inspect the existing handles
@@ -124,8 +185,29 @@ continues the durable host state; it does not create a new scientific run.
 
 The wall limit controls admission of another host turn. It does not kill an
 in-flight host or external job. Scientific execution uses its separately stated
-budget. An unknown host outcome needs inspection rather than an automatic new
-process. Use an already reviewed native host installation; this adapter does not
+budget. If a controller exits before saving a turn receipt, reentry first inspects
+the recorded host's creation identity. A live process is left alone; a failed
+identity read by itself remains unknown. With explicit
+`continuation.resume_after_host_exit=true`, proven process exit plus a matching
+launch intent, capsule identity and recorded native session permits another host
+turn to reconcile the existing entry, receipts, outputs and pending handles.
+This uses the existing session in `resume` mode; `fresh` mode receives the same
+recovery facts without native conversation history. It never resubmits scientific
+commands. Missing or inconsistent evidence remains `unknown_host_outcome`.
+
+If the host left a normal failure receipt (a nonzero exit or missing checkpoint),
+the same explicit authorization, positive exit evidence and exact session binding
+permit reconciliation. Its original receipt stays unchanged; `recovery.json`
+records the continuation evidence. Missing session identity never manufactures a
+new session. Without this authorization, failure retains the old stopping behavior.
+
+When interruption lost the receipt, exit code, duration and unobserved usage remain
+unknown; measured records and `known_host_wall_seconds` remain separately available.
+An existing failure receipt retains its measured exit code and duration. All
+interrupted turns count toward the original host bounds, and unobserved usage is
+marked partial. `objective_complete` reports the host's checkpoint
+claim only when the lifecycle stopped on `complete`; it is not external scientific
+verification. Use an already reviewed native host installation; this adapter does not
 install hooks, change account settings or grant trust.
 
 ## Let producers publish usable results
@@ -143,8 +225,10 @@ Original reads and verification still run; this reduces output/context bytes,
 not verification coverage. A new host without the base receipt reads a full
 packet. Full historical material remains reachable through the work reference.
 
-For a task-owned Python method that already knows its calculation batch, use the
-optional `etalon.research.research_segment` adapter:
+For note entries, a task-owned method can use native execution/reuse and save its
+meaningful result through `notes.save_progress` or `notes.patch_progress`. The
+optional `etalon.research.research_segment` adapter runs a known batch with either
+a note entry or an existing graph checkpoint entry:
 
 ```python
 from etalon.research.research_segment import work_from_entry, run_segment, read_work
@@ -167,10 +251,21 @@ is a normal `{argv,cwd,reason,ends_when,inputs}` command with absolute executabl
 and directory and input `{path,identity}` pins. It is a host option, not a DSL
 or automatic scientific router.
 
+Optional `feedback` is a compact task-specific object: it can preserve contrasts,
+learned conditions, counter cases, untested questions and possible next actions.
+An `actions` list contains `{id, command, ...}` options; `command` uses the ordinary
+next-segment shape or `null` for no execution. If `selected_action` names an option,
+its command must match `next_segment`. The adapter checks that linkage and passes
+feedback to the current work/note; the host interprets it and can choose differently.
+The next result replaces current feedback, while prior results remain evidence.
+No feedback field makes an omitted comparison measured or forces a new algorithm.
+
 Optional `counter_refs` and `method_refs` pass through to the existing publisher;
 `{"publication_ref": "original_name"}` can name a just-produced file. Thus a
 new negative result becomes a checkpoint counter without copying the historical
-evidence into the work card. Reading a current work object checks record schema
+evidence into the work card. Note entries accept original file pins or these named
+outputs as counters; graph evidence refs stay on the graph path. Reading a current
+work object checks record schema
 bindings before expanding its body; other declared result bodies stay available
 for the relevant scientific decision.
 
@@ -197,10 +292,11 @@ rereading its implementation, publication intent or completed history. A compact
 result plus the existing publication receipt is the normal return; expand the
 specific original needed to resolve a contradiction or error.
 
-The adapter saves the producer response and work as ordinary Artifacts, then
-automatically calls the existing result publisher. `read_work` verifies the
-work selected in the branch's current `next_read_refs`; a fresh host need not
-reconstruct the full source history before running its next known segment.
+The adapter saves the producer response and work, then publishes through the
+entry's existing note patch or graph result interface. For graph entries,
+`read_work` verifies the work selected in the branch's current `next_read_refs`;
+notes carry a pinned segment work file. A fresh host need not reconstruct the
+full source history before running its next known segment.
 Pauses, pending handles and original evidence remain available. An absent next
 command means an honest implementation or judgment gap, not an invented action.
 

@@ -37,6 +37,7 @@ from __future__ import annotations
 
 import re
 import uuid
+import threading
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -94,6 +95,74 @@ def _visible_devices() -> tuple[str, ...]:
     except Exception:
         count = 0
     return tuple(f"cuda:{index}" for index in range(count)) or ("cpu",)
+
+
+class ConcurrentLanesRefused(RuntimeError):
+    """Two CUDA-laned runs were asked for in one process, which cannot work here."""
+
+
+#: Run ids with CUDA lanes currently executing in this process, and the lanes each asked for.
+#: Guarded by :data:`_LANES_LOCK`.
+_IN_FLIGHT_LANES: dict[str, tuple[str, ...]] = {}
+_LANES_LOCK = threading.Lock()
+
+
+def _claim_lanes(run_id: str, lanes: tuple[str, ...]) -> None:
+    """Refuse a second CUDA-laned run in this process, naming the real reason.
+
+    MolCascade pins a shard's device with two pieces of **process-global** state: the module
+    variable ``molcascade.parallel.shards._WORKER_DEVICE``, and ``CUDA_VISIBLE_DEVICES`` via
+    ``parallel.devices.pinned_device`` -- whose own docstring says it restores the previous value
+    "so an in-process single-lane run does not leak its pinning into the rest of the program". One
+    run at a time is the contract, and nothing stated it where a caller of this method would read it.
+
+    Two concurrent runs in one process therefore overwrite each other's pinning, and the damage is
+    not merely that a batch lands on the wrong card. ``shards._execute_shard`` re-stamps a task
+    whose ``device`` disagrees with the global, and ``shards._replace_device`` rebuilds the
+    ``ShardTask`` field by field while omitting ``side_inputs`` -- which carries
+    ``field(default_factory=dict)``, so the rebuilt task gets an empty one. The shard then fails
+    with "was given no files for side input 'conformers'", a message about geometry that is really
+    about a device.
+
+    Measured on the SND1 v2 sweep. A driver ran four batches as four threads of one process,
+    ``screen.run(..., workers=4, devices=(d,))`` with d one of cuda:0..3. All four reached
+    ``docking_score`` and all four failed there, each after hours of work: shard 0 docked 20,000
+    molecules while shard 1 died in seconds, and the error surfaced only when the pool drained.
+    Eight GPU-hours across four cards for four runs that could not have succeeded. The same batch
+    resumed afterwards as the only run in its own process went straight through docking to stage 16.
+
+    Refused rather than serialised. A lock here would make a four-way driver run four times slower
+    with every log line still saying four cards, and the remedy -- one OS process per card -- is not
+    something the caller can be nudged towards by being made slow.
+    """
+
+    if not any(lane.startswith("cuda:") for lane in lanes):
+        # CPU lanes touch neither global in a way that can collide: ``pinned_device`` returns
+        # immediately for a non-CUDA device, and every task's device equals the global, so the
+        # re-stamp path is never taken. Concurrent CPU runs are left alone.
+        return
+    with _LANES_LOCK:
+        if _IN_FLIGHT_LANES:
+            held = ", ".join(f"{name} on {list(held)}" for name, held in _IN_FLIGHT_LANES.items())
+            raise ConcurrentLanesRefused(
+                f"this process is already running {held}, so a second CUDA-laned run "
+                f"({run_id or '<generated>'} on {list(lanes)}) would corrupt it. MolCascade pins "
+                "a shard's device with process-global state -- shards._WORKER_DEVICE and "
+                "CUDA_VISIBLE_DEVICES -- so two concurrent runs overwrite each other's pinning, "
+                "and a task re-stamped with the wrong device loses its side inputs entirely: the "
+                "symptom is a docking stage failing with \"was given no files for side input "
+                "'conformers'\" after hours of work. Run one batch per OS process -- "
+                "subprocess, or a separate invocation per card -- rather than one process with a "
+                "thread per card."
+            )
+        _IN_FLIGHT_LANES[run_id or "<generated>"] = lanes
+
+
+def _release_lanes(run_id: str, lanes: tuple[str, ...]) -> None:
+    if not any(lane.startswith("cuda:") for lane in lanes):
+        return
+    with _LANES_LOCK:
+        _IN_FLIGHT_LANES.pop(run_id or "<generated>", None)
 
 
 @dataclass(frozen=True, slots=True)
@@ -467,6 +536,11 @@ class Screen:
 
         So when a caller asks for parallelism and names no devices, the visible CUDA lanes are used,
         falling back to the library's own default when there are none.
+
+        Raises:
+            ConcurrentLanesRefused: if this process is already running a CUDA-laned screen. The
+                layer below pins devices with process-global state, so one run per process is the
+                contract; see :func:`_claim_lanes` for what the collision actually costs.
         """
 
         if self.read_only:
@@ -475,32 +549,37 @@ class Screen:
         from molcascade.runtime import LocalRunner
 
         resources = None
+        lanes: tuple[str, ...] = ()
         if workers is not None or devices is not None:
             lanes = tuple(devices) if devices else _visible_devices()
             resources = StageResources(workers=workers or len(lanes), devices=lanes)
 
-        runner = LocalRunner(
-            self.workspace,
-            plugins=plan._internal["registry"],
-            resources=resources,
-        )
-        execution_id = uuid.uuid4().hex if run_id is None else run_id
-        previous = self.state(execution_id)
+        _claim_lanes(run_id or "", lanes)
         try:
-            result = runner.run(plan._internal["pipeline"], run_id=execution_id, resume=resume)
-        except Exception as error:
-            if ((previous is not None and not resume)
-                    or getattr(error, "code", None) in {"RUN_ALREADY_EXISTS", "RUN_LOCKED", "RUN_LOCK_FAILED"}):
+            runner = LocalRunner(
+                self.workspace,
+                plugins=plan._internal["registry"],
+                resources=resources,
+            )
+            execution_id = uuid.uuid4().hex if run_id is None else run_id
+            previous = self.state(execution_id)
+            try:
+                result = runner.run(plan._internal["pipeline"], run_id=execution_id, resume=resume)
+            except Exception as error:
+                if ((previous is not None and not resume)
+                        or getattr(error, "code", None) in {"RUN_ALREADY_EXISTS", "RUN_LOCKED", "RUN_LOCK_FAILED"}):
+                    raise
+                # The executor persists a failed stage before raising. Preserve that actual result,
+                # including exhausted input and paid partial artifacts, rather than losing the receipt
+                # at the adapter boundary. A refusal before execution must never reuse an old result.
+                failed = self.state(execution_id)
+                if (failed is not None and failed != previous and failed.status == "FAILED"
+                        and failed.revision_id == plan.revision_id):
+                    return failed
                 raise
-            # The executor persists a failed stage before raising. Preserve that actual result,
-            # including exhausted input and paid partial artifacts, rather than losing the receipt
-            # at the adapter boundary. A refusal before execution must never reuse an old result.
-            failed = self.state(execution_id)
-            if (failed is not None and failed != previous and failed.status == "FAILED"
-                    and failed.revision_id == plan.revision_id):
-                return failed
-            raise
-        state = runner.load_run(result.run_id)
+            state = runner.load_run(result.run_id)
+        finally:
+            _release_lanes(run_id or "", lanes)
         return ScreenResult(
             run_id=result.run_id,
             revision_id=plan.revision_id,

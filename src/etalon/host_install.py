@@ -262,7 +262,9 @@ def doctor(target):
             "host": saved["host"], "transport": transport, "verification": verification,
             "entry_exists_on_server": bool(entry and Path(entry).is_file()),
             "configured_events": events,
-            "startup_delivery": "MCP may not be ready; first matching PreToolUse prepares baseline"
+            "startup_delivery": "command_adapter; later tool events use MCP"
+                if transport == "mcp_tool" and saved["host"] == "claude" else
+                "MCP may not be ready; first matching PreToolUse prepares baseline"
                 if transport == "mcp_tool" else "command_adapter",
             "native_discovery": "not_checked", "native_trust": "not_checked",
             "native_delivery": "not_verified", "model_consumption": "not_verified",

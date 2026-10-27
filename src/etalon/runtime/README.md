@@ -276,3 +276,50 @@ CLI 同源入口为 `etalon action prepare|submit|result|events --config <JSON>`
 标 additive=false。未知结果保留费用与预留；结果读取、reconcile 不自动重派。
 当前 detached worker 依赖 Linux `/proc` 身份和 POSIX 锁，Windows prepare 返回明确能力限制；
 本地 fixture 的 in-process worker 测试不证明 Windows 后台作业、真实 PRISM 或真实宿主调用。
+
+## 可选的研究结果接线
+
+已有方法选择只需绑定一次，计算仍走相同 action/workflow，不增加模型调用：
+
+```python
+from etalon.research.method_execution import bind_method_execution, collect_method_results
+
+# node 是现有 workflow node；也可传现有 etalon-action/1 request。
+node = bind_method_execution(node, entry=entry, branch_id=branch,
+                             use_refs=[published_method_use_ref])
+```
+
+MethodVersion、MethodUse 来自当前入口可见的既有记录。`use_refs` 是宿主实际选择，
+可含部分采用；运行收据另行记录真正执行的参数、源文件身份、结果、失败和成本。
+不会把安装或读取 skill 当作实际采用，也不自动制造科学评价。
+需要比较时可传 `evaluation_plan_ref`，结果节点会保留该评价入口。
+
+worker 完成绑定节点后自动消费其终局事件，使用已有 publication 更新 checkpoint 和入口。
+运行成功与发布成功分开；`workflow status` 的 `research_feedback` 显示发布进展。
+发布失败不会重算、改变成功结果或阻止后继数值节点。重入时使用：
+
+```python
+delivery = collect_method_results(runtime_workspace, job_id)
+# has_more=true 时继续读取下一页；每次调用有界，不遍历全部历史。
+```
+
+该调用只补归档，不提交科学计算。已有 `workflow reconcile` 也会收尾发布。
+原始输出保留在 native archives；发布的执行收据保留其路径、身份、原生收据及完整成本依据。
+读取反馈可对节点的 receipt_ref 使用现有 `read_evidence(view="artifact", selector={"json":
+["/result/summary", "/result/feedback", "/costs"]})`；按需展开原件，避免重复注入全量结果。
+
+需要评价时，`execution_evaluation_inputs(writer_journal, entry=entry, node_refs=[...])`
+把已发布收据接到既有可写 journal，返回可直接传给 `composition.record_evaluation` 的
+结果、成本、实际使用和节点引用。评价仍使用原协议、分组和显式结论；未运行对照保持未知。
+有决策价值的认识再交 `improvement.record_experience`，引用该评价及已有结果，
+不为每次调用强制生成经验或改写 skill。给有科学意义的一批计算绑定节点，避免逐分子发布。
+
+采用、保留或回退仍由 `resolve_method_revision` 表达。要在当前任务使用该选择，
+把它的返回值作为 `method_resolution` 传给已有 `publish_task_workset`，并发布显式选择了
+对应方法的 workset；之后照常 `resume_publication`。同一次入口切换带上方法选择、
+评价/决策引用和工作集。它不修改全局默认，也不启动下一次计算。
+
+新上下文的 `bind_method_execution(..., use_refs=None)` 可直接取当前工作集关联的选择；
+`method.run` 的 `method_id` 须匹配所选方法 ID 或名称，避免把另一个程序误标成已采用方法。
+其他选择可显式传 use_refs。改变算法/参数后重新绑定，已运行节点保持原归属。
+没有 `research` 绑定的调用与旧版相同；研究归属不改变计算的 plan_id，重放不能重标旧计算。

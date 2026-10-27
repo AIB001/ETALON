@@ -4,6 +4,7 @@ import json
 import os
 from pathlib import Path
 import shutil
+import subprocess
 import sys
 import tomllib
 
@@ -36,16 +37,22 @@ def test_move_rebind_preserves_sources_and_same_hook_definition(tmp_path, consum
     assert report["hook_transport"] == "mcp_tool"
     name = ".codex/hooks.json" if consumer == "codex" else ".claude/settings.json"
     hook_bytes = (before / name).read_bytes()
-    assert str(tmp_path).encode() not in hook_bytes
-    assert all(handler["type"] == "mcp_tool" for groups in json.loads(hook_bytes)["hooks"].values()
-               for group in groups for handler in group["hooks"])
+    if consumer == "codex":
+        assert str(tmp_path).encode() not in hook_bytes
+    for event, groups in json.loads(hook_bytes)["hooks"].items():
+        expected = "command" if consumer == "claude" and event == "SessionStart" else "mcp_tool"
+        assert all(handler["type"] == expected for group in groups for handler in group["hooks"])
     after = tmp_path / "moved project"
     shutil.copytree(before, after)
     next_entry = tmp_path / "next.json"
     next_entry.write_text("{}", encoding="utf-8")
     rebound = host.install(after, research_entry=next_entry, host=consumer)
     assert rebound["status"] == "rebound"
-    assert (after / name).read_bytes() == hook_bytes
+    if consumer == "codex":
+        assert (after / name).read_bytes() == hook_bytes
+    else:
+        startup = json.loads((after / name).read_bytes())["hooks"]["SessionStart"][0]["hooks"][0]
+        assert startup["args"] == [str(after / ".etalon/research-hook.py")]
     binding = json.loads((after / ".etalon/research-hook-binding.json").read_bytes())
     assert binding["entry"] == str(next_entry)
     assert Path(binding["state_dir"]).is_relative_to(after)
@@ -55,6 +62,21 @@ def test_move_rebind_preserves_sources_and_same_hook_definition(tmp_path, consum
     assert host.doctor(after)["native_delivery"] == "not_verified"
     assert ("PostToolUseFailure" in host.doctor(after)["configured_events"]) == (consumer == "claude")
     assert Path(rebound["operation"], "receipt.json").is_file()
+
+
+def test_claude_startup_delivers_context_without_mcp_client(graph_case, tmp_path):
+    project = tmp_path / "claude-startup"
+    host.install(project, research_entry=graph_case["entry"], host="claude")
+    handler = json.loads((project / ".claude/settings.json").read_text())["hooks"]["SessionStart"][0]["hooks"][0]
+    env = {k: v for k, v in os.environ.items() if k != "ETALON_RESEARCH_HOOK_BINDING"}
+    result = subprocess.run([handler["command"], *handler["args"]],
+        input=json.dumps({"hook_event_name": "SessionStart", "session_id": "startup-without-mcp",
+                          "source": "startup"}).encode(), capture_output=True, env=env, timeout=30)
+    assert result.returncode == 0, result.stderr.decode(errors="replace")
+    context = json.loads(result.stdout)["hookSpecificOutput"]["additionalContext"]
+    payload = json.loads(context.split("\n", 1)[1])
+    assert payload["delivery"]["mode"] == "baseline"
+    assert "resume_frontier" in payload["context"]
 
 
 def test_install_preserves_user_changes_and_arbitrary_project(tmp_path):

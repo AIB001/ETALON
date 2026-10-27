@@ -35,3 +35,16 @@ def test_task_switch_requires_full_packet_and_damaged_receipt_fails():
     previous['packet']['residuals']=['tampered']
     with pytest.raises(ValueError,match='receipt changed'):
         decision_packet(result,previous=previous)
+
+
+def test_current_feedback_and_predecessor_link_survive_compact_delivery():
+    result=fixture()
+    result['work']['work'].update(feedback={'conditions':{'fixture':'local'},
+        'untested':[{'measurement':None}], 'selected_action':None},
+        previous_work={'path':'/fixture/previous.json','identity':{'sha256':'fixture','bytes':123}})
+    full,receipt=decision_packet(result)
+    assert full['packet']['feedback']==result['work']['work']['feedback']
+    assert full['packet']['previous_work']==result['work']['work']['previous_work']
+    result['work']['work']['feedback']={'counter_cases':['new negative evidence'], 'selected_action':None}
+    delta,_=decision_packet(result,previous=receipt)
+    assert delta['changed']['feedback']['counter_cases']==['new negative evidence']

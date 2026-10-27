@@ -169,6 +169,9 @@ def main(argv: list[str] | None = None) -> int:
     from etalon.runtime.cli import register as register_runtime
 
     register_runtime(sub)
+    from etalon.research.cli import register as register_research
+
+    register_research(sub)
 
     plan = sub.add_parser("plan", help="render a funnel's shape, cost and refusals")
     plan.add_argument("--pool", type=int, default=750_000, help="molecules entering the funnel")

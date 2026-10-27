@@ -57,7 +57,7 @@ def _texts(values):
     return values
 
 
-def _command(command):
+def _command(command, *, verify_inputs=True):
     if command is None:
         return
     if (not isinstance(command, dict) or set(command) != {"argv", "cwd", "reason", "ends_when", "inputs"}
@@ -71,8 +71,43 @@ def _command(command):
     for item in command["inputs"]:
         if not isinstance(item, dict) or set(item) != {"path", "identity"} or not Path(item["path"]).is_absolute():
             raise EvidenceError("next segment inputs require absolute path and identity")
-        if file_identity(item["path"]) != item["identity"]:
+        if verify_inputs and file_identity(item["path"]) != item["identity"]:
             raise EvidenceError("next segment input changed")
+
+
+def _feedback(feedback, next_segment, *, check_choice=True):
+    """Keep domain feedback open; check only an explicitly chosen runnable option.
+
+    Producers can supply contrasts, conditions, counter_cases, untested cases,
+    and any task-specific scope/fidelity/fallback metadata. No field here makes
+    an unrun comparison measured or a proposed replacement validated. Optional
+    actions have an id and ordinary command (null for retain/no execution).
+    The producer/host selects one; this adapter never ranks or executes them.
+    """
+    if feedback is None:
+        return
+    if not isinstance(feedback, dict):
+        raise EvidenceError("producer feedback must be a compact object")
+    actions = feedback.get("actions", [])
+    if not isinstance(actions, list):
+        raise EvidenceError("feedback actions must be a list")
+    by_id = {}
+    for action in actions:
+        if (not isinstance(action, dict) or not isinstance(action.get("id"), str)
+                or not action["id"].strip() or "command" not in action):
+            raise EvidenceError("feedback action requires an id and command (null for no execution)")
+        if action["id"] in by_id:
+            raise EvidenceError("feedback action ids must be unique")
+        # Unchosen proposals can describe unavailable or untested branches.
+        # Only the actual next_segment requires live dependency verification.
+        _command(action["command"], verify_inputs=False)
+        by_id[action["id"]] = action
+    selected = feedback.get("selected_action")
+    if selected is not None:
+        if not isinstance(selected, str) or selected not in by_id:
+            raise EvidenceError("selected feedback action must identify an offered action")
+        if check_choice and by_id[selected]["command"] != next_segment:
+            raise EvidenceError("selected feedback action must match next_segment")
 
 
 def validate_work(work):
@@ -85,6 +120,22 @@ def validate_work(work):
     if not isinstance(work.get("completed_refs"), list):
         raise EvidenceError("completed references must be a list")
     _command(work.get("next_segment"))
+    # A host may replace a note's next_action after reading producer feedback.
+    # That current choice wins; the producer's reported choice stays intact.
+    # Producer results themselves always require a consistent selected action.
+    _feedback(work.get("feedback"), work.get("next_segment"), check_choice="source_record_id" not in work)
+    return _compact(work)
+
+
+def _note_choice(work):
+    """Label a later host override without changing the historical feedback."""
+    feedback = work.get("feedback") or {}
+    selected = feedback.get("selected_action")
+    work.pop("feedback_selection_status", None)
+    if selected is not None:
+        chosen = next(action for action in feedback["actions"] if action["id"] == selected)
+        work["feedback_selection_status"] = (
+            "current" if chosen["command"] == work["next_segment"] else "superseded_by_host")
     return _compact(work)
 
 
@@ -96,6 +147,28 @@ def work_from_entry(goal, entry, *, branch_id=None, residuals=None, next_segment
     authority is inferred from a goal. Pauses remain on the original checkpoint.
     """
     entry = Path(entry).absolute()
+    from .notes import ENTRY, entry_value, read_entry
+    if entry_value(entry).get("schema") == ENTRY:
+        current = read_entry(entry, branch_id=branch_id, verify_originals=False)
+        note = current["note"]
+        if next_segment is None and isinstance(note.get("next_action"), dict) and "argv" in note["next_action"]:
+            next_segment = note["next_action"]
+        work = {"schema": WORK, "task_id": note["task_id"], "branch_id": note["branch_id"],
+            "goal": goal, "question": note["question"], "change_when": change_when,
+            "source_entry": str(entry), "source_record_id": current["record_id"],
+            "last_summary": note["summary"], "next_action": note.get("next_action"),
+            "branch_state": note.get("state", note.get("status", "unspecified")),
+            "completed_refs": [{"entry": str(entry), "record_id": current["record_id"]}],
+            "residuals": list(residuals) if residuals is not None else note.get("residuals", [note["question"]]),
+            "next_segment": next_segment, "status_guards": note.get("status_guards", []),
+            "pending_handles": note.get("pending_handles", []), "execution_permission": "not_granted"}
+        # Preserve current task constraints without copying a note's full memory.
+        for key in ("conditions", "authorization", "constraints", "controls", "budget", "other_pauses", "state", "status"):
+            if key in note:
+                work[key] = note[key]
+        if note.get("feedback") is not None:
+            work["feedback"] = note["feedback"]
+        return _note_choice(validate_work(work))
     workspace, ref = load_entry(entry)
     checkpoint = read_content(workspace, ref)
     branches = checkpoint["branches"]
@@ -122,7 +195,7 @@ def result_file(path, name, *, source_kind="existing_real_artifact", role="diagn
 
 def _validate_result(result):
     required = {"summary", "measurements", "failures", "decision", "residuals", "next_segment"}
-    allowed = required | {"candidate_index", "decisive_examples", "originals", "costs", "counter_refs", "method_refs"}
+    allowed = required | {"candidate_index", "decisive_examples", "originals", "costs", "counter_refs", "method_refs", "feedback"}
     if not isinstance(result, dict) or not required <= set(result) or set(result) - allowed:
         raise EvidenceError("producer must return summary, measurements, failures, decision, residuals and next_segment")
     if not isinstance(result["summary"], str) or not result["summary"].strip():
@@ -133,6 +206,7 @@ def _validate_result(result):
         raise EvidenceError("producer requires the existing explicit scientific decision")
     _texts(result["residuals"])
     _command(result["next_segment"])
+    _feedback(result.get("feedback"), result["next_segment"])
     for original in result.get("originals", []):
         if file_identity(original["path"]) != original["identity"]:
             raise EvidenceError("producer original changed")
@@ -140,6 +214,74 @@ def _validate_result(result):
         if not isinstance(result.get(key, []), list):
             raise EvidenceError("producer " + key + " must be a list")
     return _compact(result)
+
+
+def _publish_note_result(result, work, directory, *, entry, operation_id):
+    """Update the existing note memory through its ordinary patch publisher."""
+    from .notes import ENTRY, entry_journal, entry_value, patch_progress, read_note
+    target = entry_value(entry)
+    if target.get("schema") != ENTRY or target["task_id"] != work["task_id"]:
+        raise EvidenceError("research work must remain in its selected note task")
+    parent_id = work.get("source_record_id")
+    if not parent_id:
+        raise EvidenceError("note work requires its source record identity")
+    parent = read_note(entry_journal(target), parent_id, verify_originals=False)["note"]
+    if parent["branch_id"] != work["branch_id"]:
+        raise EvidenceError("research work must remain in its selected note branch")
+    pins = {name: {"path": str(directory / filename), "identity": file_identity(directory / filename)}
+        for name, filename in (("segment_result", "result.json"), ("segment_work", "work.json"),
+                               ("segment_input_work", "input-work.json"))}
+    originals = {original["name"]: {"path": original["path"], "identity": original["identity"]}
+        for original in result.get("originals", [])}
+    if set(originals) & set(pins):
+        raise EvidenceError("producer original name conflicts with segment output")
+    refs = {**originals, **pins}
+    counters = list(parent.get("counterevidence", []))
+    for counter in result.get("counter_refs", []):
+        if isinstance(counter, dict) and set(counter) == {"publication_ref"}:
+            if counter["publication_ref"] not in refs:
+                raise EvidenceError("counter reference names an absent segment output")
+            counter = refs[counter["publication_ref"]]
+        if not isinstance(counter, dict) or not {"path", "identity"} <= set(counter):
+            raise EvidenceError("note counters require original pins or named segment outputs")
+        if counter not in counters:
+            counters.append(counter)
+    # Replace generated navigation artifacts, preserving actual prior evidence
+    # and every counter. Full older work remains in the immutable prior note.
+    previous_pins = [parent.get(key) for key in pins]
+    evidence = [ref for ref in parent.get("evidence", []) if ref not in previous_pins]
+    for ref in refs.values():
+        if ref not in evidence:
+            evidence.append(ref)
+    patch = {"summary": result["summary"], "measurements": result["measurements"],
+        "failures": result["failures"], "decision": result["decision"],
+        "residuals": result["residuals"], "next_action": result["next_segment"],
+        "feedback": result.get("feedback"), "completed_refs": [pins["segment_result"]],
+        "evidence": evidence, "counterevidence": counters, **pins}
+    # Scientific branch progress can resolve an active question, but cannot
+    # revoke an explicit pause/stop represented in the current note controls.
+    stopped = {"paused", "stopped", "cancelled", "canceled"}
+    if not any(isinstance(parent.get(key), str) and parent[key] in stopped for key in ("state", "status")):
+        patch["state"] = result["decision"]["state"]
+    if "method_refs" in result:
+        patch["method_refs"] = result["method_refs"]
+    published = patch_progress(entry, patch, branch_id=work["branch_id"], expected_record=parent_id,
+        publication_id=operation_id)
+    # current_record_id is the active branch; a producer can publish a background
+    # branch too. Check its actual head when determining historical replay.
+    current = entry_value(entry)
+    head = current.get("branches", {current["branch_id"]: current["record_id"]}).get(work["branch_id"])
+    receipt = {"schema": "etalon-segment-publication/1", "status": "published" if head == published["record_id"] else "superseded",
+        "entry": str(entry), "operation_id": operation_id, "record_id": published["record_id"],
+        "work": pins["segment_work"], "result": pins["segment_result"]}
+    receipt_path = directory / "publication-receipt.json"
+    if receipt_path.exists():
+        prior = _read(receipt_path)
+        if {k: v for k, v in prior.items() if k != "status"} != {k: v for k, v in receipt.items() if k != "status"}:
+            raise EvidenceError("saved segment publication receipt changed")
+    else:
+        _save(receipt_path, receipt)
+    return receipt
 
 
 def publish_segment_result(result, work, directory, *, entry, operation_id, parent_entry=None):
@@ -156,11 +298,31 @@ def publish_segment_result(result, work, directory, *, entry, operation_id, pare
         _save(directory / "result.json", compact)
         successor = {**work, "residuals": result["residuals"], "next_segment": result["next_segment"],
             "branch_state": result["decision"]["state"], "last_summary": result["summary"],
-            "completed_refs": [*work["completed_refs"],
+            "completed_refs": [
                 {"path": str(directory / "result.json"), "identity": file_identity(directory / "result.json")}]}
+        # Keep the latest actionable feedback, rather than silently applying an
+        # older choice to changed conditions. Earlier lessons remain reachable.
+        successor.pop("feedback", None)
+        if result.get("feedback") is not None:
+            successor["feedback"] = result["feedback"]
+        work_path = directory / "work.json"
+        legacy = work_path.exists() and "previous_work" not in _read(work_path)
+        if legacy:
+            # Replay pre-feedback publications byte-for-byte; only new segments
+            # use bounded lineage. _save still rejects any changed old content.
+            successor["completed_refs"] = [*work["completed_refs"], *successor["completed_refs"]]
+        else:
+            _save(directory / "input-work.json", work)
+            successor["previous_work"] = {"path": str(directory / "input-work.json"),
+                "identity": file_identity(directory / "input-work.json")}
         _save(directory / "work.json", validate_work(successor))
+        if "source_record_id" in work:
+            return _publish_note_result(result, work, directory, entry=entry, operation_id=operation_id)
         publication_results = [result_file(directory / "result.json", "segment_result", bindings={"schema": RESULT}),
             result_file(directory / "work.json", "segment_work", bindings={"schema": WORK}), *result.get("originals", [])]
+        if not legacy:
+            publication_results.append(result_file(directory / "input-work.json", "segment_input_work",
+                bindings={"schema": WORK, "work_role": "predecessor"}))
         decision = {**result["decision"], "basis_refs": [*result["decision"]["basis_refs"],
             {"publication_ref": "segment_result"}, {"publication_ref": "segment_work"}]}
         stable = {"entry": str(entry), "operation_id": operation_id, "branch_id": work["branch_id"],
@@ -236,6 +398,15 @@ def run_segment(work, directory, *, producer, method_id, entry, operation_id, pa
         intent = directory / "producer-intent.json"
         response = directory / "producer-response.json"
         existed = intent.exists()
+        if not existed and "source_record_id" in work:
+            from .notes import ENTRY, entry_value
+            if not Path(entry).exists():
+                raise EvidenceError("note segments publish to an existing note entry")
+            target = entry_value(entry)
+            if (target.get("schema") != ENTRY or target["task_id"] != work["task_id"]
+                    or target.get("branches", {target["branch_id"]: target["record_id"]}).get(work["branch_id"])
+                    != work["source_record_id"]):
+                raise EvidenceError("note entry changed before producer execution")
         _save(intent, identity)
         reused = response.exists()
         if reused:
@@ -277,6 +448,36 @@ def read_work(entry, *, branch_id=None):
     This verifies original bytes and checkpoint navigation; its command remains a
     host-selected option. It does not confer execution authority or run anything.
     """
+    from .notes import ENTRY, entry_journal, entry_value, read_entry
+    metadata = entry_value(entry)
+    if metadata.get("schema") == ENTRY:
+        current = read_entry(entry, branch_id=branch_id, verify_originals=False)
+        note = current["note"]
+        pin = note.get("segment_work")
+        if pin is None:
+            work = work_from_entry(note.get("goal", note["question"]), entry, branch_id=note["branch_id"])
+        else:
+            resolver = entry_journal(metadata).resolver
+            path = resolver.resolve(pin["path"], **pin["identity"]) if resolver is not None else pin["path"]
+            if file_identity(path) != pin["identity"] or pin["identity"]["bytes"] > MAX_BYTES:
+                raise EvidenceError("current segment work changed or exceeds 64 KiB")
+            work = _read(path)
+            if (work.get("task_id"), work.get("branch_id")) != (note["task_id"], note["branch_id"]):
+                raise EvidenceError("work object belongs to another task or branch")
+            work = {**work, "source_entry": str(Path(entry).absolute()), "source_record_id": current["record_id"],
+                "last_summary": note["summary"], "residuals": note.get("residuals", work["residuals"]),
+                "feedback": note.get("feedback"), "next_action": note.get("next_action"),
+                "branch_state": note.get("state", note.get("status", work["branch_state"])),
+                "next_segment": note["next_action"] if isinstance(note.get("next_action"), dict)
+                    and "argv" in note["next_action"] else None}
+            for key in ("conditions", "authorization", "constraints", "controls", "budget", "other_pauses",
+                        "state", "status", "pending_handles", "status_guards"):
+                if key in note:
+                    work[key] = note[key]
+            work = _note_choice(validate_work(work))
+        return {"work": work, "work_ref": pin or {"record_id": current["record_id"]},
+            "record_id": current["record_id"], "entry": str(Path(entry).absolute()),
+            "execution_permission": "not_granted"}
     workspace, ref = load_entry(entry)
     checkpoint = read_content(workspace, ref)
     branches = checkpoint["branches"]
@@ -301,6 +502,8 @@ def read_work(entry, *, branch_id=None):
     for candidate in candidates:
         record = read_evidence(workspace, candidate, view="record", limit=1).get("record", {})
         declared = record.get("bindings", {}).get("schema")
+        if record.get("bindings", {}).get("work_role") == "predecessor":
+            continue
         if declared is not None and declared != WORK:
             continue
         item = read_evidence(workspace, candidate, view="artifact", limit=32768)

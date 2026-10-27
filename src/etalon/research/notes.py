@@ -20,7 +20,7 @@ SCHEMA = "etalon-research-note/1"
 ENTRY = "etalon-note-entry/1"
 _CONTINUATION = ("question", "summary", "conditions", "status", "state", "outcome",
                  "pending_handles", "completed_refs", "completed", "wait_for", "next_action",
-                 "invalid_when", "reconsider_when", "residuals")
+                 "invalid_when", "reconsider_when", "residuals", "feedback")
 _ORIGINAL_CHECKS = ContextVar("etalon_note_publication_originals", default=None)
 _CONTROLS = ("state", "status", "authorization", "constraints", "controls", "budget",
              "other_pauses", "pending_handles", "conditions", "completed_refs", "completed", "wait_for")
@@ -273,7 +273,7 @@ def _brief_note(response, note, *, max_bytes, response_envelope=None):
     response.update(view="brief", knowledge={})
     keys = ("question", "summary", "conditions", "status", "state", "outcome", "limits",
         "invalid_when", "reconsider_when", "residuals", "lesson", "knowledge", "decision",
-        "next_action", "completed_refs", "completed", "wait_for", "capability_id", "method_choices", "result_read", "scientific_result")
+        "next_action", "completed_refs", "completed", "wait_for", "capability_id", "method_choices", "result_read", "scientific_result", "feedback")
     pending = [k for k in keys if k in note]
     response["coverage"] = {"knowledge": "partial", "note_identity": "verified",
         "originals": "verified" if response["originals_verified"] is not None else "not_read",
@@ -313,7 +313,7 @@ def _brief_note(response, note, *, max_bytes, response_envelope=None):
                 pending.append(key)
                 update()
 
-    deferred = {"knowledge", "scientific_result", "result_read", "method_choices"}
+    deferred = {"knowledge", "scientific_result", "result_read", "method_choices", "feedback"}
     offer([key for key in pending if key not in deferred])
     for key, page in response["references"].items():
         for index, ref in enumerate(note[key]):
@@ -336,6 +336,65 @@ def _brief_note(response, note, *, max_bytes, response_envelope=None):
 def original(path):
     path = Path(path).absolute()
     return {"path": str(path), "identity": file_identity(path)}
+
+
+def _original_selection(entry, pointer, branch_id):
+    # Read only the immutable note, never every cited support/counter original.
+    value = entry_value(entry)
+    result = read_entry(value, branch_id=branch_id, verify_originals=False)
+    pin = {k: value[k] for k in ("schema", "database", "task_id", "workspace", "source_id",
+                                 "definitions", "definitions_digest") if k in value}
+    result["details"] = {**pin, "branch_id": result["branch_id"], "record_id": result["record_id"]}
+    selected = _selected(result["note"], pointer)
+    return result, selected, entry_journal(value).resolver
+
+
+def open_original(entry, pointer, *, branch_id=None, max_loaded_bytes=256 * 1024 * 1024):
+    """Open one exact original reference selected from a note by JSON Pointer.
+
+    with open_original(pin, '/evidence/0') as saved:
+        decisions = saved.array('decisions')  # loaded once; ordinary NumPy below
+    """
+    from .evidence import OriginalReader
+    _, ref, resolver = _original_selection(entry, pointer, branch_id)
+    if not isinstance(ref, dict) or not {"path", "identity"} <= ref.keys():
+        raise ValueError("select an original reference with path and identity")
+    return OriginalReader(ref, resolver=resolver, max_loaded_bytes=max_loaded_bytes)
+
+
+def read_original(entry, pointer, *, branch_id=None, selector=None, offset=0, limit=20, max_bytes=16384):
+    """Bounded metadata or selected saved results; defaults never dump arrays."""
+    with open_original(entry, pointer, branch_id=branch_id) as saved:
+        return saved.read(selector=selector, offset=offset, limit=limit, max_bytes=max_bytes)
+
+
+def resolve_method(entry, pointer, *, branch_id=None, max_bytes=16384):
+    """Describe exactly the host-selected method; never import, invoke or rank it.
+
+    Existing descriptor fields remain unchanged. An optional source original or
+    source_ref JSON Pointer is resolved through the existing relocation map.
+    Signature/conditions are producer declarations, not validated science.
+    """
+    from .evidence_refs import resolve_artifact
+    result, description, resolver = _original_selection(entry, pointer, branch_id)
+    if not isinstance(description, dict):
+        raise ValueError("select an explicit method description object")
+    output = {"record_id": result["record_id"], "details": result["details"],
+              "pointer": pointer, "description": description,
+              "execution_performed": False, "signature_verification": "producer_declared"}
+    source = description.get("source")
+    if isinstance(description.get("source_ref"), str) and description["source_ref"].startswith("/"):
+        source = _selected(result["note"], description["source_ref"])
+    if isinstance(source, dict) and {"path", "identity"} <= source.keys():
+        path = resolve_artifact({"path": source["path"], **source["identity"]}, resolver=resolver)
+        output["source"] = {"path": str(path), "identity": source["identity"], "verification": "verified"}
+    else:
+        output["source_verification"] = "not_resolved; use the descriptor's explicit source reader"
+    if type(max_bytes) is not int or not 4096 <= max_bytes <= 65536:
+        raise ValueError("method max_bytes must be 4096..65536")
+    if byte_size(output) > max_bytes:
+        raise ValueError("method description exceeds response bound; select its fields with read_entry")
+    return output
 
 
 def _verify(note, resolver=None):
@@ -478,6 +537,65 @@ def save_progress(journal, entry, note, *, directory=None, activate=True, public
             activate=activate, publication_id=publication_id)
     finally:
         _ORIGINAL_CHECKS.reset(token)
+
+
+def patch_progress(entry, patch, *, branch_id=None, expected_record=None,
+                   publication_id=None, evidence=(), counterevidence=(), activate=True):
+    """Publish changed fields through the same entry used by CLI and producers.
+
+    Omitted fields (including contrary evidence) remain. A replay is rebuilt
+    against its original publication, not a newer host interpretation. File
+    arguments append originals without callers reading or copying old arrays.
+    This function publishes data; it does not choose or execute an action.
+    """
+    entry = Path(entry).absolute()
+    locator = _read(entry)
+    if isinstance(locator, dict) and set(locator) == {"entry"}:
+        target = Path(locator["entry"])
+        entry = target if target.is_absolute() else entry.parent / target
+    if not isinstance(patch, dict):
+        raise ValueError("progress patch must be an object")
+    reserved = {"schema", "task_id", "branch_id", "publication_id", "supersedes"}
+    if reserved.intersection(patch):
+        raise ValueError("patch replaces note fields only; use a complete note for task/branch metadata")
+    value = entry_value(entry)
+    branch = branch_id or value["branch_id"]
+    heads = value.get("branches", {value["branch_id"]: value["record_id"]})
+    if branch not in heads:
+        raise ValueError("patch requires an existing branch; use a complete note for a new branch")
+    journal = entry_journal(value)
+    prior = None
+    if publication_id is not None:
+        with journal.store.connection() as db:
+            rows = db.execute("SELECT key FROM metadata WHERE json_extract(body,'$.bindings.schema')=? "
+                "AND json_extract(body,'$.bindings.task_id')=? AND json_extract(body,'$.bindings.branch_id')=? "
+                "AND json_extract(body,'$.bindings.publication_id')=?",
+                (SCHEMA, value["task_id"], branch, publication_id)).fetchall()
+        if len(rows) > 1:
+            raise ValueError("publication identity has conflicting records")
+        if rows:
+            prior = read_note(journal, rows[0][0].removeprefix("research:"), verify_originals=False)["note"]
+    base = prior or read_note(journal, heads[branch], verify_originals=False)["note"]
+    note = {**base, **patch}
+    note.pop("publication_id", None)
+    note["supersedes"] = base.get("supersedes", []) if prior else [heads[branch]]
+    if expected_record is not None:
+        parents = prior.get("supersedes", []) if prior else [heads[branch]]
+        if expected_record not in parents:
+            raise ValueError("entry changed; expected record is not the current publication parent")
+        note["supersedes"] = [expected_record]
+    for role, paths in (("evidence", evidence), ("counterevidence", counterevidence)):
+        for path in paths:
+            ref = original(path)
+            refs = note.setdefault(role, [])
+            if ref not in refs:
+                refs.append(ref)
+    rid = save_progress(entry_journal(value, read_only=False), entry, note,
+                        activate=activate, publication_id=publication_id)
+    current = entry_value(entry)
+    return {"ok": True, "entry": str(entry), "task_id": value["task_id"],
+            "branch_id": branch, "record_id": rid,
+            "current_record_id": current["record_id"], "execution_performed": False}
 
 
 def _save_progress(journal, entry, note, *, directory, activate, publication_id):
@@ -663,7 +781,7 @@ def read_entry(entry, *, verify_originals=None, conditions=None, definitions=Non
         response["knowledge"] = {k: note[k] for k in (
             "question", "summary", "conditions", "status", "outcome", "lesson", "knowledge",
             "invalid_when", "reconsider_when", "residuals", "next_action", "pending_handles",
-            "capability_id", "method_choices") if k in note}
+            "capability_id", "method_choices", "feedback") if k in note}
         response["branches"] = heads
         response["details"] = {"schema": ENTRY, "database": value["database"],
             "task_id": note["task_id"], "branch_id": selected, "record_id": heads[selected]}

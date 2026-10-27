@@ -65,11 +65,20 @@ def _research_hook_files(host: str, source: dict, config: dict,
                 group["matcher"] = TOOL_PATTERN
             hooks[event] = [group]
         config_name = ".codex/hooks.json" if host == "codex" else ".claude/settings.json"
-        return {config_name: _json({"hooks": hooks}),
+        files = {config_name: _json({"hooks": hooks}),
                 ".etalon/research-hook-binding.json": _json({
                     "schema": "etalon-research-hook-binding/1", "host": host,
                     "entry": config["entry"], "state_dir": config["state_dir"],
                     "max_bytes": 16384})}
+        if host == "claude":
+            # Claude fires SessionStart before an MCP client exists. Reuse the
+            # same reader through the command adapter for startup/compaction;
+            # ordinary tool events keep their persistent MCP transport.
+            startup = _research_hook_files(host, source, config, "command")
+            hooks["SessionStart"] = json.loads(startup[config_name])["hooks"]["SessionStart"]
+            files[config_name] = _json({"hooks": hooks})
+            files[".etalon/research-hook.py"] = startup[".etalon/research-hook.py"]
+        return files
     launcher = ("# Generated from the active ETALON installation.\n"
                 "import sys\n"
                 f"sys.path.insert(0, {source['pythonpath']!r})\n"

@@ -28,17 +28,18 @@ python -m etalon.host install --host codex --target /absolute/new/project --rese
 python -m etalon.host doctor --target /absolute/new/project
 ```
 
-Use `--host claude` for Claude Code. This ships native `mcp_tool` hooks plus a
-portable installation recipe. After moving the unchanged export, repeat install
+Use `--host claude` for Claude Code. SessionStart uses the command adapter because
+Claude has no MCP client at that event; later hooks use native `mcp_tool` calls.
+Both transports share the same research reader and delivery state. After moving the unchanged export, repeat install
 with the new target and server-local entry to rebind the runtime and paths.
 Interrupted installs retain their intent and can resume with the same request.
 No dependencies, global configuration or host trust are automatically changed.
 The final host must discover and review its project/hooks. `doctor` checks
 configuration integrity, not actual delivery or model consumption.
 
-MCP may not be ready for the initial SessionStart (Claude skips that startup hook).
-Give the new chat the entry; its first ETALON read can receive the baseline via
-PreToolUse. After compaction, read the current summary and `resume_frontier`, then
+Claude's startup adapter delivers the entry before the first tool call. The first
+matching PreToolUse can also prepare a missing baseline. After compaction, read
+the current summary and `resume_frontier`, then
 the relevant latest-step/output originals. Preserve workset changes, counterevidence,
 pending tasks and pauses. Hook receipts alone do not prove these were understood.
 The existing repository `.mcp.json` is a historical Linux/conda configuration;

@@ -100,11 +100,14 @@ def workflow(value: dict) -> dict:
         raise ValueError("a workflow needs 1–100 explicit nodes")
     nodes, known = [], set()
     for raw in value["nodes"]:
-        fields(raw, {"id", "operation", "arguments"}, {"depends_on", "resources"})
+        fields(raw, {"id", "operation", "arguments"}, {"depends_on", "resources", "research"})
         key = identifier(raw["id"])
         if key in known or key in {"finish", "pause"} or raw["operation"] not in describe():
             raise ValueError("duplicate node or unregistered operation")
         validate_arguments(raw["operation"], raw["arguments"], deferred=True)
+        if "research" in raw:
+            from etalon.research.method_execution import validate_binding
+            validate_binding(raw["research"], raw)
         deps = raw.get("depends_on", [])
         if not isinstance(deps, list) or any(not isinstance(d, str) for d in deps):
             raise ValueError("depends_on must be a list of node identifiers")
@@ -129,6 +132,7 @@ def workflow(value: dict) -> dict:
         if (len(nodes) != 1 or nodes[0]["id"] != "action" or nodes[0]["depends_on"]
                 or nodes[0]["operation"] != action["operation"]
                 or canonical(nodes[0]["arguments"]) != canonical(action["arguments"])
+                or nodes[0].get("research") != action.get("research")
                 or nodes[0]["resources"] != action["limits"] or limits != action["limits"]
                 or max_seconds != action["max_seconds"]):
             raise ValueError("action metadata differs from its single executable node")
@@ -143,4 +147,5 @@ def workflow(value: dict) -> dict:
 def plan_id(spec: dict, inputs: dict) -> str:
     # Attribution is durable metadata, not an executable input or a new dispatch identity.
     semantic = {key: value for key, value in spec.items() if key != "action_request"}
+    semantic["nodes"] = [{k: v for k, v in n.items() if k != "research"} for n in spec["nodes"]]
     return digest({"spec": semantic, "inputs": inputs})

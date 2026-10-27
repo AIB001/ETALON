@@ -243,7 +243,7 @@ def node_step(*, task_id, question, branch_id, node_id, capability_id=None, work
 
 def record_evaluation(journal, plan_ref, *, directory, source_id, source_kind, result_refs=(),
                       accounting_refs=(), assessment_role="diagnostic", conclusion, scope,
-                      use_refs=(), node_refs=()):
+                      use_refs=(), node_refs=(), external_workspace=None):
     """Reuse MethodEvaluation's existing diagnostic/independent validation checks.
 
     No auto-promotion or optimizer is called. A failed step append leaves the
@@ -276,6 +276,7 @@ def record_evaluation(journal, plan_ref, *, directory, source_id, source_kind, r
             "detail": {"plan_ref": plan_ref, "evaluation_ref": ref}}
     if use_refs or node_refs:
         step["detail"].update(use_refs=list(use_refs), node_refs=list(node_refs))
-    step_id = record_content(journal, step, directory, source_id=source_id, source_kind=source_kind)
+    step_id = record_content(journal, step, directory, source_id=source_id, source_kind=source_kind,
+                             external_workspace=external_workspace)
     return {"evaluation_ref": ref, "step_ref": journal_ref(journal, step_id, source_id=source_id),
             "promotion": "not_performed", "optimization": "not_triggered"}

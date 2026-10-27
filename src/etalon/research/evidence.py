@@ -553,6 +553,248 @@ def read_evidence(workspace=None, ref=None, *, view="record", member=None, selec
                           max_bytes=max_bytes, response_envelope=response_envelope)
 
 
+class OriginalReader:
+    """Explicit local analysis scope over one pinned original, with no global cache.
+
+    Opening checks its bytes using the existing artifact resolver. A scope owns
+    its file handle and selected decompressed NPZ members; repeated array(key)
+    calls reuse that member. File changes detected during the scope invalidate
+    it. The caller chooses what to compute, and only read/index bound stdout.
+    """
+
+    def __init__(self, original, *, resolver=None, max_loaded_bytes=256 * 1024 * 1024):
+        self.original = json.loads(canonical(original))
+        self.format = Path(self.original["path"]).suffix.lower()
+        self.resolver = resolver
+        _bounded_int(max_loaded_bytes, 1, 2**63 - 1, "max_loaded_bytes")
+        self.max_loaded_bytes = max_loaded_bytes
+        self._handle = None
+        self._zip = None
+        self._arrays = {}
+        self._headers = {}
+        self._json = None
+        self._json_loaded = False
+
+    @staticmethod
+    def _stamp(stat):
+        return (stat.st_dev, stat.st_ino, stat.st_size, stat.st_mtime_ns, stat.st_ctime_ns)
+
+    def __enter__(self):
+        import os
+        from .evidence_refs import resolve_artifact
+        if self._handle is not None:
+            raise EvidenceError("original reader is already open")
+        self.path = resolve_artifact({"path": self.original["path"], **self.original["identity"]},
+                                     resolver=self.resolver)
+        self._stamp_at_open = self._stamp(self.path.stat())
+        self._handle = self.path.open("rb")
+        self._handle_stamp = self._stamp(os.fstat(self._handle.fileno()))
+        try:
+            # Windows path stat and handle fstat expose different ctime meanings.
+            if self._handle_stamp[:4] != self._stamp_at_open[:4]:
+                raise EvidenceError("original changed while opening read scope")
+            self._check()
+            if self.format == ".npz":
+                import zipfile
+                self._zip = zipfile.ZipFile(self._handle)
+                members = self._zip.namelist()
+                if len(members) != len(set(members)):
+                    raise EvidenceError("NPZ has duplicate members")
+                self._members = {name[:-4]: name for name in members if name.endswith(".npy")}
+            return self
+        except BaseException:
+            self.close()
+            raise
+
+    def _check(self):
+        import os
+        if self._handle is None:
+            raise EvidenceError("use the original reader inside its with scope")
+        if (self._stamp(self.path.stat()) != self._stamp_at_open
+                or self._stamp(os.fstat(self._handle.fileno())) != self._handle_stamp):
+            raise EvidenceError("original changed during read scope")
+
+    def close(self):
+        if self._zip is not None:
+            self._zip.close()
+            self._zip = None
+        if self._handle is not None:
+            self._handle.close()
+            self._handle = None
+        self._arrays.clear()
+        self._headers.clear()
+        self._json = None
+        self._json_loaded = False
+
+    def __exit__(self, kind, value, traceback):
+        try:
+            self._check()
+        finally:
+            self.close()
+
+    def json(self):
+        """Load this JSON once in memory; no body is automatically printed."""
+        self._check()
+        if not self._json_loaded:
+            if self.original["identity"]["bytes"] > min(MAX_SOURCE_BYTES, self.max_loaded_bytes):
+                raise EvidenceError("JSON original exceeds read bound; use byte pages or a scientific reducer")
+            self._handle.seek(0)
+            try:
+                self._json = json.loads(self._handle.read().decode("utf-8-sig"))
+            except (ValueError, UnicodeError) as exc:
+                raise EvidenceError("selected original is not UTF-8 JSON") from exc
+            self._json_loaded = True
+            self._check()
+        return self._json
+
+    def _header(self, key):
+        self._check()
+        if self._zip is None or key not in self._members:
+            raise EvidenceError("NPZ member is absent: " + str(key))
+        if key not in self._headers:
+            import numpy as np
+            with self._zip.open(self._members[key]) as member:
+                version = np.lib.format.read_magic(member)
+                if version not in {(1, 0), (2, 0)}:
+                    raise EvidenceError("unsupported NPY header version; use the producer's reader")
+                read = (np.lib.format.read_array_header_1_0 if version == (1, 0)
+                        else np.lib.format.read_array_header_2_0)
+                shape, fortran, dtype = read(member)
+            from math import prod
+            self._headers[key] = {"key": key, "shape": list(shape), "dtype": str(dtype),
+                "fortran_order": fortran, "object_dtype": dtype.hasobject,
+                "array_bytes": prod(shape) * dtype.itemsize,
+                "compressed_bytes": self._zip.getinfo(self._members[key]).compress_size}
+        return self._headers[key]
+
+    def array(self, key):
+        """Load only the explicitly named NPZ member once, without pickle."""
+        header = self._header(key)
+        if key not in self._arrays:
+            if header["object_dtype"]:
+                raise EvidenceError("object arrays require the producer's explicit reader; pickle is disabled")
+            used = sum(array.nbytes for array in self._arrays.values())
+            if used + header["array_bytes"] > self.max_loaded_bytes:
+                raise EvidenceError("selected NPZ members exceed max_loaded_bytes")
+            import numpy as np
+            with self._zip.open(self._members[key]) as member:
+                array = np.lib.format.read_array(member, allow_pickle=False)
+            array.setflags(write=False)
+            self._arrays[key] = array
+            self._check()
+        return self._arrays[key]
+
+    def _response(self):
+        self._check()
+        return {"original": self.original, "verification": "verified_on_open",
+                "scope": "one explicit original; unselected bodies not delivered"}
+
+    def index(self, *, offset=0, limit=20, max_bytes=16384):
+        """Return paged keys/shapes/types, never result arrays or JSON values."""
+        _bounded_int(offset, 0, 2**63 - 1, "offset")
+        _bounded_int(limit, 1, 50, "limit")
+        _bounded_int(max_bytes, 4096, MAX_READ_BYTES, "max_bytes")
+        result = self._response()
+        result.update(format=self.format.lstrip("."), items=[], offset=offset)
+        if self._zip is not None:
+            keys = list(self._members)
+            describe = self._header
+        elif self.format == ".json":
+            value = self.json()
+            from .selection import pointer
+            keys = list(value) if isinstance(value, dict) else list(range(len(value))) if isinstance(value, list) else []
+            def describe(key):
+                item = value[key]
+                return {"pointer": pointer("", key), "kind": type(item).__name__,
+                        **({"items": len(item)} if isinstance(item, (list, dict)) else {})}
+        else:
+            keys = []
+            result["read"] = "select bytes, or use the producer's reader for this format"
+        result.update(total_items=len(keys), next_offset=offset if offset < len(keys) else None)
+        for key in keys[offset:offset + limit]:
+            result["items"].append(describe(key))
+            end = offset + len(result["items"])
+            result["next_offset"] = end if end < len(keys) else None
+            if byte_size(result) > max_bytes:
+                result["items"].pop()
+                result["next_offset"] = offset + len(result["items"])
+                break
+        if byte_size(result) > max_bytes or (not result["items"] and offset < len(keys)):
+            raise EvidenceError("original index exceeds max_bytes; increase the bound")
+        return result
+
+    def read(self, *, selector=None, offset=0, limit=20, max_bytes=16384):
+        """Select JSON pointers, byte pages, or explicit NPZ member slices.
+
+        NPZ example: {"npz": [{"key": "scores", "slice": [[0, 3], 1]}]}.
+        Each axis is an integer, null (all), or [start, stop, optional step].
+        Omitting slice selects that member; output is still byte bounded.
+        """
+        _bounded_int(offset, 0, 2**63 - 1, "offset")
+        _bounded_int(limit, 1, 32768, "limit")
+        _bounded_int(max_bytes, 4096, MAX_READ_BYTES, "max_bytes")
+        if selector is None:
+            return self.index(offset=offset, limit=min(limit, 50), max_bytes=max_bytes)
+        result = self._response()
+        if selector == "bytes":
+            self._handle.seek(offset)
+            data = self._handle.read(limit)
+            end = offset + len(data)
+            result["fragment"] = {"encoding": "base64", "content": base64.b64encode(data).decode(),
+                "offset": offset, "next_offset": end if end < self.original["identity"]["bytes"] else None,
+                "total_bytes": self.original["identity"]["bytes"]}
+            return _fit_read(result, max_bytes, None)
+        if not isinstance(selector, dict) or len(selector) != 1:
+            raise EvidenceError("select bytes, json pointers, or npz member slices")
+        if "json" in selector:
+            pointers = selector["json"]
+            if (not isinstance(pointers, list) or not 1 <= len(pointers) <= 16
+                    or any(not isinstance(p, str) or not p.startswith("/") for p in pointers)
+                    or len(set(pointers)) != len(pointers)):
+                raise EvidenceError("JSON selection requires 1..16 distinct explicit pointers")
+            return project_json(result, self.json(), pointers, offset=offset, limit=min(limit, 50), max_bytes=max_bytes)
+        requests = selector.get("npz")
+        if not isinstance(requests, list) or not 1 <= len(requests) <= 16:
+            raise EvidenceError("NPZ selection requires 1..16 explicit member slices")
+        if offset or limit != 20:
+            raise EvidenceError("NPZ selection uses explicit slices, not offset/limit")
+        result["selection"] = {"format": "npz", "items": [], "unselected_content": "not_delivered"}
+        for request in requests:
+            if not isinstance(request, dict) or set(request) - {"key", "slice"} or not isinstance(request.get("key"), str):
+                raise EvidenceError("NPZ selection requires key and optional slice")
+            axes = request.get("slice", [])
+            if not isinstance(axes, list):
+                raise EvidenceError("NPZ slice must be a list of explicit axes")
+            index = []
+            for axis in axes:
+                if axis is None or type(axis) is int:
+                    index.append(slice(None) if axis is None else axis)
+                elif (isinstance(axis, list) and len(axis) in {2, 3}
+                        and all(value is None or type(value) is int for value in axis)
+                        and (len(axis) == 2 or axis[2] != 0)):
+                    index.append(slice(*axis))
+                else:
+                    raise EvidenceError("each NPZ axis is an integer, null, or [start, stop, step]")
+            array = self.array(request["key"])
+            try:
+                selected = array[tuple(index)]
+            except (IndexError, ValueError) as exc:
+                raise EvidenceError("invalid NPZ slice: " + str(exc)) from exc
+            if selected.size > max_bytes or selected.nbytes > max_bytes * 8:
+                raise EvidenceError("selected array exceeds response bound; select a smaller slice")
+            row = {"key": request["key"], "slice": axes, "shape": list(selected.shape),
+                   "dtype": str(selected.dtype), "value": selected.tolist()}
+            result["selection"]["items"].append(row)
+            try:
+                if byte_size(result) > max_bytes:
+                    raise EvidenceError("selected array exceeds response bound; select a smaller slice")
+            except (TypeError, ValueError) as exc:
+                if isinstance(exc, EvidenceError):
+                    raise
+                raise EvidenceError("array values are not JSON compatible; use array(key) in Python") from exc
+        return result
+
+
 def _read_evidence(workspace, ref, *, view="record", member=None, selector=None, offset=0, limit=100,
                    collection=None, max_bytes=MAX_READ_BYTES, response_envelope=None):
     """Internal single-call reuse; callers must validate the collected view's lifetime."""

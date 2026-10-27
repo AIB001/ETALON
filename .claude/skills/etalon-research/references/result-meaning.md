@@ -29,6 +29,19 @@ identities as `definitions`, with actual evidence/counterevidence refs. Save thr
 and the next choice. Do not append run histories to SKILL.md or copy raw arrays
 into the note. A read recipe may select fields without loading the entire result.
 
+When later decisions need intermediate calculations, retain their useful arrays,
+case IDs and masks in an ordinary original artifact. Name the axes, units, input
+identity and parameter meaning alongside it; a key such as `score` alone does not
+carry those definitions. A compact note can point to this file and to selected
+summary/exception fields. Save the values needed for continuation, rather than
+every temporary array or a second copy of the history.
+
+A callable descriptor can live at any named note pointer and include its pinned
+source, function/signature, input/output meaning, parameters and applicability.
+`notes.resolve_method` exposes that declaration; `notes.open_original` reads its
+saved numeric inputs in code. This is an optional delivery convention, not a new
+registry, execution engine or proof that the method transfers to another task.
+
 For task-specific skill/memory selection, `make_task_profile(definitions=...)`
 and resource parts' `definitions` bind the meaning used. Changed or missing
 definitions cannot silently activate old judgments; a genuinely independent

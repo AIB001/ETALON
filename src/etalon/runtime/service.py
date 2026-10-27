@@ -56,6 +56,10 @@ def observe(workspace: str | Path, job_id: str) -> dict:
 
 def status(workspace: str | Path, job_id: str) -> dict:
     job = RuntimeStore(workspace).get(job_id)
+    feedback = RuntimeStore(workspace).job_root(job_id) / "research-feedback.json"
+    if feedback.exists():
+        from etalon.runtime.files import _read
+        job["research_feedback"] = _read(feedback)
     job["worker_alive"] = process.alive(job["process_identity"])
     job["heartbeat_age_seconds"] = None if job["heartbeat"] is None else max(0, time.time() - job["heartbeat"])
     job["needs_reconciliation"] = (job["state"] in {"starting", "running", "cancel_requested"} and not job["worker_alive"]
@@ -225,6 +229,23 @@ def _over_budget(job: dict) -> bool:
     return any(v["remaining"] is not None and v["remaining"] < -1e-12 for v in job["resources"].values())
 
 
+def _publish_research(store: RuntimeStore, job_id: str) -> None:
+    """Optional archival work cannot change or retry a numerical outcome."""
+    if not any(n["definition"].get("research") for n in store.get(job_id)["nodes"]):
+        return
+    from etalon.research.method_execution import collect_method_results
+    from etalon.runtime.files import _save
+    try:
+        result = collect_method_results(store.workspace, job_id)
+    except Exception as error:
+        result = {"status": "pending", "error": str(error), "execution": "not_performed"}
+    try:
+        _save(store.job_root(job_id) / "research-feedback.json", result, replace=True)
+    except OSError:
+        import logging
+        logging.getLogger(__name__).exception("Research delivery status could not be saved; runtime receipts remain authoritative")
+
+
 def _complete(ctx: Context, node: dict, parameters: dict, result: dict, *, recovered: bool = False) -> bool:
     operation = node["definition"]["operation"]
     kwargs = {}
@@ -239,13 +260,16 @@ def _complete(ctx: Context, node: dict, parameters: dict, result: dict, *, recov
     except Exception as error:
         evidence = {"verified": False, "result_sha256": digest(result), "recovered": recovered}
         ctx.store.finish_node(ctx.job, ctx.epoch, ctx.node, result, evidence, spent, basis=basis, state="failed", error=str(error))
+        _publish_research(ctx.store, ctx.job)
         return False
     evidence["recovered"] = recovered
     ctx.store.finish_node(ctx.job, ctx.epoch, ctx.node, result, evidence, spent, basis=basis)
+    _publish_research(ctx.store, ctx.job)
     return True
 
 
 def _control(store: RuntimeStore, job_id: str, epoch: int, checkpoint, *, transport=None) -> None:
+    _publish_research(store, job_id)
     while True:
         checkpoint()
         from etalon.runtime.revisions import apply_pending
@@ -566,6 +590,7 @@ def reconcile(workspace: str | Path, job_id: str, *, resume: bool = False, reaso
             store.set_state(job_id, epoch, state)
     if state == "queued":
         _launch(store, job_id)
+    _publish_research(store, job_id)
     return status(workspace, job_id)
 
 

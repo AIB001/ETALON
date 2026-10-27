@@ -284,7 +284,7 @@ def inspect_attempt(directory):
     if (root / "finished.json").exists():
         return {**base, "state": "finished-unpublished", "finished": _check_finished(root, intent, identity)}
     live = []
-    for name in ("worker", "native"):
+    for name in ("worker", "native", "launcher"):
         path = root / (name + ".json")
         if path.exists():
             record = _read(path)
@@ -336,6 +336,13 @@ def launch_detached_attempt(directory, request, command, *, cwd=None, outputs=No
         with (root / "worker.log").open("ab") as log:
             process = subprocess.Popen([sys.executable, "-m", __name__, "_worker", str(root)],
                 cwd=body["cwd"], stdin=subprocess.DEVNULL, stdout=log, stderr=log, close_fds=True, **options)
+        # The child may need more than the short bootstrap wait to import its
+        # environment. Preserve the creation identity already known to its
+        # parent, without equating a live launcher with completed computation.
+        launched = process_identity(process.pid)
+        if launched is not None:
+            _save(root / "launcher.json", {"intent_digest": digest(body),
+                "launch_nonce": body["launch_nonce"], "process": launched})
         # Retain the parent-side Popen while it starts; no native completion wait.
         for _ in range(100):
             if (root / "worker.json").exists() or process.poll() is not None:

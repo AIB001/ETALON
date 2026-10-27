@@ -7,12 +7,79 @@ host; scientific meaning remains with the caller.
 from __future__ import annotations
 
 import json
+import os
 from pathlib import Path
 import time
 
 from .files import EvidenceError
 
 SCHEMA = "etalon-host-wait/1"
+
+
+def inspect_host_process(record):
+    """Prove a recorded local host exited, or leave its outcome unknown.
+
+    A failed identity read alone is not exit evidence (it may mean access was
+    denied). This reader never signals a process and never inspects job children.
+    A different creation identity proves the old PID occupant has exited.
+    """
+    from .native import process_identity
+
+    saved = record.get("identity") if isinstance(record, dict) else None
+    platform = "windows" if os.name == "nt" else "linux"
+    keys = ("pid", "platform", "creation_filetime") if platform == "windows" else (
+        "pid", "platform", "boot_id", "start_ticks")
+    if (not isinstance(saved, dict) or saved.get("platform") != platform
+            or type(saved.get("pid")) is not int or saved["pid"] < 1
+            or record.get("pid") != saved["pid"] or any(saved.get(k) is None for k in keys)
+            or type(saved.get("creation_filetime" if platform == "windows" else "start_ticks")) is not int
+            or (platform == "linux" and (not isinstance(saved.get("boot_id"), str) or not saved["boot_id"]))):
+        return {"state": "unknown", "basis": "missing_or_invalid_process_identity"}
+    current = process_identity(saved["pid"])
+    if current is not None:
+        if any(current.get(key) != saved[key] for key in keys):
+            return {"state": "exited", "basis": "different_creation_identity", "observed": current}
+        if current.get("alive") is False:
+            return {"state": "exited", "basis": "observed_terminated_identity", "observed": current}
+        if current.get("alive") is True and os.name != "nt":
+            return {"state": "running", "basis": "same_live_creation_identity", "observed": current}
+    if os.name == "nt":
+        import ctypes
+        from ctypes import wintypes
+        kernel = ctypes.WinDLL("kernel32", use_last_error=True)
+        kernel.OpenProcess.argtypes = [wintypes.DWORD, wintypes.BOOL, wintypes.DWORD]
+        kernel.OpenProcess.restype = wintypes.HANDLE
+        kernel.WaitForSingleObject.argtypes = [wintypes.HANDLE, wintypes.DWORD]
+        kernel.WaitForSingleObject.restype = wintypes.DWORD
+        kernel.CloseHandle.argtypes = [wintypes.HANDLE]
+        handle = kernel.OpenProcess(0x100000, False, saved["pid"])  # SYNCHRONIZE only
+        if not handle:
+            error = ctypes.get_last_error()
+            # A nonzero nonexistent PID produces ERROR_INVALID_PARAMETER.
+            return {"state": "exited" if error == 87 else "unknown",
+                    "basis": "pid_absent" if error == 87 else "process_open_unavailable", "os_error": error}
+        try:
+            result = kernel.WaitForSingleObject(handle, 0)
+            if result == 258 and current is not None and current.get("alive") is True:
+                return {"state": "running", "basis": "same_live_creation_identity", "observed": current}
+            # Waiting also distinguishes an exited Windows process whose actual
+            # return code happens to equal STILL_ACTIVE (259).
+            return {"state": "exited" if result == 0 else "unknown",
+                    "basis": "signaled_process_handle" if result == 0 else "process_identity_unavailable"}
+        finally:
+            kernel.CloseHandle(handle)
+    # A missing /proc mount is a failed observation, not an absent host.
+    try:
+        (Path("/proc") / "self" / "stat").read_text()
+    except OSError as exc:
+        return {"state": "unknown", "basis": "proc_unavailable", "os_error": exc.errno}
+    try:
+        (Path("/proc") / str(saved["pid"])).stat()
+    except FileNotFoundError:
+        return {"state": "exited", "basis": "pid_absent"}
+    except OSError as exc:
+        return {"state": "unknown", "basis": "process_stat_unavailable", "os_error": exc.errno}
+    return {"state": "unknown", "basis": "process_identity_unavailable"}
 
 
 def validate_wait(body):

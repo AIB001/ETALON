@@ -78,11 +78,14 @@ def _action_request(request: dict) -> dict:
     import json
     from etalon.runtime.schema import amounts, fields, text
     fields(request, {"schema", "request_id", "operation", "arguments", "limits"},
-           {"max_seconds", "method_use_refs", "evidence_refs"})
+           {"max_seconds", "method_use_refs", "evidence_refs", "research"})
     if request["schema"] != "etalon-action/1":
         raise ValueError("action schema must be etalon-action/1")
     identifier(request["request_id"])
     operations.validate_arguments(request["operation"], request["arguments"])
+    if "research" in request:
+        from etalon.research.method_execution import validate_binding
+        validate_binding(request["research"], request)
     normalized = json.loads(canonical(request))
     normalized["limits"] = amounts(request["limits"])
     normalized["max_seconds"] = request.get("max_seconds", 3600)
@@ -125,6 +128,8 @@ def prepare_action(request: dict) -> dict:
                        "arguments": request["arguments"], "resources": request["limits"]}],
             "limits": request["limits"], "max_seconds": request["max_seconds"],
             "controller": {"mode": "ordered"}, "action_request": request, "action_binding": binding}
+    if "research" in request:
+        spec["nodes"][0]["research"] = request["research"]
     planned = service.plan(spec)
     import os
     return {"schema": "etalon-prepared-action/1", **planned, "request": request,
@@ -157,7 +162,7 @@ def submit_action(request: dict, *, workspace: str | Path, plan_id: str) -> dict
     if old is not None:
         previous_request = old["plan"]["spec"].get("action_request")
         semantics = lambda value: {k: v for k, v in (value or {}).items()
-                                   if k not in {"request_id", "method_use_refs", "evidence_refs"}}
+                                   if k not in {"request_id", "method_use_refs", "evidence_refs", "research"}}
         if old["plan_id"] != plan_id or canonical(semantics(previous_request)) != canonical(semantics(request)):
             raise StateError("action request conflict: existing request has different frozen semantics")
         if old["state"] == "queued":
