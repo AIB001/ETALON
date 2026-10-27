@@ -1,88 +1,47 @@
 ---
 name: etalon-research-decision
-description: Use domain knowledge, local rules and experience to resolve an open scientific choice, propose an executable method or experiment, and let normal results change the next action.
+description: Turn an unresolved scientific result into a discriminating next action or a useful local method change, using the evidence already available for the research choice.
 ---
 
-# Turn an unexplained result into a useful next action
+# Choose the next useful research action
 
-Identify the choice that new evidence could change: objective, current state,
-controllable operations, observable and constraints. Use the existing methods,
-rules and relevant experience selected by `etalon-research-context`. A settled
-choice can proceed directly; no diagnostic study is required before normal work.
+Name the choice, the observation it depends on and the uncertainty that matters.
+Use current knowledge, relevant contrary results and the existing unfinished work.
+A settled choice can proceed directly; no diagnostic stage is required.
+For a stable method, execute the useful batch and read its concise outcomes;
+do not repeatedly reread its source or reassess every successful item. An
+unexpected outcome or changed input meaning justifies opening the relevant
+detail. Unknown improvement potential remains open, not a reason to stall the
+research or a declaration that optimization is worthless.
 
-Reason from domain knowledge and actual observations about what is missing. A
-failed expectation may reflect an omitted state variable, a wrong mechanism, an
-implementation error or an inadequate observable. Compare these explanations
-where they lead to different actions; keep unknown or coexisting causes possible.
-Record the concise scientific rationale and testable consequences, not a transcript
-of internal reasoning. Scientific importance and present solving ability differ.
+Relate plausible mechanisms or implementation problems to different observable
+outcomes. Choose an authorized action that advances the task or separates those
+explanations: a candidate, local algorithm, changed representation, calculation
+or workflow. State the result that would continue, change or stop that choice.
+Keep unknown and coexisting causes possible; a failed result should inform the
+next action rather than automatically reject the whole method.
 
-Choose an action that advances the research or resolves the consequential unknown.
-This can be a new local algorithm, a different problem representation, an altered
-workflow, another molecular candidate or a targeted calculation. Separate fixed
-structure from variable state, use known invariants, or compose compatible local
-operations when that removes repeated work. When outcomes would alter the choice,
-state what would continue, change or stop for each relevant result. An interval,
-trend or conditional prediction can suffice; unknowns need not become numbers.
+Run through existing component interfaces, retaining native handles and exact
+inputs. Compare useful output, failed attempts and complete costs under the same
+external endpoint. Prediction match, numerical convergence and scientific benefit
+are distinct. Reuse does not create a replicate; exploratory use can precede a
+broader adoption claim. Keep unresolved counterevidence and scope with the result.
+Use the task's selected skill/memory parts and exact metric/state definitions;
+the same label in another task does not establish the same meaning. When creating
+an operation, emit its actual inputs/changes and observations through the existing
+result interface. Keep measured outcomes, criterion results and host interpretation
+separate. For the compact producer contract, optionally retrieve
+`etalon_skill_read(slug="research", member="references/result-meaning.md")`.
 
-Let a useful lesson change the actual candidate generator, search, sampling,
-ranking or next operation. Keep repeatable parsing and calculation in the owning
-component or versioned method; keep conditions, exceptions and supporting results
-in linked rule/experience Artifacts. Skills retain the way to use and improve
-these resources, not the growing case history. A better task-local algorithm is
-valuable even when transfer to another task is unsupported.
+Save meaningful findings and the next choice through the existing entry/journal
+interfaces. Continue executable unfinished work within current authorization;
+retain a real pending handle when an external result is needed. A user pause
+remains authoritative.
 
-Execute the selected method through existing component interfaces. Use
-`etalon-method-configuration` when compiling a parameter or workflow change;
-a saved rule or method reference does not run a predictor or set a parameter.
-Bind actual inputs, dependencies and method version, keeping chemical state,
-graph, coordinates, receptor frame and preparation distinct. For synthesis,
-distinguish a proposed route and conditions from evidence that a product formed.
-
-Prefer feedback from the work already needed for the task. Compare the relevant
-normal results with the expectation and the fixed external quality endpoint.
-Successful prediction, numerical convergence, physical validity and useful
-scientific output are separate judgments. Retain failed work, unknown outcomes
-and full costs; compare like objectives rather than rewarding a changed score.
-For a budget comparison, preserve what each choice could see before its outcome.
-Count rule discovery, preparation, failed attempts, model use and continuation
-alongside execution; show one-time learning and repeated-use costs separately.
-Shared reference calculations are measured evaluation cost, not free evidence
-available to a prospective selector. Reusing a result produces no new replicate.
-The optional [action-learning adapter](references/action-learning.md) binds selected
-rules to the action and extracts exact feedback; the host interprets the mechanism
-and chooses what to do next. It does not require an extra Probe or comparison run.
-
-Use a discrepancy to revise the affected assumption, method or choice. Preserve
-unexplained correlated results, conflicting predictions and outside-scope cases
-as research leads. A match may justify continuing the action without settling
-every alternative; a mismatch does not automatically reject the whole method.
-Feed a concrete change to `etalon-skill-improvement`, or retain the current choice
-when nothing useful changed. Exploratory use can precede broader confirmation.
-
-For saved decisions and candidate bridges, read
-[SDK entrypoints](references/contracts.md). Prospective claims need the actual
-pre-outcome evidence window; retrospective material stays seen. For recurring
-rules, dependencies or split/merge changes, read
-[model revisions](references/model-revisions.md). These optional records preserve
-the decision and evidence; they do not establish independent benefit or adoption.
-
-Keep lessons scoped to the conditions actually supported. Publish meaningful
-results, next choices and pending actions through existing step/checkpoint/entry
-interfaces so continuation can use completed work. Search, Judge, Quick and Deep
-remain revisitable or skippable; a missing brief does not demand another run.
-
-When a choice depends jointly on a binding pose and synthesis feasibility, use
-[pose and route choice](references/pose-route-choice.md). Shared molecular identity
-allows selective reuse; it does not make a supported route a verified pose or a
-good pose evidence that the chemical transformation will succeed.
-
-When the research objective remains unfinished and an executable next action is
-within existing authorization and resource limits, save meaningful progress and
-continue. A phase result, checkpoint or completed subgoal is not a reason to wait
-for approval. Use `active`/`proceed` for a chosen continuation; use `waiting`/`defer`
-for a real external result, resource or evidence dependency, recording its handle
-or observable resumption condition. Reuse completed work before dispatching more.
-Unsettled scientific questions can support further investigation; stop or defer
-the affected work when it truly needs unavailable input, exceeds its authorized
-scope or resources, meets the task's completion condition, or the user pauses it.
+Read [decision details](references/decision-details.md) for scientific boundaries,
+[the action-learning adapter](references/action-learning.md) to connect selected
+rules to ordinary feedback, or [saved decision contracts](references/contracts.md)
+when recording a structured choice. These are optional tools, not prerequisites.
+`skill-dependencies.json` lists other skills that can help when the question calls
+for them; retrieve a named member through `etalon_skill_read` if needed rather
+than searching the system for an absent skill directory.

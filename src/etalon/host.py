@@ -6,12 +6,13 @@ manifest detects drift without silently replacing an older capability version.
 
 from __future__ import annotations
 
+from etalon.runtime.files import _consumer_lock
+
 import argparse
 import json
 import os
 import base64
 import shlex
-from contextlib import contextmanager
 import sys
 from pathlib import Path, PurePosixPath
 
@@ -105,15 +106,19 @@ def _research_hook_files(host: str, source: dict, config: dict,
 
 
 def _payload(host: str, research_hooks: dict | None = None, task_workset: dict | None = None,
-             *, hook_transport: str = "command", portable: bool = False) -> tuple[dict, dict[str, bytes]]:
+             *, hook_transport: str = "command", portable: bool = False,
+             selected_skills: list[str] | None = None) -> tuple[dict, dict[str, bytes]]:
     if host not in {"codex", "claude"}:
         raise ValueError("host must be codex or claude")
     source = _source()
     files: dict[str, bytes] = {}
     versions = []
     directory = ".agents/skills" if host == "codex" else ".claude/skills"
+    if task_workset is not None and selected_skills is not None:
+        raise ValueError("choose task_workset or selected_skills, not both")
     if task_workset is None:
-        selection = [{"slug": slug} for slug in skills.WORKFLOWS]
+        selection = [{"slug": slug} for slug in
+                     skills._selection(selected_skills, skills.WORKFLOWS, "selected_skills")]
     else:
         from etalon.research.meta_context import selected_skill_members
         task_workspace = None
@@ -122,19 +127,8 @@ def _payload(host: str, research_hooks: dict | None = None, task_workset: dict |
             task_workspace = resolve_entry(research_hooks["entry"])[0]
         selection = selected_skill_members(task_workset, workspace=task_workspace)
         files[".etalon/task-workset.json"] = _json(task_workset)
-    output_names = set()
-    for chosen in selection:
-        slug = chosen["slug"]
-        manifest, contents = skills.snapshot(slug, bundle_ref=chosen.get("bundle_ref"))
-        if manifest["name"] in output_names:
-            raise ValueError("selected skills collide in the host export directory")
-        output_names.add(manifest["name"])
-        if chosen.get("manifest_sha256", manifest["manifest_sha256"]) != manifest["manifest_sha256"]:
-            raise ValueError("workset skill version changed before export")
-        if "members" in chosen:
-            if not set(chosen["members"]) <= set(contents):
-                raise ValueError("workset skill member is unavailable")
-            contents = {name: contents[name] for name in chosen["members"]}
+    closure, snapshots = skills.snapshot_selection(selection)
+    for manifest, contents in snapshots:
         versions.append(manifest)
         for name, data in contents.items():
             files[f"{directory}/{manifest['name']}/{name}"] = data
@@ -194,6 +188,11 @@ def _payload(host: str, research_hooks: dict | None = None, task_workset: dict |
     if task_workset is not None:
         manifest["task_workset_digest"] = task_workset["digest"]
         manifest["skill_selection"] = selection
+    if selected_skills is not None:
+        manifest["selected_skills"] = list(selected_skills)
+        manifest["skill_selection"] = selection
+    if closure != selection:
+        manifest["skill_dependency_closure"] = closure
     return manifest, files
 
 
@@ -206,7 +205,7 @@ def _root(target: str | Path) -> Path:
 
 def export(target: str | Path, host: str = "codex", *, research_entry: str | Path | None = None,
            task_workset: dict | None = None, hook_transport: str = "command",
-           portable: bool = False) -> dict:
+           portable: bool = False, selected_skills: list[str] | None = None) -> dict:
     """Create an export without modifying existing projects or host settings."""
     root = _root(target)
     config = None
@@ -219,7 +218,8 @@ def export(target: str | Path, host: str = "codex", *, research_entry: str | Pat
     if hook_transport not in {"command", "mcp_tool"}:
         raise ValueError("hook transport must be command or mcp_tool")
     manifest, files = _payload(host, config, task_workset,
-                               hook_transport=hook_transport, portable=portable)
+                               hook_transport=hook_transport, portable=portable,
+                               selected_skills=selected_skills)
     # Fail even for an existing empty directory. No existing role or config is replaced.
     root.mkdir(parents=True, exist_ok=False)
     for name, data in files.items():
@@ -263,7 +263,8 @@ def verify(target: str | Path) -> dict:
         if workset.get("digest") != saved["task_workset_digest"]:
             raise ValueError("export workset identity mismatch")
     current, current_files = _payload(saved["host"], saved.get("research_hooks"), workset,
-        hook_transport=saved.get("hook_transport", "command"), portable=saved.get("portable", False))
+        hook_transport=saved.get("hook_transport", "command"), portable=saved.get("portable", False),
+        selected_skills=saved.get("selected_skills"))
     files = saved.get("files")
     if not isinstance(files, dict) or not files or len(files) > 2000:
         raise ValueError("host manifest needs a bounded file inventory")
@@ -294,8 +295,9 @@ def verify(target: str | Path) -> dict:
                 unexpected.append(relative)
     # Compare the inventory as well as self-reported digests. Edited manifests
     # cannot hide a missing reference or pass as the current source version.
-    source_matches = all(saved.get(key) == current[key] for key in
-                         ("skills", "catalog_sha256", "usage_method", "files"))
+    source_matches = all(saved.get(key) == current.get(key) for key in
+                         ("skills", "catalog_sha256", "usage_method", "files",
+                          "selected_skills", "skill_selection", "skill_dependency_closure"))
     runtime_matches = saved.get("source") == current["source"]
     return {"target": str(root), "export_matches_manifest": not (changed or missing or unexpected),
             "matches_current_source": source_matches, "runtime_matches": runtime_matches,
@@ -326,30 +328,6 @@ def hook_request_id(event_ref: dict, handler_method_version: str) -> str:
     return "hook-" + skills.digest({"event_ref": event_ref, "handler_method_version": handler_method_version})
 
 
-@contextmanager
-def _consumer_lock(path: Path):
-    """One cursor writer; OS releases the lock even when a consumer crashes."""
-    lock = _root(str(path) + ".lock")
-    with lock.open("a+b") as handle:
-        if os.name == "nt":
-            import msvcrt
-            handle.seek(0)
-            if handle.read(1) == b"":
-                handle.write(b"0")
-                handle.flush()
-            handle.seek(0)
-            msvcrt.locking(handle.fileno(), msvcrt.LK_NBLCK, 1)
-        else:
-            import fcntl
-            fcntl.flock(handle.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
-        try:
-            yield
-        finally:
-            if os.name == "nt":
-                handle.seek(0)
-                msvcrt.locking(handle.fileno(), msvcrt.LK_UNLCK, 1)
-            else:
-                fcntl.flock(handle.fileno(), fcntl.LOCK_UN)
 
 
 def _save_cursor(path: Path, value: dict) -> None:
@@ -423,10 +401,11 @@ def consume_events(log_ref: dict, *, state_path: str | Path, handler_method_vers
         return {"handled": handled, "skipped": skipped, "next_cursor": state["cursor"],
                 "has_more": page["has_more"], "delivery": "at_least_once_with_stable_request_id"}
 
-def install(target, *, research_entry, host="codex", hook_transport="mcp_tool"):
+def install(target, *, research_entry, host="codex", hook_transport="mcp_tool", selected_skills=None):
     """Install or relocate an owned portable project, preserving previous bytes."""
     from etalon.host_install import install as bind
-    return bind(target, research_entry=research_entry, host=host, hook_transport=hook_transport)
+    return bind(target, research_entry=research_entry, host=host, hook_transport=hook_transport,
+                selected_skills=selected_skills)
 
 
 def doctor(target):
@@ -450,11 +429,15 @@ def main() -> int:
     create.add_argument("--hook-transport", choices=("command", "mcp_tool"), default="command")
     create.add_argument("--portable", action="store_true",
                         help="include a recipe for explicit runtime/entry rebinding")
+    create.add_argument("--skills", nargs="*", default=None,
+                        help="selected skill slugs plus required dependencies; omit for all, empty for none")
     setup = sub.add_parser("install", help="create or rebind a portable host project")
     setup.add_argument("--target", type=Path, required=True)
     setup.add_argument("--host", choices=("codex", "claude"), default="codex")
     setup.add_argument("--research-entry", type=Path, required=True)
     setup.add_argument("--hook-transport", choices=("command", "mcp_tool"), default="mcp_tool")
+    setup.add_argument("--skills", nargs="*", default=None,
+                       help="selected skills plus required dependencies; rebind preserves the saved selection")
     diagnose = sub.add_parser("doctor", help="check bindings; native trust/delivery remain separate")
     diagnose.add_argument("--target", type=Path, required=True)
     check = sub.add_parser("verify", help="check an export for changed, missing or added files")
@@ -465,10 +448,11 @@ def main() -> int:
             report = {**skills.catalog(detail=args.detail, skills=args.skills), "source": _source()}
         elif args.command == "export":
             report = export(args.target, args.host, research_entry=args.research_entry,
-                            hook_transport=args.hook_transport, portable=args.portable)
+                            hook_transport=args.hook_transport, portable=args.portable,
+                            selected_skills=args.skills)
         elif args.command == "install":
             report = install(args.target, host=args.host, research_entry=args.research_entry,
-                             hook_transport=args.hook_transport)
+                             hook_transport=args.hook_transport, selected_skills=args.skills)
         elif args.command == "doctor":
             report = doctor(args.target)
         else:

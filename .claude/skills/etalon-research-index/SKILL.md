@@ -19,6 +19,11 @@ workset is not an empty one.
 For a changed question, describe the target, chemical/template relation,
 objective, method/protocol and decision stage. SND1 is a target/series;
 PoseBusters is a dataset/evaluation context. Neither name alone determines reuse.
+Bind important metric/state meanings with `make_task_profile(definitions=...)`
+and the applicable resource part's `definitions`, using producer definition
+digests rather than matching labels. Missing legacy definitions remain unknown.
+A portable part can explicitly declare `definition:<name>` irrelevant; a changed
+meaning needs adaptation/reference or a compatible template, not silent reuse.
 Read only permitted sources; evaluation-only answers cannot become conditioning
 input just because their molecular identity matches.
 

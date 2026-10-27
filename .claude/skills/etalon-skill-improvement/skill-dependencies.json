@@ -1,0 +1,5 @@
+{
+  "schema": "etalon-skill-dependencies/1",
+  "required": ["research-decision"],
+  "optional": ["research-context", "method-configuration"]
+}

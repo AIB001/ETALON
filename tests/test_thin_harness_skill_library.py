@@ -22,7 +22,9 @@ def test_v_original_sources_complete_and_zero_argument_shape_remains_additive():
     rows = {row["slug"]: row for row in report["skills"]}
     assert OLD | MQ <= rows.keys()
     assert set(rows) == set(skills.WORKFLOWS)
-    originals = list((ROOT / ".claude/skills").glob("*/SKILL.md"))
+    # This existing authoring helper is outside the shipped runtime catalog.
+    originals = [path for path in (ROOT / ".claude/skills").glob("*/SKILL.md")
+                 if path.parent.name != "rsi-skill-creator"]
     originals += list((ROOT / "asset/molquarry/skills").glob("*/SKILL.md"))
     assert {skills.bundle_root(s) / "SKILL.md" for s in rows} == set(originals)
     for slug in MQ:

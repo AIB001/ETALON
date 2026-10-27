@@ -7,12 +7,18 @@ adapter. No execution retry, scientific router, job database, or new allocator.
 
 Usage: python examples/research_host_lifecycle.py CAPSULE.json RUN_DIRECTORY
 The wall bound admits new host turns; it never kills an in-flight host or job.
+For a narrow cwd outside a Git checkout, an existing native profile may set
+skip_git_repo_check=true. Absolute capsule paths still locate the task; this
+only disables the CLI's Git-directory check and does not change trust/permissions.
+An optional context_max_bytes profile field bounds each current-note read
+(4096..65536 bytes, default 16384); omitted controls keep explicit read recipes.
 """
 from __future__ import annotations
 
 import argparse
 from datetime import datetime, timezone
 import json
+import math
 import os
 from pathlib import Path
 import subprocess
@@ -21,6 +27,7 @@ import time
 from etalon.host import _consumer_lock
 from etalon.research.evidence_refs import EvidenceError, file_identity
 from etalon.research.execution_recovery import process_identity, _same_process
+from etalon.runtime.host_wait import inspect_wait, validate_wait
 
 CAPSULE = "etalon-host-task-capsule/1"
 CHECKPOINT = "etalon-host-checkpoint/1"
@@ -55,6 +62,13 @@ def save(path, body):
     temporary.replace(path)
 
 
+def context_budget(body):
+    value = body.get("context_max_bytes", 16384)
+    if type(value) is not int or not 4096 <= value <= 65536:
+        raise EvidenceError("context_max_bytes must be an integer in 4096..65536")
+    return value
+
+
 def validate_capsule(body):
     if not isinstance(body, dict) or body.get("schema") != CAPSULE:
         raise EvidenceError("host task capsule schema required")
@@ -66,6 +80,7 @@ def validate_capsule(body):
             raise EvidenceError(name + " must be absolute")
     if not isinstance(body.get("budget"), dict) or not body["budget"]:
         raise EvidenceError("explicit host/scientific budget required")
+    context_budget(body)
     native = body.get("native", {})
     if not isinstance(native, dict):
         raise EvidenceError("explicit native runtime profile required")
@@ -75,6 +90,8 @@ def validate_capsule(body):
     for name in ("codex_executable", "cwd"):
         if not Path(native[name]).is_absolute():
             raise EvidenceError("native " + name + " must be absolute")
+    if "skip_git_repo_check" in native and type(native["skip_git_repo_check"]) is not bool:
+        raise EvidenceError("native skip_git_repo_check must be an explicit boolean")
     bounds = body.get("bounds", {})
     for name in ("max_host_turns", "max_wall_seconds"):
         if type(bounds.get(name)) is not int or bounds[name] <= 0:
@@ -93,25 +110,42 @@ def capsule_from_goal(goal, entry, profile, *, branch_id=None, work=None):
     natural language never manufactures those fields. A published work object is
     enough for fresh hosts; original evidence remains available through its refs.
     """
-    from etalon.research.research_segment import read_work, work_from_entry, validate_work
+    from etalon.research.notes import ENTRY, entry_value, read_current
     entry = str(Path(entry).absolute())
+    max_context = context_budget(profile)
     if not isinstance(goal, str) or not goal.strip():
         raise EvidenceError("natural research goal required")
-    if work is None:
-        try:
-            work = read_work(entry, branch_id=branch_id)["work"]
-        except EvidenceError as exc:
-            if "exactly one work object" not in str(exc):
-                raise
-            work = work_from_entry(goal, entry, branch_id=branch_id)
-    validate_work(work)
-    capsule = {"schema": CAPSULE, "task_id": work["task_id"], "entry": entry,
+    value = entry_value(entry)
+    if value.get("schema") == ENTRY:
+        if work is not None:
+            raise EvidenceError("note entry uses its current reader, not a legacy work override")
+        current = read_current(entry, branch_id=branch_id, max_bytes=max_context)
+        initial = {"initial_context": current, "branch_id": current["branch_id"],
+                   "read_recipe": value.get("read_recipe"),
+                   "branch_catalog": {"entry": entry,
+                       "sdk": "etalon.research.resource_catalog.build_resource_catalog",
+                       "next_read": {"limit": 20, "max_bytes": 16384}}}
+        task_id = current["task_id"]
+    else:
+        from etalon.research.research_segment import read_work, work_from_entry, validate_work
+        if work is None:
+            try:
+                work = read_work(entry, branch_id=branch_id)["work"]
+            except EvidenceError as exc:
+                if "exactly one work object" not in str(exc):
+                    raise
+                work = work_from_entry(goal, entry, branch_id=branch_id)
+        validate_work(work)
+        task_id, initial = work["task_id"], {"initial_work": work}
+    capsule = {"schema": CAPSULE, "task_id": task_id, "entry": entry,
         "question": goal, "scope": profile.get("scope", goal),
         "authority": profile.get("authority"), "budget": profile.get("budget"),
         "completion_condition": profile.get("completion_condition", goal),
         "host_instructions": profile.get("host_instructions", "Use the current work object; batch known operations until new evidence requires judgment."),
         "native": profile.get("native"), "bounds": profile.get("bounds"),
-        "session_mode": profile.get("session_mode", "resume"), "initial_work": work}
+        "session_mode": profile.get("session_mode", "resume"), **initial}
+    if "context_max_bytes" in profile:
+        capsule["context_max_bytes"] = max_context
     return validate_capsule(capsule)
 
 
@@ -131,8 +165,14 @@ def native_argv(capsule, folder, session_id):
     native = capsule["native"]
     argv = [native["codex_executable"], "exec"]
     argv += ["resume", session_id] if session_id else ["-C", native["cwd"]]
+    if native.get("skip_git_repo_check") is True:
+        argv.append("--skip-git-repo-check")
+    # Preserve the invoking host's configured trust unless the existing profile
+    # explicitly declares these options. A goal never widens runtime authority.
+    for key in ("approval_policy", "sandbox_mode"):
+        if key in native:
+            argv += ["-c", key + "=" + json.dumps(native[key])]
     return argv + ["-m", native["model"], "-c", "model_reasoning_effort=" + json.dumps(native["reasoning_effort"]),
-        "-c", 'approval_policy="never"', "-c", 'sandbox_mode="danger-full-access"',
         "--json", "--output-schema", str(folder.parent / "checkpoint-schema.json"),
         "-o", str(folder / "checkpoint.json"), "-"]
 
@@ -155,6 +195,20 @@ capsule or adapter receipts. No full parent conversation has been injected into 
     if session_id:
         boundary += "Your previous native host process exited. Resume this SAME saved session and reread the current entry; do not repeat completed work.\n"
     context = dict(capsule)
+    if "initial_context" in context:
+        from etalon.research.notes import entry_value, read_current
+        value = entry_value(capsule["entry"])
+        context["current_context"] = read_current(capsule["entry"], branch_id=capsule["branch_id"],
+                                                max_bytes=context_budget(capsule))
+        if context["current_context"]["task_id"] != capsule["task_id"]:
+            raise EvidenceError("current note belongs to a different task")
+        context["read_recipe"] = value.get("read_recipe")
+        del context["initial_context"]
+        boundary = boundary.replace(
+            "Read the current scientific entry and the relevant originals needed for the next decision.\n",
+            "Use current_context below, its declared scope, definitions, completed results and pending handles.\n")
+        boundary += ("Expand needed omitted fields through the supplied pinned details/followup reading recipe.\n"
+                     "Omitted authorization, pauses and constraints remain unread; use followup.controls before assuming their scope.\n")
     if "initial_work" in context:
         from etalon.research.research_segment import read_work
         try:
@@ -180,6 +234,29 @@ the residual changes what is worth doing, not after every known operation. This 
 override applicable workspace instructions or prevent choosing a different scientific
 action when the compact evidence is insufficient.
 """
+    previous = folder.parent / "receipt.json"
+    if previous.exists():
+        prior = read(previous)
+        if prior.get("task_id") != capsule["task_id"]:
+            raise EvidenceError("previous lifecycle receipt belongs to a different task")
+        context["previous_checkpoint"] = prior.get("last_checkpoint")
+        if prior.get("wait_observation"):
+            context["wait_observation"] = prior["wait_observation"]
+    boundary += """For waiting on an existing job, optionally write wait.json in this turn directory:
+{"schema":"etalon-host-wait/1","poll_seconds":5,"checks":[...]}. Use checks with
+kind native_attempt, absolute path, exact request_id and attempt_id; or kind file
+with an absolute completion-marker path; or kind json_status with an absolute
+path, top-level field and disjoint running/ready/failed string lists. Missing
+files mean still running unless missing_is_running=false. Checks are read-only;
+ready/failed wakes you to interpret the result, never declares scientific success.
+Use only task-owned completion signals. A failed check stops visibly, without
+repeated LLM polling or execution retry. Legacy checkpoints without wait.json
+retain their explicit wake_after_seconds timer. Do not poll with repeated LLM turns.
+If existing child usage receipts expose exact session/usage or request IDs, you
+may link them in usage-sources.json as a list of {session_id, usage_id, receipt,
+identity}, where receipt is absolute and identity is its {sha256, bytes}. The
+receipt must contain those IDs and measured usage. Do not invent IDs or costs.
+"""
     return boundary + "Host turn artifacts: " + str(folder) + "\nTask capsule:\n" + json.dumps(context, ensure_ascii=False, indent=2)
 
 
@@ -194,7 +271,7 @@ def host_turn(capsule, folder, session_id):
               "resumed_session_id": session_id, "capsule_identity": file_identity(folder.parent / "capsule.json")}
     save(folder / "intent.json", intent)
     usages, event_counts = [], {}
-    observed_session = session_id
+    observed_session = None
     with (folder / "events.jsonl").open("x", encoding="utf-8") as events, (folder / "stderr.txt").open("x", encoding="utf-8") as errors:
         process = subprocess.Popen(argv, cwd=capsule["native"]["cwd"], stdin=subprocess.PIPE,
             stdout=subprocess.PIPE, stderr=errors, text=True, encoding="utf-8",
@@ -217,7 +294,13 @@ def host_turn(capsule, folder, session_id):
                 observed_session = event["thread_id"]
                 save(folder / "session.json", {"session_id": observed_session})
             if kind == "turn.completed":
-                usages.append(event.get("usage"))
+                usage = event.get("usage")
+                if isinstance(usage, dict):
+                    usage = dict(usage)
+                    native_id = event.get("usage_id") or event.get("request_id") or event.get("turn_id")
+                    if isinstance(native_id, str) and native_id:
+                        usage["usage_id"] = native_id
+                usages.append(usage)
         returncode = process.wait()
     checkpoint, checkpoint_error = None, None
     try:
@@ -228,7 +311,7 @@ def host_turn(capsule, folder, session_id):
         "wall_seconds": time.perf_counter() - clock, "process": identity, "pid": process.pid,
         "prompt_bytes": len(prompt.encode("utf-8")),
         "session_id": observed_session, "resumed_session_id": session_id,
-        "session_continuity_verified": not session_id or observed_session == session_id,
+        "session_continuity_verified": bool(observed_session) and (not session_id or observed_session == session_id),
         "exit_code": returncode, "usage": usages, "event_counts": event_counts,
         "checkpoint": checkpoint, "checkpoint_error": checkpoint_error,
         "checkpoint_identity": file_identity(folder / "checkpoint.json") if (folder / "checkpoint.json").exists() else None,
@@ -238,22 +321,100 @@ def host_turn(capsule, folder, session_id):
     return receipt
 
 
-def summarize(capsule, directory, receipts, stop_reason, active=None):
+def usage_summary(receipts, directory):
+    """Sum measured native usage and explicitly linked child receipts only.
+
+    usage-sources.json is an optional list of {session_id, usage_id, receipt,
+    identity}. The existing receipt must carry those exact IDs and a usage dict.
+    No directory/time inference, provider-price estimate or second cost ledger.
+    """
     keys = ("input_tokens", "cached_input_tokens", "output_tokens")
-    usage = {key: 0 for key in keys}
-    unknown = 0
-    for item in receipts:
+    totals = {key: 0 for key in keys}
+    unknown, measured, costs, records, linked, issues = 0, 0, [], {}, 0, []
+
+    def add(value, identity, *, source):
+        if identity in records:
+            if records[identity] != value:
+                issues.append({"source": source, "error": "same exact usage ID has conflicting values"})
+                records[identity] = None
+            return
+        records[identity] = value
+
+    for number, item in enumerate(receipts, 1):
         if not item["usage"]:
             unknown += 1
-        for turn in item["usage"]:
-            if not isinstance(turn, dict) or any(type(turn.get(key)) is not int for key in keys):
-                unknown += 1
-                continue
-            for key in keys:
-                usage[key] += turn[key]
-    usage["uncached_input_tokens"] = usage["input_tokens"] - usage["cached_input_tokens"]
-    usage["unknown_usage_records_or_turns"] = unknown
+        for index, turn in enumerate(item["usage"]):
+            uid = turn.get("usage_id") or turn.get("request_id") if isinstance(turn, dict) else None
+            add(turn, (item.get("session_id"), uid) if uid else (str(directory), number, index), source="host")
+    for number in range(1, len(receipts) + 1):
+        declaration = directory / ("turn-%03d" % number) / "usage-sources.json"
+        if not declaration.exists():
+            continue
+        try:
+            if declaration.stat().st_size > 65536:
+                raise EvidenceError("usage sources exceed compact bound")
+            sources = read(declaration)
+            if not isinstance(sources, list) or len(sources) > 100:
+                raise EvidenceError("usage sources must be at most 100 explicit receipt links")
+            for source in sources:
+                try:
+                    if (not isinstance(source, dict) or any(not isinstance(source.get(k), str) or not source[k]
+                            for k in ("session_id", "usage_id", "receipt")) or not Path(source["receipt"]).is_absolute()):
+                        raise EvidenceError("exact session/usage IDs and absolute receipt required")
+                    if Path(source["receipt"]).stat().st_size > 1024 * 1024:
+                        raise EvidenceError("linked usage receipt exceeds 1 MiB")
+                    if file_identity(source["receipt"]) != source.get("identity"):
+                        raise EvidenceError("linked usage receipt identity changed or absent")
+                    linked_receipt = read(source["receipt"])
+                    if not isinstance(linked_receipt, dict) or linked_receipt.get("session_id") != source["session_id"]:
+                        raise EvidenceError("linked usage receipt IDs differ")
+                    child_usage = linked_receipt.get("usage")
+                    if isinstance(child_usage, list):
+                        matching = [u for u in child_usage if isinstance(u, dict)
+                            and (u.get("usage_id") or u.get("request_id")) == source["usage_id"]]
+                        if len(matching) != 1:
+                            raise EvidenceError("linked native turn must expose exactly one matching usage ID")
+                        child_usage = matching[0]
+                    elif (linked_receipt.get("usage_id") or linked_receipt.get("request_id")) != source["usage_id"]:
+                        raise EvidenceError("linked usage receipt IDs differ")
+                    add(child_usage, (source["session_id"], source["usage_id"]), source=source["receipt"])
+                    linked += 1
+                except (OSError, ValueError, KeyError, EvidenceError) as exc:
+                    unknown += 1
+                    issues.append({"source": str(source)[:300], "error": str(exc)[:300]})
+        except (OSError, ValueError, EvidenceError) as exc:
+            unknown += 1
+            issues.append({"source": str(declaration), "error": str(exc)[:300]})
+    for value in records.values():
+        if (not isinstance(value, dict) or any(type(value.get(k)) is not int or value[k] < 0 for k in keys)
+                or value["cached_input_tokens"] > value["input_tokens"]):
+            unknown += 1
+            continue
+        measured += 1
+        for key in keys:
+            totals[key] += value[key]
+        cost = value.get("cost_usd")
+        if type(cost) in (int, float) and math.isfinite(cost) and cost >= 0:
+            costs.append(cost)
+    usage = {key: totals[key] if measured else None for key in keys}
+    usage["uncached_input_tokens"] = totals["input_tokens"] - totals["cached_input_tokens"] if measured else None
+    usage.update(unknown_usage_records_or_turns=unknown, measured_usage_records=measured,
+        coverage="partial" if unknown else "declared_records_complete",
+        cost_usd=sum(costs) if costs and len(costs) == measured and not unknown else None,
+        known_cost_usd=sum(costs) if costs else None,
+        unknown_cost_records=measured - len(costs) + unknown,
+        explicit_child_receipt_links=linked, issues=issues,
+        scope="host plus exact-ID declared child receipts; undeclared child/provider usage remains unknown")
+    return usage
+
+
+def summarize(capsule, directory, receipts, stop_reason, active=None):
+    usage = usage_summary(receipts, directory)
     checkpoint = receipts[-1]["checkpoint"] if receipts else None
+    wait_path = directory / ("turn-%03d" % len(receipts)) / "wait-state.json"
+    wait = read(wait_path) if wait_path.exists() else None
+    wait_states = [read(path) for number in range(1, len(receipts) + 1)
+        if (path := directory / ("turn-%03d" % number) / "wait-state.json").exists()]
     began = datetime.fromisoformat(read(directory / "started.json")["started_at"])
     result = {"schema": "etalon-host-lifecycle-receipt/1", "task_id": capsule["task_id"],
         "entry": capsule["entry"], "capsule_identity": file_identity(directory / "capsule.json"),
@@ -264,11 +425,66 @@ def summarize(capsule, directory, receipts, stop_reason, active=None):
         "lifecycle_elapsed_seconds": (datetime.now(timezone.utc) - began).total_seconds(),
         "elapsed_basis": "includes host processes, controller work, waits and any interval before controller reentry",
         "usage": usage, "stop_reason": stop_reason, "last_checkpoint": checkpoint,
+        "wait_observation": wait,
+        "wait_checks": sum(item.get("check_count", 0) for item in wait_states),
+        "wait_check_wall_seconds": sum(item.get("read_wall_seconds", 0) for item in wait_states),
+        "wait_check_errors": sum(item.get("check_error_count", 0) for item in wait_states),
         "active_process": active, "updated_at": stamp(),
         "turn_receipts": [str(directory / ("turn-%03d" % n) / "receipt.json") for n in range(1, len(receipts) + 1)],
         "external_compute_terminated": False, "wall_bound": "new_turn_admission_only; never kills in-flight work"}
     save(directory / "receipt.json", result)
     return result
+
+
+def await_completion(capsule, directory, receipts, began):
+    """Observe a declared existing task until it changes or this run is bounded."""
+    folder = directory / ("turn-%03d" % len(receipts))
+    declaration = folder / "wait.json"
+    if not declaration.exists():
+        return None  # Legacy explicit timer remains compatible.
+    state_path = folder / "wait-state.json"
+    previous = read(state_path) if state_path.exists() else {}
+    count, read_wall = previous.get("check_count", 0), previous.get("read_wall_seconds", 0)
+    errors, last_error = previous.get("check_error_count", 0), previous.get("last_check_error")
+    try:
+        if declaration.stat().st_size > 65536:
+            raise EvidenceError("wait declaration exceeds compact bound")
+        spec = validate_wait(read(declaration))
+        identity = file_identity(declaration)
+        if previous.get("declaration_identity") is not None and previous["declaration_identity"] != identity:
+            raise EvidenceError("waiting declaration changed; do not silently alter a pending handle")
+        for index in range(spec.get("max_checks", 1200)):
+            if file_identity(declaration) != identity:
+                raise EvidenceError("waiting declaration changed during observation")
+            observed = inspect_wait(spec)
+            count += 1
+            read_wall += observed.pop("read_wall_seconds")
+            if observed["state"] == "check_error":
+                errors += 1
+                last_error = {"checked_at": stamp(), "checks": observed["checks"]}
+            observed.update(checked_at=stamp(), check_count=count, read_wall_seconds=read_wall,
+                            declaration_identity=identity, check_error_count=errors, last_check_error=last_error)
+            save(state_path, observed)
+            if observed["state"] in {"ready", "failed"}:
+                summarize(capsule, directory, receipts, "wait_" + observed["state"])
+                return None
+            if observed["state"] in {"check_error", "unknown"}:
+                return "wait_" + observed["state"]
+            if index + 1 == spec.get("max_checks", 1200):
+                return "wait_check_bound"
+            next_check = time.monotonic() + spec.get("poll_seconds", 5)
+            while next_check > time.monotonic():
+                remaining = capsule["bounds"]["max_wall_seconds"] - (datetime.now(timezone.utc) - began).total_seconds()
+                if remaining <= 0:
+                    return "wall_admission_bound"
+                time.sleep(min(next_check - time.monotonic(), remaining, 30))
+        return "wait_check_bound"
+    except (OSError, ValueError, EvidenceError) as exc:
+        save(state_path, {"state": "check_error", "error": str(exc)[:500], "checked_at": stamp(),
+                          "check_count": count, "read_wall_seconds": read_wall,
+                          "check_error_count": errors + 1, "last_check_error": str(exc)[:500],
+                          "declaration_identity": previous.get("declaration_identity")})
+        return "wait_check_error"
 
 
 def run_lifecycle(capsule_path, directory, *, turn_runner=host_turn):
@@ -300,7 +516,12 @@ def run_lifecycle(capsule_path, directory, *, turn_runner=host_turn):
                 elapsed = (datetime.now(timezone.utc) - began).total_seconds()
                 if elapsed >= bounds["max_wall_seconds"]:
                     return summarize(capsule, directory, receipts, "wall_admission_bound")
-                if receipts and receipts[-1]["checkpoint"]["wake_after_seconds"]:
+                declared_wait = receipts and (directory / ("turn-%03d" % len(receipts)) / "wait.json").exists()
+                if receipts and receipts[-1]["checkpoint"]["state"] == "waiting" and declared_wait:
+                    reason = await_completion(capsule, directory, receipts, began)
+                    if reason:
+                        return summarize(capsule, directory, receipts, reason)
+                elif receipts and receipts[-1]["checkpoint"]["wake_after_seconds"]:
                     due = datetime.fromisoformat(receipts[-1]["finished_at"]).timestamp() + receipts[-1]["checkpoint"]["wake_after_seconds"]
                     while due > time.time():
                         remaining = bounds["max_wall_seconds"] - (datetime.now(timezone.utc) - began).total_seconds()
@@ -335,11 +556,14 @@ if __name__ == "__main__":
         if args.profile is None:
             parser.error("--goal requires an explicit --profile")
         capsule_path = Path(args.directory).absolute() / "goal-capsule.json"
-        body = capsule_from_goal(args.goal, args.capsule, read(args.profile), branch_id=args.branch)
+        prior = read(capsule_path) if capsule_path.exists() else None
+        selected_branch = args.branch or (prior.get("branch_id") if prior else None)
+        body = capsule_from_goal(args.goal, args.capsule, read(args.profile), branch_id=selected_branch)
         if capsule_path.exists():
-            prior = read(capsule_path)
             # Reentry uses its saved initial work even when publication advanced.
-            body["initial_work"] = prior["initial_work"]
+            for key in ("initial_work", "initial_context", "read_recipe"):
+                if key in prior:
+                    body[key] = prior[key]
             if prior != body:
                 raise EvidenceError("goal or profile changed; use a separate run")
         else:

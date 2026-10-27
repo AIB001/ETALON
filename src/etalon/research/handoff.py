@@ -11,6 +11,9 @@ import hashlib
 import json
 from pathlib import Path, PurePosixPath
 import re
+import sqlite3
+import tempfile
+from contextlib import closing
 
 from etalon.active.schema import canonical, digest
 from .continuation import CHECKPOINT, read_content, resume_research
@@ -170,22 +173,25 @@ class _Inventory:
     def __init__(self, limits):
         self.limits, self.files, self.originals, self.total = limits, {}, {}, 0
 
-    def add(self, path, target, identity=None):
+    def add(self, path, target, identity=None, *, backup_source=None):
         path, target = _plain(path), _relative(target)
         if not path.is_file():
             raise EvidenceError("handoff original is not a regular file: " + str(path))
         if target not in self.files:
             if len(self.files) >= self.limits["max_files"] or self.total + path.stat().st_size > self.limits["max_bytes"]:
                 raise EvidenceError("handoff file/byte limit exceeded; no partial plan is returned")
-        if str(path) not in self.originals and len(self.originals) >= self.limits["max_files"]:
+        if backup_source is None and str(path) not in self.originals and len(self.originals) >= self.limits["max_files"]:
             raise EvidenceError("handoff original file limit exceeded")
         actual = file_identity(path)
         if identity is not None and actual != identity:
             raise EvidenceError("handoff original identity mismatch: " + str(path))
         if str(path) in self.originals and self.originals[str(path)] != actual:
             raise EvidenceError("handoff original changed during planning")
-        self.originals[str(path)] = actual
-        row = {"source": str(path), "target": target, **actual}
+        if backup_source is None:
+            self.originals[str(path)] = actual
+        row = {"source": str(_plain(backup_source)) if backup_source is not None else str(path), "target": target, **actual}
+        if backup_source is not None:
+            row["materialization"] = "sqlite_backup"
         if target in self.files:
             if {k: self.files[target][k] for k in ("sha256", "bytes")} != actual:
                 raise EvidenceError("conflicting handoff target")
@@ -193,6 +199,28 @@ class _Inventory:
             self.files[target] = row
             self.total += actual["bytes"]
         return target
+
+
+def _backup_database(source, destination, max_bytes):
+    """A read-only SQLite backup has its own bytes; it is not the live DB file."""
+    source, destination = _plain(source), _plain(destination)
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    # Reserve the new filename exclusively, as for other archive members.
+    with destination.open("xb"):
+        pass
+    with closing(sqlite3.connect(source.as_uri() + "?mode=ro", uri=True)) as reader:
+        reader.execute("PRAGMA query_only=ON")
+        if reader.execute("PRAGMA page_count").fetchone()[0] * reader.execute("PRAGMA page_size").fetchone()[0] > max_bytes:
+            raise EvidenceError("handoff database snapshot byte limit exceeded")
+        with closing(sqlite3.connect(destination)) as writer:
+            def progress(status, remaining, total):
+                if destination.stat().st_size > max_bytes:
+                    raise EvidenceError("handoff database snapshot byte limit exceeded")
+            reader.backup(writer, pages=256, progress=progress)
+    identity = file_identity(destination)
+    if identity["bytes"] > max_bytes:
+        raise EvidenceError("handoff database snapshot byte limit exceeded")
+    return identity
 
 
 def _publication_history(entry, envelope, extra, inventory):
@@ -306,13 +334,145 @@ def _publication_history(entry, envelope, extra, inventory):
     return history, trees
 
 
+def _archive_workspace(ws, inventory, overrides, checkpoint_ref=None, *, source_backups=None, note_originals=(),
+                       extra_resources=(), extra_skill_refs=(), require_paused=True, source_only=False):
+    """Share source, artifact, workset and skill relocation without creating a graph."""
+    limits = inventory.limits
+    source_backups = source_backups or {}
+    manifest = copy.deepcopy(ws.manifest)
+    if len(manifest["sources"]) > limits["max_sources"]:
+        raise EvidenceError("handoff source limit exceeded")
+    maps = {}
+
+    def mapping(sid, original, path, identity, *, target=None, backup_source=None):
+        if target is None:
+            target = "objects/" + identity["sha256"]
+        target = inventory.add(path, target, identity, backup_source=backup_source)
+        key = sid, original
+        value = {"source_id": sid, "original": original, "location": target, **identity}
+        if key in maps and maps[key] != value:
+            raise EvidenceError("conflicting relocation for an original location")
+        maps[key] = value
+        return target
+
+    for source in manifest["sources"]:
+        if source["identity"]["kind"] != "snapshot_sha256":
+            raise EvidenceError("handoff requires frozen snapshot sources; publish a snapshot first")
+        if source.get("visibility", "released") != "released":
+            raise EvidenceError("handoff cannot include an unpublished source")
+        original = source["location"]
+        path = _local(ws.base, original)
+        if inventory.total + path.stat().st_size > limits["max_bytes"]:
+            raise EvidenceError("handoff source byte limit exceeded")
+        identity = file_identity(path)
+        if identity["sha256"] != source["identity"]["value"]:
+            raise EvidenceError("source snapshot hash mismatch")
+        prefix = "sources/" + digest(source["source_id"])[:24]
+        backup_source = source_backups.get(source["source_id"])
+        source["location"] = mapping(source["source_id"], backup_source or original, path, identity,
+                                      target=prefix + "/snapshot" + path.suffix, backup_source=backup_source)
+    if source_only:
+        # A note may cite an optional workset archived next. Check those links
+        # against the combined records, without first suppressing its notes.
+        from .evidence import _source
+        parts = [(s["source_id"], _source(ws, s)) for s in ws.manifest["sources"]]
+        rows, coverage, issues = {sid: result[0] for sid, result in parts}, [result[1] for _, result in parts], []
+    else:
+        rows, coverage, issues = _collect(ws)
+    if issues or any(c["status"] != "complete" for c in coverage):
+        raise EvidenceError("handoff requires complete source coverage: " + canonical({"issues": issues, "coverage": coverage}))
+    count = sum(len(r) for r in rows.values())
+    if count > limits["max_records"]:
+        raise EvidenceError("handoff record limit exceeded")
+    checkpoint = read_content(ws, checkpoint_ref) if checkpoint_ref is not None else None
+    if checkpoint is not None and checkpoint["schema"] != CHECKPOINT:
+        raise EvidenceError("handoff entry must select a research checkpoint")
+    guards = {g["location"]: g for g in checkpoint["status_guards"]} if checkpoint else {}
+    status_locations = {s if isinstance(s, str) else s.get("location") for s in manifest.get("status_refs", [])}
+    if status_locations != set(guards) or require_paused and any(g["state"] not in {"paused", "stopped"} for g in guards.values()):
+        raise EvidenceError("handoff needs matching paused/stopped authority guards; no authority is inferred")
+    for item in ws.manifest.get("location_map", []):
+        identity = {k: item[k] for k in ("sha256", "bytes")}
+        key = item["source_id"], item["original"]
+        target = maps[key]["location"] if key in maps else None
+        if item["original"] in guards:
+            target = "authority/" + digest(list(key))[:24]
+        mapping(*key, _local(ws.base, item["location"], confined=True), identity, target=target)
+    for sid, original, path, identity in note_originals:
+        mapping(sid, original, path, identity)
+    artifacts, members, skills = 0, 0, []
+    workset_resources, saved_bundles = list(extra_resources), {}
+    def archive_skill(sid, content_ref):
+        resolver = EvidenceResolver._from_validated(ws, sid)
+        from etalon.skills import verify_snapshot
+        skill = verify_snapshot(content_ref, resolver=resolver)
+        path = resolver.resolve_snapshot(content_ref)
+        prefix = "skills/" + digest(content_ref)[:24]
+        # An existing map can point at this same skill. Its structural
+        # layout must be kept so the existing snapshot verifier works.
+        maps.pop((sid, content_ref["manifest_path"]), None)
+        mapping(sid, content_ref["manifest_path"], path, file_identity(path), target=prefix + "/manifest.json")
+        for member in skill["files"]:
+            name = member["path"]
+            inventory.add(path.parent / "bundle" / name, prefix + "/bundle/" + _relative(name),
+                          {k: member[k] for k in ("sha256", "bytes")})
+        skills.append({"source_id": sid, "content_ref": content_ref})
+        saved_bundles[(skill["slug"], skill["manifest_sha256"])] = path.parent / "bundle"
+
+    for sid, records in rows.items():
+        resolver = EvidenceResolver._from_validated(ws, sid)
+        for row in records.values():
+            body = row["record"]
+            if row["record_type"] == "artifact":
+                identity = {k: body[k] for k in ("sha256", "bytes")}
+                key = sid, body["path"]
+                artifact_path = resolver.resolve(body["path"], **identity)
+                target = ("authority/" + digest([sid, body["path"]])[:24]
+                          if body["path"] in guards else maps[key]["location"] if key in maps else None)
+                mapping(sid, body["path"], artifact_path, identity,
+                        target=target)
+                artifacts += 1
+                workset_resources.extend(_record_workset_pins(row, resolver, artifact_path))
+            else:
+                workset_resources.extend(_record_workset_pins(row, resolver))
+            for member in row.get("members", body.get("members", [])):
+                if member.get("visibility") != "released":
+                    continue
+                identity = {k: member[k] for k in ("sha256", "bytes")}
+                path = resolver.resolve(member["path"], **identity)
+                target = None
+                if body.get("schema") == "etalon-data-snapshot/1":
+                    prefix = "sources/" + digest(sid)[:24]
+                    target = prefix + "/" + _relative(member["member"])
+                mapping(sid, member["path"], path, identity, target=target)
+                members += 1
+            content_ref = body.get("content_ref")
+            if isinstance(content_ref, dict) and "manifest_path" in content_ref:
+                archive_skill(sid, content_ref)
+    for sid, content_ref in extra_skill_refs:
+        archive_skill(sid, content_ref)
+    bundles = _bundle_dependencies(ws, workset_resources, saved_bundles, overrides, inventory)
+    if bundles or "skill_bundle_map" in manifest:
+        manifest["skill_bundle_map"] = [{k: b[k] for k in ("slug", "manifest_sha256", "root")} for b in bundles]
+    for original, guard in guards.items():
+        sid = checkpoint_ref["source_id"]
+        identity = {k: guard[k] for k in ("sha256", "bytes")}
+        mapping(sid, original, EvidenceResolver._from_validated(ws, sid).resolve(original, **identity),
+                identity, target="authority/" + digest([sid, original])[:24])
+    manifest["location_map"] = list(maps.values())
+    continuation = resume_research(ws, checkpoint_ref, read_mode="frozen_view") if checkpoint else None
+    return manifest, rows, count, checkpoint, continuation, artifacts, members, skills, bundles
+
+
 def plan_research_handoff(entry, *, publication_intents=(), skill_bundles=(), limits=None):
-    """Read/verify a complete explicit frozen workspace and return a sealed plan.
+    """Plan a local note handoff or a complete explicit frozen workspace.
 
     Only local entry/one-hop locator files are accepted, never policy-restricted
     read contexts. All published records and original source bytes are retained;
     this is not a redaction or disclosure API. Bounds fail closed, not truncate.
-    Selected authority guards must already be paused/stopped and unchanged.
+    Notes retain their task history through a consistent SQLite backup and the
+    existing location map. Graph-entry authority guards must already be
+    paused/stopped and unchanged; ordinary notes require no graph or checkpoint.
     """
     limits = _limits(limits)
     overrides = _skill_overrides(skill_bundles)
@@ -333,6 +493,16 @@ def plan_research_handoff(entry, *, publication_intents=(), skill_bundles=(), li
         raise EvidenceError("publication_intents must be a bounded explicit list")
     inventory = _Inventory(limits)
     inventory.add(requested, "origin/requested-entry.json")
+    candidate = _read(requested, 65536)
+    note_origin, note_selector = requested, requested
+    if isinstance(candidate, dict) and set(candidate) == {"entry"}:
+        target = Path(candidate["entry"])
+        note_selector = (target if target.is_absolute() else requested.parent / target).absolute()
+        note_origin = _plain(_local(requested.parent, candidate["entry"]))
+        candidate = _read(note_origin, 65536)
+    if candidate.get("schema") == "etalon-note-entry/1":
+        from .note_handoff import plan_note_handoff
+        return plan_note_handoff(note_origin, note_selector, requested, selector, inventory, overrides, publication_intents)
     with verified_read():
         workspace, checkpoint_ref, origin, context = resolve_entry(requested)
         if context is not None or not isinstance(workspace, (str, Path)) or origin is None:
@@ -341,114 +511,10 @@ def plan_research_handoff(entry, *, publication_intents=(), skill_bundles=(), li
         origin = _plain(resolved_selector.resolve(strict=True))
         envelope = _read(origin, 65536)
         ws = load_workspace(workspace)
-        manifest = copy.deepcopy(ws.manifest)
-        if len(manifest["sources"]) > limits["max_sources"]:
-            raise EvidenceError("handoff source limit exceeded")
         inventory.add(origin, "origin/entry.json")
         inventory.add(workspace, "origin/workspace.json")
-        maps = {}
-
-        def mapping(sid, original, path, identity, *, target=None):
-            if target is None:
-                target = "objects/" + identity["sha256"]
-            target = inventory.add(path, target, identity)
-            key = sid, original
-            value = {"source_id": sid, "original": original, "location": target, **identity}
-            if key in maps and maps[key] != value:
-                raise EvidenceError("conflicting relocation for an original location")
-            maps[key] = value
-            return target
-
-        for source in manifest["sources"]:
-            if source["identity"]["kind"] != "snapshot_sha256":
-                raise EvidenceError("handoff requires frozen snapshot sources; publish a snapshot first")
-            if source.get("visibility", "released") != "released":
-                raise EvidenceError("handoff cannot include an unpublished source")
-            original = source["location"]
-            path = _local(ws.base, original)
-            if inventory.total + path.stat().st_size > limits["max_bytes"]:
-                raise EvidenceError("handoff source byte limit exceeded")
-            identity = file_identity(path)
-            if identity["sha256"] != source["identity"]["value"]:
-                raise EvidenceError("source snapshot hash mismatch")
-            prefix = "sources/" + digest(source["source_id"])[:24]
-            source["location"] = mapping(source["source_id"], original, path, identity,
-                                          target=prefix + "/snapshot" + path.suffix)
-        rows, coverage, issues = _collect(ws)
-        if issues or any(c["status"] != "complete" for c in coverage):
-            raise EvidenceError("handoff requires complete source coverage: " + canonical({"issues": issues, "coverage": coverage}))
-        count = sum(len(r) for r in rows.values())
-        if count > limits["max_records"]:
-            raise EvidenceError("handoff record limit exceeded")
-        checkpoint = read_content(ws, checkpoint_ref)
-        if checkpoint["schema"] != CHECKPOINT:
-            raise EvidenceError("handoff entry must select a research checkpoint")
-        guards = {g["location"]: g for g in checkpoint["status_guards"]}
-        status_locations = {s if isinstance(s, str) else s.get("location") for s in manifest.get("status_refs", [])}
-        if status_locations != set(guards) or any(g["state"] not in {"paused", "stopped"} for g in guards.values()):
-            raise EvidenceError("handoff needs matching paused/stopped authority guards; no authority is inferred")
-        for item in ws.manifest.get("location_map", []):
-            identity = {k: item[k] for k in ("sha256", "bytes")}
-            key = item["source_id"], item["original"]
-            target = maps[key]["location"] if key in maps else None
-            if item["original"] in guards:
-                target = "authority/" + digest(list(key))[:24]
-            mapping(*key, _local(ws.base, item["location"], confined=True), identity, target=target)
-        artifacts, members, skills = 0, 0, []
-        workset_resources, saved_bundles = [], {}
-        for sid, records in rows.items():
-            resolver = EvidenceResolver._from_validated(ws, sid)
-            for row in records.values():
-                body = row["record"]
-                if row["record_type"] == "artifact":
-                    identity = {k: body[k] for k in ("sha256", "bytes")}
-                    key = sid, body["path"]
-                    artifact_path = resolver.resolve(body["path"], **identity)
-                    target = ("authority/" + digest([sid, body["path"]])[:24]
-                              if body["path"] in guards else maps[key]["location"] if key in maps else None)
-                    mapping(sid, body["path"], artifact_path, identity,
-                            target=target)
-                    artifacts += 1
-                    workset_resources.extend(_record_workset_pins(row, resolver, artifact_path))
-                else:
-                    workset_resources.extend(_record_workset_pins(row, resolver))
-                for member in row.get("members", body.get("members", [])):
-                    if member.get("visibility") != "released":
-                        continue
-                    identity = {k: member[k] for k in ("sha256", "bytes")}
-                    path = resolver.resolve(member["path"], **identity)
-                    target = None
-                    if body.get("schema") == "etalon-data-snapshot/1":
-                        prefix = "sources/" + digest(sid)[:24]
-                        target = prefix + "/" + _relative(member["member"])
-                    mapping(sid, member["path"], path, identity, target=target)
-                    members += 1
-                content_ref = body.get("content_ref")
-                if isinstance(content_ref, dict) and "manifest_path" in content_ref:
-                    from etalon.skills import verify_snapshot
-                    skill = verify_snapshot(content_ref, resolver=resolver)
-                    path = resolver.resolve_snapshot(content_ref)
-                    prefix = "skills/" + digest(content_ref)[:24]
-                    # An existing map can point at this same skill. Its structural
-                    # layout must be kept so the existing snapshot verifier works.
-                    maps.pop((sid, content_ref["manifest_path"]), None)
-                    mapping(sid, content_ref["manifest_path"], path, file_identity(path), target=prefix + "/manifest.json")
-                    for member in skill["files"]:
-                        name = member["path"]
-                        inventory.add(path.parent / "bundle" / name, prefix + "/bundle/" + _relative(name),
-                                      {k: member[k] for k in ("sha256", "bytes")})
-                    skills.append({"source_id": sid, "content_ref": content_ref})
-                    saved_bundles[(skill["slug"], skill["manifest_sha256"])] = path.parent / "bundle"
-        bundles = _bundle_dependencies(ws, workset_resources, saved_bundles, overrides, inventory)
-        if bundles or "skill_bundle_map" in manifest:
-            manifest["skill_bundle_map"] = [{k: b[k] for k in ("slug", "manifest_sha256", "root")} for b in bundles]
-        for original, guard in guards.items():
-            sid = checkpoint_ref["source_id"]
-            identity = {k: guard[k] for k in ("sha256", "bytes")}
-            mapping(sid, original, EvidenceResolver._from_validated(ws, sid).resolve(original, **identity),
-                    identity, target="authority/" + digest([sid, original])[:24])
-        manifest["location_map"] = list(maps.values())
-        continuation = resume_research(ws, checkpoint_ref, read_mode="frozen_view")
+        manifest, rows, count, checkpoint, continuation, artifacts, members, skills, bundles = _archive_workspace(
+            ws, inventory, overrides, checkpoint_ref)
     history, trees = _publication_history(origin, envelope, publication_intents, inventory)
     plan = _seal({"schema": PLAN, "limits": limits, "origin_entry": str(origin),
                   "entry_selector": {"path": str(selector), "resolved_path": str(requested),
@@ -483,6 +549,12 @@ def _verify_originals(plan):
     for path, identity in plan["originals"].items():
         if file_identity(_plain(path)) != identity:
             raise EvidenceError("handoff original identity changed: " + path)
+    for item in plan["files"]:
+        if item.get("materialization") == "sqlite_backup":
+            with tempfile.TemporaryDirectory(prefix="etalon-handoff-") as directory:
+                actual = _backup_database(item["source"], Path(directory) / "snapshot.sqlite", plan["limits"]["max_bytes"])
+            if actual != {k: item[k] for k in ("sha256", "bytes")}:
+                raise EvidenceError("handoff journal changed after planning; create a new plan")
     for bundle in plan.get("skill_bundles", []):
         from etalon.skills import snapshot
         version, _ = snapshot(bundle["slug"], bundle_ref={"root": bundle["source_root"],
@@ -515,6 +587,11 @@ def _documents(plan):
                           "origin_entry": plan["origin_entry"], "archive_only": True,
                           "authority_semantics": "copied paused/stopped bytes; not a live remote control channel",
                           "execution_permission": "not_granted", "automatic_retry": False})
+    if plan.get("entry_kind") == "note":
+        entry["source_id"] = plan["note_source_id"]
+        entry["handoff"]["authority_semantics"] = "archived notes and external job handles; no execution migration"
+        if "task_workset" in entry:
+            entry["task_workset"]["workspace"] = "workspace.json"
     if len(canonical(entry).encode()) > 65536 or len(canonical(plan["workspace"]).encode()) > 4 * 1024 * 1024:
         raise EvidenceError("handoff entry/workspace exceeds existing reader bounds")
     return {"workspace.json": plan["workspace"], "entry.json": entry}
@@ -558,7 +635,9 @@ def _validate_plan(plan):
             raise EvidenceError("duplicate or reserved handoff target")
         targets.add(target)
         total += item["bytes"]
-        if plan["originals"].get(item["source"]) != {k: item[k] for k in ("sha256", "bytes")}:
+        if item.get("materialization") not in {None, "sqlite_backup"}:
+            raise EvidenceError("unsupported handoff materialization")
+        if item.get("materialization") != "sqlite_backup" and plan["originals"].get(item["source"]) != {k: item[k] for k in ("sha256", "bytes")}:
             raise EvidenceError("handoff file has no matching original identity")
     if total > limits["max_bytes"] or len(canonical(plan).encode()) > MAX_MANIFEST_BYTES:
         raise EvidenceError("handoff byte limit exceeded")
@@ -577,7 +656,12 @@ def export_research_handoff(plan, destination):
     _verify_originals(plan)
     destination.mkdir(parents=True, exist_ok=False)
     for item in plan["files"]:
-        _copy_file(item["source"], destination / item["target"], {k: item[k] for k in ("sha256", "bytes")})
+        if item.get("materialization") == "sqlite_backup":
+            actual = _backup_database(item["source"], destination / item["target"], plan["limits"]["max_bytes"])
+            if actual != {k: item[k] for k in ("sha256", "bytes")}:
+                raise EvidenceError("handoff journal changed while exporting; create a new plan")
+        else:
+            _copy_file(item["source"], destination / item["target"], {k: item[k] for k in ("sha256", "bytes")})
     for name, value in _documents(plan).items():
         _write(destination / name, value)
     _verify_originals(plan)
@@ -613,9 +697,13 @@ def verify_research_handoff(directory, *, verify_originals=True):
         rows, coverage, issues = _collect(ws)
         if issues or any(c["status"] != "complete" for c in coverage) or _rows_digest(rows) != plan["records_digest"]:
             raise EvidenceError("handoff record coverage or semantic digest mismatch")
-        checkpoint = read_content(ws, plan["checkpoint_ref"])
-        if digest(checkpoint) != plan["checkpoint_content_digest"]:
-            raise EvidenceError("handoff checkpoint changed")
+        if plan["checkpoint_ref"] is not None:
+            checkpoint = read_content(ws, plan["checkpoint_ref"])
+            if digest(checkpoint) != plan["checkpoint_content_digest"]:
+                raise EvidenceError("handoff checkpoint changed")
+        if plan.get("entry_kind") == "note":
+            from .note_handoff import verify_notes
+            verify_notes(root / "entry.json", plan)
         for skill in plan["skill_snapshots"]:
             from etalon.skills import verify_snapshot
             verify_snapshot(skill["content_ref"], resolver=EvidenceResolver._from_validated(ws, skill["source_id"]))
@@ -638,7 +726,9 @@ def verify_research_handoff(directory, *, verify_originals=True):
                 "manifest_sha256": bundle["manifest_sha256"]})
             if version != bundle["manifest"]:
                 raise EvidenceError("handoff skill bundle member inventory changed")
-        continuation = resume_research(ws, plan["checkpoint_ref"], read_mode="frozen_view")
+        continuation = resume_research(ws, plan["checkpoint_ref"], read_mode="frozen_view") if plan["checkpoint_ref"] is not None else {
+            "authority": {"state": "not_granted", "sources": []}, "issues": [], "warnings": [],
+            "pending": plan.get("continuation_at_export", {}).get("pending", [])}
         before = plan["continuation_at_export"]
         if (continuation["authority"]["state"] != before["authority"]["state"]
                 or any(g["status"] != "unchanged" for g in continuation["authority"]["sources"])):

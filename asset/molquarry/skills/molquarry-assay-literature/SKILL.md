@@ -33,7 +33,22 @@ Separate a reported observation, the authors' mechanistic interpretation and the
 
 ## Deliver
 
-Write an evidence table with exact claim, molecule identity status, assay context, measurement relation/value/units, source IDs, primary passage/table locator, evidence type and unresolved questions. Include searched query strings, cutoff, page budgets, full-text/SI availability and saved raw response provenance. A conflict may require a follow-up experiment; it need not be forced into a single consensus potency.
+When the host needs knowledge for a next choice, synthesize what the evidence
+implies rather than returning every row. Existing `Curation` accepts optional
+`knowledge` items: `statement`, `conditions`, `implications`, `limitations`,
+`references` (the existing EvidenceReference format), and `basis` equal to
+`reported_observation`, `authors_interpretation` or `agent_inference`.
+Keep conditions and important contrary results in the synthesis. The agent writes
+the interpretation; the SDK checks source links, not its scientific correctness.
+
+`build_target_bundle(..., view="knowledge")` saves the full reviewed material
+and returns a compact knowledge view plus its detail path, without preparing
+structures or making additional network queries. SDK users can call
+`integrate_review` and `knowledge_context`. Read the details when the current
+choice needs them. Existing adequate knowledge can be used directly; this
+synthesis is optional and does not process all internal experiment memory.
+
+When the task needs assay comparison or source reconciliation, deliver an evidence table with exact claim, molecule identity status, assay context, measurement relation/value/units, source IDs, primary passage/table locator, evidence type and unresolved questions. Keep query strings, cutoff, page budgets, full-text/SI availability and raw response provenance in the saved material. A conflict may require a follow-up experiment; it need not be forced into a single consensus potency.
 
 Use this result to label reference actives/inactives and choose assay-compatible evaluation sets before screening. An unmeasured analogue is not an experimental inactive, and test-set compounds already used to tune the protocol do not provide independent validation.
 

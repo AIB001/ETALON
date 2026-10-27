@@ -14,7 +14,10 @@ returned once; potentially affected dependents are IDs rather than full historie
 An explicit `prediction_ids` selection can also study a successful prediction for
 missed opportunities. No selection triggers a proposal or blocks unrelated work.
 Use this context to revise the scientific method or, when its improvement strategy
-is itself unproductive, the [improvement procedure](../../etalon-skill-improvement/references/mechanism-revision.md).
+is itself unproductive, the improvement procedure. For that optional guidance,
+read `etalon_skill_read(slug="skill-improvement", member="references/mechanism-revision.md")`.
+If unavailable, keep the limitation explicit and choose from the available methods;
+the optional skill need not be located through a whole-system search.
 
 The host chooses relevant rule fragments and experience from context, reasons
 about the missing mechanism, and selects an actual action. For example, an
@@ -187,9 +190,11 @@ does not turn their historical evidence into a new replicate.
 When the new action changes endpoint, the previous experience can remain a
 related input with an explicit mismatch. Save the host's resulting conditional
 choice through the ordinary decision/step interfaces. For a real method change,
-the [revision records](../../etalon-skill-improvement/references/revision.md#saving-the-part-that-can-guide-the-next-choice)
-describe how to retain the new feedback as experience without inheriting the
-old patch's conditions or manufacturing a revision for ordinary progress.
+the optional revision records describe how to retain the new feedback as experience
+without inheriting the old patch's conditions or manufacturing a revision for
+ordinary progress. Retrieve that member with
+`etalon_skill_read(slug="skill-improvement", member="references/revision.md")`
+when the record would help the current choice.
 
 For a local synthesis-route edit, the optional
 `etalon.research.reaction_candidate.compile_reaction_candidate(tree, binding, operations)`

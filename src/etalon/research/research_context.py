@@ -389,7 +389,8 @@ def load_entry(entry):
 def build_research_context(entry, *, node_id=None, question=None, purpose="research",
                            policy=None, max_bytes=16384, as_of=None, home_overrides=None,
                            conditions=None, view="full", scope=None, section="references",
-                           cursor=None, limit=20):
+                           cursor=None, limit=20, branch_id=None, selectors=None, offset=0,
+                           definitions=None):
     """Read local/adjacent/counterevidence context and report selection coverage.
 
     question records the host's purpose; it does not rewrite the research task
@@ -398,6 +399,24 @@ def build_research_context(entry, *, node_id=None, question=None, purpose="resea
     Optional scope selects exact roots or a branch before bounded graph traversal;
     scoped reference coverage and excerpt delivery never imply global coverage.
     """
+    from .notes import ENTRY as NOTE_ENTRY, entry_value, read_entry as read_note_entry, read_current
+    candidate = entry_value(entry)
+    if candidate.get("schema") == NOTE_ENTRY:
+        if scope is not None or node_id is not None or cursor is not None or policy is not None or view not in {"summary", "card", "full", "knowledge", "index", "selected"}:
+            raise EvidenceError("note entry selects one task branch; graph scope applies to legacy graph entries")
+        if view in {"summary", "card"}:
+            recipe = ({"view": "selected", "selectors": selectors, "offset": offset, "limit": limit}
+                      if selectors is not None else None)
+            result = read_current(entry, recipe=recipe, conditions=conditions,
+                definitions=definitions, branch_id=branch_id, max_bytes=max_bytes)
+        else:
+            result = read_note_entry(entry, conditions=conditions, definitions=definitions, branch_id=branch_id,
+                view=view, selectors=selectors, offset=offset, limit=limit, max_bytes=max_bytes)
+        if len(canonical(result).encode("utf-8")) > max_bytes:
+            raise EvidenceError("note exceeds delivery budget; keep arrays in original artifacts")
+        return result
+    if branch_id is not None or selectors is not None or offset:
+        raise EvidenceError("branch_id/selectors/offset apply to note entries; graph branches use scope")
     if view not in {"summary", "node", "full", "card", "manifest"}:
         raise EvidenceError("context view must be summary, node, full, card or manifest")
     if view in {"card", "manifest"} and scope is not None:
@@ -406,7 +425,7 @@ def build_research_context(entry, *, node_id=None, question=None, purpose="resea
         raise EvidenceError("section/cursor/limit require manifest or scoped context view")
     if type(limit) is not int or not 1 <= limit <= 50:
         raise EvidenceError("context page limit must be 1..50")
-    if view == "manifest" and (question is not None or conditions is not None):
+    if view == "manifest" and (question is not None or conditions is not None or definitions is not None):
         raise EvidenceError("manifest uses exact navigation, without question or conditions selection")
     if view == "node" and scope is None and (not isinstance(node_id, str) or not node_id):
         raise EvidenceError("node context requires node_id")
@@ -458,7 +477,8 @@ def build_research_context(entry, *, node_id=None, question=None, purpose="resea
     from .graph_memory import restrict_workspace
     try:
         visible_workspace = restrict_workspace(workspace, policy=policy, purpose=purpose)[0]
-        handoff["task_workset"] = workset_summary(visible_workspace, checkpoint_ref, conditions=conditions)
+        handoff["task_workset"] = workset_summary(visible_workspace, checkpoint_ref, conditions=conditions,
+                                                definitions=definitions)
     except (ValueError, OSError, KeyError) as exc:
         handoff["task_workset"] = {"status": "unavailable", "reason": str(exc)[:500]}
         if graph is not None and scope is None:
@@ -472,7 +492,7 @@ def build_research_context(entry, *, node_id=None, question=None, purpose="resea
                 raise EvidenceError("home overrides require node identities and Search/Judge/Quick/Deep")
         data = _inventory(workspace, checkpoint_ref, policy=policy, purpose=purpose,
             publications=publications, handoff=handoff, graph=graph, as_of=as_of, home_overrides=home_overrides,
-            neutral_workset=handoff["task_workset"] if conditions is None else None)
+            neutral_workset=handoff["task_workset"] if conditions is None and definitions is None else None)
         if view == "manifest":
             return manifest_page(data, checkpoint_ref, handoff, section=section, cursor=cursor,
                                  limit=limit, max_bytes=max_bytes, node_id=node_id)
@@ -495,6 +515,7 @@ def build_research_context(entry, *, node_id=None, question=None, purpose="resea
         return graph_page(graph, cursor=cursor, limit=limit, max_bytes=max_bytes, handoff=handoff,
             context={"requested_view": view, "node_id": node_id, "question": question,
                 "purpose": purpose, "conditions": conditions, "scope": scope,
+                **({"definitions": definitions} if definitions is not None else {}),
                 "publications": publications,
                 "handoff": {k: v for k, v in handoff.items() if k != "read_context"}})
     if scope is not None and cursor is not None:

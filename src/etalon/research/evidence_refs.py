@@ -4,12 +4,13 @@ No registry, ledger, directory discovery, downloads, or scientific admission.
 """
 from __future__ import annotations
 
+from etalon.runtime.files import EvidenceError, file_identity, _sha
+
 from dataclasses import dataclass
 from functools import cached_property
 import hashlib
 import json
 from pathlib import Path, PurePosixPath, PureWindowsPath
-import re
 
 from etalon.active.schema import canonical, digest
 
@@ -25,11 +26,9 @@ CONTENT_SCHEMAS = {"etalon-method-revision/1", "etalon-research-claim/1",
                    "etalon-defect-family/1", "etalon-opportunity-disposition/1",
                    "etalon-opportunity-reopen/1", "etalon-candidate-brief/1",
                    "etalon-research-decision/1", "etalon-research-decision-update/1",
-                   "etalon-evidence-window/1", "etalon-outcome-release/1"}
+                   "etalon-evidence-window/1", "etalon-outcome-release/1", "etalon-research-note/1"}
 
 
-class EvidenceError(ValueError):
-    """An explicit evidence contract or identity failure."""
 
 
 def _text(value):
@@ -38,20 +37,8 @@ def _text(value):
     return value
 
 
-def _sha(value):
-    if not isinstance(value, str) or not re.fullmatch(r"[0-9a-f]{64}", value):
-        raise EvidenceError("SHA256 must be 64 lowercase hexadecimal characters")
-    return value
 
 
-def file_identity(path):
-    h = hashlib.sha256()
-    size = 0
-    with Path(path).open("rb") as handle:
-        for block in iter(lambda: handle.read(1024 * 1024), b""):
-            h.update(block)
-            size += len(block)
-    return {"sha256": h.hexdigest(), "bytes": size}
 
 
 def _identity(value):

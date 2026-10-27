@@ -13,6 +13,7 @@ registration, policy fitting, or the historical R3/R4/R4b scripts.
 | --- | --- |
 | Find published results or counterevidence, read a known reference, or reuse another source | [Evidence reuse](references/evidence-reuse.md) |
 | Continue a natural research goal, batch a known method, publish compact results, read a native handle, or recover publication | [Progress publication](references/progress-publication.md) |
+| Make a new method's results understandable across tasks without mixing metric or state meanings | [Result meaning](references/result-meaning.md) |
 | Fit/calibrate a finite policy, inspect `next_action`, or compare frozen controls | [Transfer and calibration](references/transfer.md) |
 | Attach a released comparison or interpret transfer/baseline feedback | [Validation and feedback](references/validation-feedback.md) |
 | Inspect pose selection, a preparation receipt, or native resource lineage | [Pose and preparation](references/pose-preparation.md) |

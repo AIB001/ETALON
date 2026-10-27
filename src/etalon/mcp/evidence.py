@@ -36,8 +36,9 @@ def register(mcp: Any) -> None:
                                skill_bundles: list[dict] | None = None) -> str:
         """CHEAP. Export a complete released entry into a NEW local directory.
 
-        Reuses frozen sources, checkpoint, explicit location maps and original
-        hashes. Copies known publication failures as inert history. Bounds fail
+        Reuses graph checkpoints or ordinary note entries, explicit location
+        maps and original hashes. Notes include history and a consistent SQLite
+        backup (including committed WAL data). Copies known failures as history. Bounds fail
         closed; no network transport, active intent restoration or execution is
         performed. Existing destinations are refused; failed partial exports
         remain available for inspection. Returns a verified handoff receipt.
@@ -55,7 +56,7 @@ def register(mcp: Any) -> None:
     @mcp.tool()
     @tool(Cost.FREE)
     def etalon_research_handoff_verify(directory: str, verify_originals: bool = True) -> str:
-        """FREE. Verify copied bytes, checkpoint and full released record coverage.
+        """FREE. Verify copied bytes, entry and full released record coverage.
 
         By default also rehash originals. Set verify_originals=False only for
         an explicit exported-bundle-only check after physical relocation; that
@@ -96,7 +97,8 @@ def register(mcp: Any) -> None:
                                 cursor: str | None = None,
                                 limit: Annotated[int, Field(ge=1, le=50)] = 20,
                                 view_options: dict | None = None,
-                                scope: dict | None = None) -> str:
+                                scope: dict | None = None,
+                                definitions: dict | None = None) -> str:
         """FREE. Build bounded decision context from a published research entry.
 
         Includes source selection, counterevidence coverage and existing branch/pause
@@ -139,6 +141,16 @@ def register(mcp: Any) -> None:
         Index completeness does not establish that original bodies were read.
         max_bytes is 4096..65536. Expand returned refs with etalon_evidence_read; question
         is descriptive and does not perform semantic ranking.
+        For a note entry, summary/card execute its explicit read_recipe when present,
+        otherwise return a bounded brief with declared facts, limits, contrary
+        reference bodies and exact unread pointers. This does not rank relevance.
+        definitions optionally pins exact semantic hashes; supplied entry bindings
+        cannot be weakened. Original source bodies remain unread unless requested.
+        Opt in with view_options={"note_view":"index"} for a small continuation and
+        paged key/title inventory. Follow its pinned details as entry; batch fields
+        with {"note_view":"selected","selectors":["/lesson","/knowledge/0"]}.
+        offset in view_options and limit page collection items. Omitted bodies and
+        counter scope remain explicit. full preserves original identity checking.
         entry may be a server path, a one-hop {entry: server_path} locator, or the
         returned read_context for a pinned view. Follow-up evidence calls accept
         read_context directly; never guess a workspace or open server files locally.
@@ -160,6 +172,27 @@ def register(mcp: Any) -> None:
         options = {} if view_options is None else view_options
         if not isinstance(options, dict):
             raise EvidenceError("view_options must be an object")
+        from etalon.research.notes import ENTRY as NOTE_ENTRY, entry_value, read_entry as read_note_entry, read_current
+        note_entry = entry_value(_entry_argument(entry))
+        if note_entry.get("schema") == NOTE_ENTRY:
+            if view == "resources":
+                from etalon.research.resource_catalog import build_resource_catalog
+                return _context_page(build_resource_catalog(entry=note_entry, limit=limit,
+                    cursor=cursor, max_bytes=max_bytes, purpose=purpose, **options), max_bytes)
+            if view not in {"summary", "card", "full"}:
+                raise EvidenceError("note entries support summary, card or full; detailed graph views require a graph entry")
+            if node_id is not None or scope is not None or cursor is not None or policy is not None:
+                raise EvidenceError("note entry already selects one branch; graph options require a graph entry")
+            if set(options) - {"note_view", "selectors", "offset", "verify_originals"}:
+                raise EvidenceError("note options are note_view, selectors, offset, verify_originals")
+            if not options and view != "full" and limit == 20:
+                return _context_page(read_current(note_entry, conditions=conditions, definitions=definitions,
+                    branch_id=branch_id, max_bytes=max_bytes, response_envelope=lambda payload: dict(payload, ok=True)), max_bytes)
+            return _context_page(read_note_entry(note_entry, conditions=conditions, definitions=definitions, branch_id=branch_id,
+                view=options.get("note_view", "full" if view == "full" else "brief"),
+                selectors=options.get("selectors"), offset=options.get("offset", 0), limit=limit,
+                verify_originals=options.get("verify_originals"), max_bytes=max_bytes,
+                response_envelope=lambda payload: dict(payload, ok=True)), max_bytes)
         if view == "impact":
             if (node_id is not None or question is not None or branch_id is not None
                     or scope is not None or conditions is not None or cursor is not None or limit != 20):
@@ -223,7 +256,7 @@ def register(mcp: Any) -> None:
         from etalon.research.research_context import build_research_context
         result = build_research_context(_entry_argument(entry),
             node_id=node_id, question=question, purpose=purpose, policy=policy,
-            max_bytes=max_bytes, conditions=conditions, view=view, scope=scope, cursor=cursor, limit=limit)
+            max_bytes=max_bytes, conditions=conditions, definitions=definitions, view=view, scope=scope, cursor=cursor, limit=limit)
         return _context_page(result, max_bytes) if scope is not None else ok(**result)
 
     @mcp.tool()
@@ -276,10 +309,11 @@ def register(mcp: Any) -> None:
     @tool(Cost.FREE)
     def etalon_evidence_read(workspace: str | None = None, ref: dict | None = None,
                              view: Literal["record", "summary", "lineage", "artifact"] = "record",
-                             member: str | None = None, selector: str | None = None,
+                             member: str | None = None, selector: str | dict | None = None,
                              offset: Annotated[int, Field(ge=0, le=2**63 - 1)] = 0,
                              limit: Annotated[int, Field(ge=1, le=32768)] = 100,
-                             entry: str | dict | None = None, read_context: dict | None = None) -> str:
+                             entry: str | dict | None = None, read_context: dict | None = None,
+                             max_bytes: Annotated[int, Field(ge=4096, le=65536)] = 65536) -> str:
         """FREE. Read a known evidence ref with bounded record/summary/lineage/artifact views.
 
         Metadata access is not original-byte verification. Original identities, roles,
@@ -290,6 +324,13 @@ def register(mcp: Any) -> None:
         reference rows expose original_read; do not infer view from a scientific label.
         limit is 1..32768; artifact offset/limit are byte counts. Page with the
         returned fragment.next_offset rather than requesting a larger limit.
+        For JSON artifact fields, selector={"json":["/rows/0/diagnosis","/cost"]}
+        selects literal JSON Pointers in one call. Collection offset/limit count
+        members (effective maximum 50). Source bytes are checked; untouched content
+        is not delivered. Follow selection.next_reads with the returned ref for
+        partial batches and collection pages. max_bytes includes the serialized MCP
+        payload; an atomic value that cannot fit needs a narrower child pointer.
+        Existing bytes references keep the same identity.
         Supply ref and exactly one of workspace, entry or the returned read_context.
         Prefer read_context after etalon_research_context, including on a remote server.
         """
@@ -297,4 +338,5 @@ def register(mcp: Any) -> None:
 
         return ok(**read_evidence(absolute_path(workspace, label="workspace") if workspace is not None else None, ref,
                                  view=view, member=member, selector=selector,
-                                 offset=offset, limit=limit, entry=_entry_argument(entry), read_context=read_context))
+                                 offset=offset, limit=limit, entry=_entry_argument(entry), read_context=read_context,
+                                 max_bytes=max_bytes, response_envelope=lambda payload: ok(**payload)))

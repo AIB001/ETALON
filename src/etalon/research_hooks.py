@@ -17,7 +17,7 @@ import sys
 
 from etalon.host import _consumer_lock, _root, _save_cursor
 
-VERSION = "etalon-research-hooks/3"
+VERSION = "etalon-research-hooks/4"
 MAX_EVENT_BYTES = 1024 * 1024
 HOST_EVENTS = {
     "codex": {"SessionStart", "PreToolUse", "PostToolUse", "PreCompact", "Stop"},
@@ -92,6 +92,18 @@ def _refs(value):
 
 
 def _build_context(entry, *, policy, max_bytes, conditions=None):
+    from etalon.research.notes import ENTRY as NOTE_ENTRY, entry_value, read_current
+    candidate = entry_value(entry)
+    if candidate.get("schema") == NOTE_ENTRY:
+        if policy is not None:
+            raise ValueError("graph policy requires a graph entry")
+        result = read_current(entry, conditions=conditions, max_bytes=max_bytes)
+        # Expose decision fields to the existing top-level delta algorithm.
+        # A changed lesson must not retransmit every unchanged knowledge field.
+        result.update(result.pop("knowledge", {}))
+        if len(_bytes(result)) > max_bytes:
+            raise ValueError("note exceeds delivery budget; retain large arrays in original artifacts")
+        return result
     from etalon.research.research_context import build_research_context
     return build_research_context(entry, purpose="research", policy=policy,
                                   max_bytes=max_bytes, view="card", conditions=conditions)
@@ -155,6 +167,14 @@ def _source_complete(context):
                for source in context.get("source_watermarks", []))
 
 
+def _context_scope(context):
+    """Compare declared task/branch bindings, without judging applicability."""
+    return (context.get("task_id"), context.get("branch_id"),
+            context.get("task_workset", {}).get("digest"),
+            _digest(context.get("definitions", {})),
+            _digest(context.get("conditions", context.get("controls", {}).get("conditions", {}))))
+
+
 def _impact_navigation(context, previous, config):
     """Offer an optional exact read after newly visible refs; never run a review.
 
@@ -166,8 +186,7 @@ def _impact_navigation(context, previous, config):
             or not isinstance(context.get("read_context"), dict)):
         return None
     old = previous["context"]
-    if (old.get("task_id"), old.get("task_workset", {}).get("digest")) != (
-            context.get("task_id"), context.get("task_workset", {}).get("digest")):
+    if _context_scope(old) != _context_scope(context):
         return None
     before = _refs(old)
     added = [r for r in _refs(context) if r not in before]
@@ -208,7 +227,7 @@ def _delivery_payload(context, previous, *, event_name, entry, config):
             and isinstance(previous.get("context"), dict)):
         old_context = previous["context"]
         old, new = old_context.get("task_workset", {}), context.get("task_workset", {})
-        if (old_context.get("task_id"), old.get("digest")) != (context.get("task_id"), new.get("digest")):
+        if _context_scope(old_context) != _context_scope(context):
             old_parts = old.get("enabled_versions", old.get("enabled", []))
             new_parts = new.get("enabled_versions", new.get("enabled", []))
             baseline["delivery"]["workset_transition"] = {
@@ -222,8 +241,7 @@ def _delivery_payload(context, previous, *, event_name, entry, config):
     elif event_name != "SessionStart" and previous and previous.get("usable"):
         if previous.get("config") != config:
             reason = "configuration_changed"
-        elif (previous["context"].get("task_id"), previous["context"].get("task_workset", {}).get("digest")) != (
-                context.get("task_id"), context.get("task_workset", {}).get("digest")):
+        elif _context_scope(previous["context"]) != _context_scope(context):
             reason = "task_or_workset_changed"
         else:
             old = previous["context"]
@@ -243,7 +261,8 @@ def _delivery_payload(context, previous, *, event_name, entry, config):
             controls = {key: context[key] for key in (
                 "checkpoint_ref", "continuation", "branches", "authority", "pending", "publications",
                 "source_watermarks", "source_issues", "execution_permission", "automatic_retry", "task_workset",
-                "resume_frontier", "checkpoint_progress", "counterevidence")
+                "resume_frontier", "checkpoint_progress", "counterevidence", "controls", "pending_handles",
+                "details", "coverage", "conditions", "definitions", "state", "status", "applicability")
                 if key in context}
             payload = {"delivery": delivery, "current_controls": controls}
             if mode == "delta":

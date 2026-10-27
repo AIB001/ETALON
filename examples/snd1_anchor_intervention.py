@@ -99,9 +99,22 @@ def minimum_image(vectors, box):
 
 def model(system, prior):
     from rdkit import Chem
-    from rdkit.Chem import AllChem
     atoms,bonds = prior.topology_sections(prior.P4/'controls'/system/'ligand.itp')
     molecule = Chem.SDMolSupplier(str(prior.P4/'inputs'/system.split('-')[1]/'ligand.sdf'),removeHs=False)[0]
+    return molecular_model(molecule, atoms, bonds)
+
+
+def molecular_model(molecule, atoms, bonds):
+    """Build the same local chemistry from explicit, mapped producer inputs.
+
+    This avoids loading an entire historical trajectory to score one new pose.
+    Atom order must already agree with the native topology.
+    """
+    from rdkit import Chem
+    from rdkit.Chem import AllChem
+    molecule = Chem.Mol(molecule)
+    if molecule.GetNumAtoms() != len(atoms):
+        raise ValueError('Molecule and native atom map differ')
     sulfur = next(a.GetIdx() for a in molecule.GetAtoms() if a.GetAtomicNum()==16)
     nitrogen = next(a.GetIdx() for a in molecule.GetAtomWithIdx(sulfur).GetNeighbors() if a.GetAtomicNum()==7)
     aryl = next(a.GetIdx() for a in molecule.GetAtomWithIdx(sulfur).GetNeighbors() if a.GetAtomicNum()==6)

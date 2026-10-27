@@ -269,3 +269,88 @@ def test_large_changed_controls_are_delivered_once_and_reconstruct_exactly(tmp_p
     assert restored == context
     assert hooks._digest(restored) == data["delivery"]["context_sha256"]
     assert data["current_controls"]["task_workset"] == context["task_workset"]
+
+
+@pytest.mark.parametrize("field,new_value", [
+    ("branch_id", "other-branch"),
+    ("conditions", {"endpoint": "different-definition"}),
+    ("definitions", {"quality": "b" * 64}),
+])
+def test_declared_note_scope_changes_require_baseline(tmp_path, context, field, new_value):
+    context.update(task_id="task", branch_id="branch", conditions={"endpoint": "quality"},
+                   definitions={"quality": "a" * 64})
+    call(tmp_path, "start", "SessionStart")
+    context[field] = new_value
+    changed = payload(call(tmp_path, "changed"))
+    assert changed["delivery"]["mode"] == "baseline"
+    assert changed["delivery"]["reason"] == "task_or_workset_changed"
+    assert changed["context"][field] == new_value
+    assert "impact_review" not in changed["delivery"]
+
+
+@pytest.fixture
+def note_entry(tmp_path):
+    from etalon.active import CampaignStore, CampaignSpec, Endpoint
+    from etalon.research import ResearchJournal
+    from etalon.research.notes import original, save_progress
+    store = CampaignStore(tmp_path / "research.sqlite")
+    store.configure(CampaignSpec("fixture", 0, "wall_second", "fixture"),
+        [Endpoint("fixture", "diagnostic", "recorded", "count", "fixture/1", 0, queryable=False)])
+    journal = ResearchJournal(store)
+    source = tmp_path / "negative.json"
+    source.write_text('{"result":"no benefit"}', encoding="utf-8")
+    note = {"task_id": "fixture", "branch_id": "method", "question": "Which method?",
+        "summary": "No observed benefit", "lesson": "Keep the same-budget control.",
+        "conditions": {"endpoint": "fixture-quality"}, "state": "paused",
+        "authorization": {"existing_scope": "read-only"}, "other_pauses": {"R4b": "user-paused"},
+        "pending_handles": [{"request_id": "already-running"}],
+        "knowledge": {"method": "Scoped knowledge. " * 100},
+        "evidence": [], "counterevidence": [original(source)]}
+    entry = tmp_path / "entry.json"
+    save_progress(journal, entry, note)
+    return entry, note
+
+
+def test_current_note_hook_delivers_lesson_counter_pointer_and_unread_scope(tmp_path, note_entry):
+    entry, note = note_entry
+    first = call(tmp_path, "start", "SessionStart")
+    assert first["ok"]
+    context = payload(first)["context"]
+    assert context["lesson"] == note["lesson"]
+    assert context["knowledge"] == note["knowledge"]
+    assert "index" not in context
+    assert context["details"]["record_id"] == context["record_id"]
+    assert context["coverage"]["originals"] == "not_read"
+    assert context["coverage"]["counter_count"] == 1
+    assert context["references"]["counterevidence"]["items"]
+    assert context["followup"]["counterevidence"]["selectors"] == ["/counterevidence"]
+    second = payload(call(tmp_path, "same"))
+    assert second["delivery"]["mode"] == "unchanged"
+    controls = second["current_controls"]
+    assert controls["controls"]["other_pauses"] == {"R4b": "user-paused"}
+    assert controls["controls"]["pending_handles"] == note["pending_handles"]
+    assert controls["state"] == "paused"
+    assert controls["coverage"] == context["coverage"]
+    assert controls["details"] == context["details"]
+    call(tmp_path, "compact", "PreCompact")
+    assert payload(call(tmp_path, "after-compact"))["delivery"]["mode"] == "baseline"
+
+
+def test_current_note_hook_honors_selected_entry_recipe(tmp_path, note_entry):
+    entry, note = note_entry
+    value = json.loads(entry.read_text(encoding="utf-8"))
+    value["read_recipe"] = {"view": "selected", "selectors": ["/lesson"]}
+    entry.write_text(json.dumps(value), encoding="utf-8")
+    result = call(tmp_path, "start", "SessionStart")
+    assert result["ok"]
+    context = payload(result)["context"]
+    assert context["view"] == "selected"
+    assert context["selected"] == [{"pointer": "/lesson", "value": note["lesson"], "body_complete": True}]
+    assert "index" not in context
+    assert context["controls"]["other_pauses"] == {"R4b": "user-paused"}
+    assert context["controls"]["conditions"] == note["conditions"]
+    assert context["controls"]["state"] == "paused"
+    assert context["controls"]["pending_handles"] == note["pending_handles"]
+    assert context["execution_permission"] == "not_granted"
+    wrong = call(tmp_path, "wrong-conditions", conditions={"endpoint": "other"})
+    assert not wrong["ok"] and wrong["host_output"] == {}

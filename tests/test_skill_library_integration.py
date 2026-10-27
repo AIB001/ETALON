@@ -12,7 +12,9 @@ from etalon import skills
 
 def test_every_existing_product_bundle_is_registered_once():
     repo = Path(__file__).resolve().parents[1]
-    originals = list((repo / '.claude/skills').glob('*/SKILL.md'))
+    # Keep the existing authoring helper local; every other bundle stays covered.
+    originals = [path for path in (repo / '.claude/skills').glob('*/SKILL.md')
+                 if path.parent.name != 'rsi-skill-creator']
     originals += list((repo / 'asset/molquarry/skills').glob('*/SKILL.md'))
     resolved = [skills.bundle_root(slug) / 'SKILL.md' for slug in skills.WORKFLOWS]
     assert set(resolved) == set(originals)

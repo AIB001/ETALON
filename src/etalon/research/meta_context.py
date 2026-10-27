@@ -48,7 +48,31 @@ def _check(value, schema):
         raise EvidenceError("meta metadata exceeds 32 KiB")
 
 
-def make_task_profile(*, task_id, question, conditions, critical_conditions, available_stages):
+def _definition_map(value, *, unknown=False):
+    """Definition identities, not labels or inferred scientific equivalence."""
+    if not isinstance(value, dict) or len(value) > 64:
+        raise EvidenceError("definitions require a bounded name/digest mapping")
+    for name, identity in value.items():
+        _text(name)
+        if identity is None and unknown:
+            continue
+        if not isinstance(identity, str) or len(identity) != 64 or any(c not in "0123456789abcdef" for c in identity):
+            raise EvidenceError("definition identity must be a SHA256 or explicit unknown")
+    return dict(value)
+
+
+def compare_definitions(expected, actual):
+    """Check requested meanings only; absent legacy meanings remain unknown."""
+    expected = _definition_map(expected, unknown=True)
+    actual = _definition_map(actual, unknown=True)
+    return {status: sorted(key for key, value in expected.items() if (
+        "missing" if value is None or actual.get(key) is None else
+        "matched" if value == actual[key] else "mismatched") == status)
+        for status in ("missing", "mismatched", "matched")}
+
+
+def make_task_profile(*, task_id, question, conditions, critical_conditions, available_stages,
+                      definitions=None):
     """Unknown conditions are null, never inferred from a task or dataset name."""
     _text(task_id); _text(question)
     _strings(critical_conditions); _strings(available_stages)
@@ -56,8 +80,9 @@ def make_task_profile(*, task_id, question, conditions, critical_conditions, ava
         raise EvidenceError("profile conditions need strings or explicit null unknowns")
     if not critical_conditions or not set(critical_conditions) <= set(conditions):
         raise EvidenceError("critical conditions must be declared, including unknowns")
+    extra = {} if definitions is None else {"definitions": _definition_map(definitions, unknown=True)}
     return _seal(dict(schema=PROFILE, task_id=task_id, question=question,
-        conditions=conditions, critical_conditions=critical_conditions, available_stages=available_stages))
+        conditions=conditions, critical_conditions=critical_conditions, available_stages=available_stages, **extra))
 
 
 def describe_resource(*, resource_id, kind, content_ref, summary, parts,
@@ -82,7 +107,8 @@ def describe_resource(*, resource_id, kind, content_ref, summary, parts,
         raise EvidenceError("resource requires 1..32 explicit parts")
     ids = set()
     for part in parts:
-        if set(part) != {"part_id", "conditions", "requires", "irrelevant", "available_at", "dependencies"}:
+        required = {"part_id", "conditions", "requires", "irrelevant", "available_at", "dependencies"}
+        if not required <= set(part) or set(part) - required - {"definitions"}:
             raise EvidenceError("part requires conditions, requires, irrelevant, available_at and dependencies")
         pid = _text(part["part_id"])
         if pid in ids:
@@ -94,6 +120,10 @@ def describe_resource(*, resource_id, kind, content_ref, summary, parts,
             raise EvidenceError("resource conditions require explicit strings")
         if set(part["irrelevant"]) & (set(part["requires"]) | set(part["conditions"])):
             raise EvidenceError("a condition cannot be both relevant and irrelevant")
+        if "definitions" in part:
+            _definition_map(part["definitions"])
+            if set(part["irrelevant"]) & {"definition:" + key for key in part["definitions"]}:
+                raise EvidenceError("a declared definition cannot also be irrelevant")
         if not isinstance(part["dependencies"], list):
             raise EvidenceError("dependencies must be explicit")
         for dep in part["dependencies"]:
@@ -246,6 +276,16 @@ def prepare_adaptation_context(profile, index):
                 checks[key] = ("not_applicable" if key in part["irrelevant"] else
                     "unknown" if actual is None or expected is None else "match" if actual == expected else "conflict")
             checks["available_at"] = "match" if part["available_at"] in profile["available_stages"] else "conflict"
+            # A matching dataset/task name never establishes matching meanings.
+            # Portable parts may explicitly mark definition:<name> irrelevant;
+            # old descriptors with no declaration remain unknown, not portable.
+            wanted, declared = profile.get("definitions", {}), part.get("definitions", {})
+            for key in sorted(set(wanted) | set(declared)):
+                name = "definition:" + key
+                actual, expected = wanted.get(key), declared.get(key)
+                checks[name] = ("not_applicable" if name in part["irrelevant"] else
+                    "unknown" if actual is None or expected is None else
+                    "match" if actual == expected else "conflict")
             status = "conflict" if "conflict" in checks.values() else "unknown" if "unknown" in checks.values() else "match"
             candidates.append(dict(resource_id=resource["resource_id"], part_id=part["part_id"],
                 applicability=status, checks=checks))
@@ -455,22 +495,45 @@ def workset_resource_part(workset, resource_id, part_id):
             "selected": {"resource_id": resource_id, "part_id": part_id} in workset["enabled"]}
 
 
-def workset_summary(workspace, checkpoint_ref, *, conditions=None):
+def workset_summary(workspace, checkpoint_ref, *, conditions=None, definitions=None):
     result = read_task_workset(workspace, checkpoint_ref)
     if result["status"] != "active":
         return result
     value = result["workset"]
     changed = [key for key, val in (conditions or {}).items() if value["profile"]["conditions"].get(key) != val]
-    return dict(status="review_required" if changed else "active", changed_conditions=changed,
+    meanings = compare_definitions(definitions or {}, value["profile"].get("definitions", {}))
+    changed_definitions = sorted(meanings["missing"] + meanings["mismatched"])
+    incompatible = bool(changed or changed_definitions)
+    extra = {} if definitions is None and "definitions" not in value["profile"] else dict(
+        definitions=value["profile"].get("definitions", {}), changed_definitions=changed_definitions)
+    return dict(status="review_required" if incompatible else "active", changed_conditions=changed,
         task_id=value["task_id"], ref=result["ref"], activation_ref=result["activation_ref"],
         digest=value["digest"], profile_digest=value["profile"]["digest"], mode=value["mode"],
-        fallback_reason=value["fallback_reason"], enabled=[] if changed else value["enabled"],
-        enabled_versions=[] if changed else [{**part, "resource_digest": next(
+        fallback_reason=value["fallback_reason"], enabled=[] if incompatible else value["enabled"],
+        enabled_versions=[] if incompatible else [{**part, "resource_digest": next(
             r["digest"] for r in value["index"]["resources"] if r["resource_id"] == part["resource_id"])}
             for part in value["enabled"]],
-        selected_skill_sources=[] if changed else selected_skill_members(value, workspace=workspace),
+        selected_skill_sources=[] if incompatible else selected_skill_members(value, workspace=workspace),
         inactive=[{k: d[k] for k in ("resource_id", "part_id", "disposition")} for d in value["review"]["decisions"] if d["disposition"] != "reuse"],
-        details="read ref artifact for exact conditions, reasons, evidence and versions")
+        details="read ref artifact for exact conditions, reasons, evidence and versions", **extra)
+
+
+def note_workset_summary(entry, *, task_id, conditions=None, definitions=None):
+    """Resolve an optional note pointer to the existing published activation.
+
+    This does not activate an inline workset or create a note-specific ledger.
+    """
+    binding = entry.get("task_workset")
+    if binding is None:
+        return None
+    if not isinstance(binding, dict) or set(binding) != {"workspace", "checkpoint_ref"}:
+        raise EvidenceError("note task_workset needs a published workspace and checkpoint_ref")
+    validate_ref(binding["checkpoint_ref"])
+    result = workset_summary(binding["workspace"], binding["checkpoint_ref"],
+                             conditions=conditions, definitions=definitions)
+    if result.get("task_id") != task_id:
+        raise EvidenceError("note task_workset belongs to another task")
+    return result
 
 
 def publish_task_workset(entry, workset, *, operation_id, directory, parent_entry=None, expected_entry_identity=None):

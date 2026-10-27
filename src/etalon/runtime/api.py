@@ -101,6 +101,8 @@ def _action_request(request: dict) -> dict:
 
 
 def _check_method_refs(request: dict) -> None:
+    if not request["method_use_refs"]:
+        return
     from etalon.research.journal import ResearchJournal
     from etalon.runtime.schema import fields
     for ref in request["method_use_refs"]:
@@ -173,7 +175,7 @@ def submit_action(request: dict, *, workspace: str | Path, plan_id: str) -> dict
 def read_action_result(handle: dict) -> dict:
     """Compatibility view over existing receipts and authoritative scientific charges."""
     if isinstance(handle, dict) and handle.get("schema") == "etalon-native-handle/1":
-        from etalon.research.execution_recovery import read_native_result
+        from etalon.runtime.native import read_native_result
         return read_native_result(handle)
     import json
     from etalon.active.schema import digest

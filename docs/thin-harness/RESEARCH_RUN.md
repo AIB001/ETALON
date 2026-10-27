@@ -1,5 +1,46 @@
 # Continue a research question across native host exits
 
+For ordinary research, call the scientific method directly. Use
+`etalon.runtime.reuse.execute_or_reuse` for exact-request reuse and an optional
+explicit `recover` callback; native handles live in `etalon.runtime.native`.
+Neither depends on a research graph or publication. A recovery reads the saved
+handle/output and does not dispatch the original callback a second time.
+
+Save a significant finding with `research.notes.record_note(journal, note, directory)`
+and advance its entry with `publish_note(entry, journal, record_id)`. One immutable
+note in the existing journal contains `task_id`, `branch_id`, `question`, `summary`,
+conditions, original/counterevidence pins and optional outcome, methods, residuals,
+pending handles and next action. Use `notes.original(path)` for a file pin.
+Superseding notes name prior record IDs; entry replacement is atomic. Failed
+recording leaves completed science intact. Existing context MCP and hook delivery
+read this entry directly. `find_notes` returns scoped negative/positive records and
+explicit condition gaps; selection and adoption belong to the host.
+
+For one-call recording and entry replacement, prefer `notes.save_progress`.
+It checks original bytes before recording and immediately before entry replacement;
+identical replay checks once without creating another note. Cite immutable run
+outputs and receipts, not mutable `latest` or `last-call` files. Keep computed
+outputs before interpretation/publication so a later failure can be repaired
+without repeating the calculation.
+
+The existing `plan_research_handoff` / `export_research_handoff` APIs accept note
+entries as well as graph checkpoints. Notes carry history, selected resources and
+explicit originals using a consistent SQLite backup and location maps. This does
+not migrate or restart external jobs. On reading, use `notes.entry_journal` to
+resolve portable locations; do not construct a store from the historical database
+string. Current branch/definition inventories can be paged through their returned
+navigation; a small context does not imply all controls or counterevidence were read.
+Explicit `entry_journal(entry_value(entry), read_only=False)` continues a sealed
+source through an atomic active copy of the same journal. Publishing advances the
+current entry to that copy; archived database, mappings and original bytes remain
+unchanged. Reopening after an interrupted publication reuses the active copy.
+
+`examples/record_method_comparison.py` uses this one-note path by default.
+`--detailed` retains the old graph attribution when needed. Existing graph entries,
+paused tasks, source snapshots and public import paths remain readable; no bulk
+migration or new experiment is needed to continue them. The adapters below describe
+that existing detailed path, which is optional for new ordinary work.
+
 The host chooses scientific actions. A small optional process adapter keeps that
 host running within an explicit task budget. Scientific jobs keep using their
 existing native handles; research state keeps using the journal, checkpoint and
@@ -34,6 +75,16 @@ has schema `etalon-host-task-capsule/1` and these fields:
 | `native` | `codex_executable`, `cwd`, `model`, `reasoning_effort`; paths are absolute |
 | `bounds` | Positive `max_host_turns` and `max_wall_seconds` |
 
+`native.cwd` may be a narrow task workspace instead of the whole source repository;
+absolute entry and method paths remain in the capsule. For a non-Git workspace,
+explicit `native.skip_git_repo_check=true` supplies the CLI flag. This does not
+change project trust, permissions or hook review. Profiles can retain the actual
+host's configured permissions rather than hard-coding a wider sandbox.
+Optional profile `context_max_bytes` passes the existing reader budget into the
+initial capsule and every subsequent current-note read (4096..65536; default
+16384). Omitted bodies retain exact navigation and coverage markers. This bounds
+the knowledge response, not the entire host prompt or its total token usage.
+
 Start with the capsule, not a copy of the parent's conversation. Read the current
 entry and the originals needed for this decision, including relevant counterevidence;
 expand elsewhere when the question demands it. Parallel specialists own separate
@@ -53,6 +104,17 @@ Each native turn ends with a structured `etalon-host-checkpoint/1`: `task_id`,
 | `complete` | The capsule's scientific completion condition was met |
 | `needs_user` | A concrete dependency requires information or new authority |
 
+When an existing external handle is pending, the host may write `wait.json` in its
+turn directory with schema `etalon-host-wait/1`, `poll_seconds`, and `checks`.
+Checks support native attempts, explicit file markers or JSON status values.
+The adapter reads status without another model call while unchanged; ready/failed
+results return to the host, and unknown/check errors remain explicit. No new job
+queue is created. Timer-only legacy waiting remains compatible.
+
+Native token usage and exact-ID linked child receipts are counted once. Missing
+usage or prices remain unknown. A fresh host receives the latest note and previous
+checkpoint; a resumed-session claim requires an observed matching native session ID.
+
 The adapter retains process/session identity, usage and output receipts and uses
 native `exec resume` after normal exit. A fresh independent session can instead
 receive the current entry and a new capsule; it must inspect the existing handles
@@ -67,6 +129,19 @@ process. Use an already reviewed native host installation; this adapter does not
 install hooks, change account settings or grant trust.
 
 ## Let producers publish usable results
+
+For an interrupted producer, `run_segment(..., recover=resume_saved_handles)`
+allows an explicit task-owned recovery callback. The adapter never calls the
+original producer again on an unknown outcome. The callback verifies completed
+outputs and native handles, then returns the ordinary result. Original duration
+remains unknown if interruption prevented measurement; recovery time is separate.
+
+`examples/read_research_work.py ENTRY --branch BRANCH --counter-bodies --packet`
+delivers current choices, scoped experience heads and all counter-evidence refs.
+Use `--receipt packet.json`, then `--previous packet.json` to deliver changes.
+Original reads and verification still run; this reduces output/context bytes,
+not verification coverage. A new host without the base receipt reads a full
+packet. Full historical material remains reachable through the work reference.
 
 For a task-owned Python method that already knows its calculation batch, use the
 optional `etalon.research.research_segment` adapter:
@@ -160,3 +235,23 @@ Skills describe how to choose and improve these resources. They do not accumulat
 the experiment history. Scientific freedom includes changing the action family,
 keeping a local method, trying an imperfect candidate, or deciding that no
 modification is useful.
+# Stable project knowledge
+
+Ordinary progress uses the existing configured journal and one project entry:
+`research.notes.save_progress(journal, entry, note)`. Branch heads share that
+entry; identical writes replay without adding a record. Keep execution artifacts
+under their original runs, task-local algorithms in methods, and note bodies in
+memory. Existing historical paths remain valid. No additional database schema,
+global research graph or forced workflow is introduced.
+
+The context MCP's card/summary and native hooks deliver condensed knowledge.
+`read_entry(..., view="knowledge")` checks the knowledge body; it explicitly
+reports original bodies as unread. Expand the returned details with `view="full"`
+for original verification and all evidence/counterevidence. Resource catalog
+reads current branch heads; `find_notes` retains historical and negative knowledge.
+Both use the same journal. Generated views/cursors can be rebuilt and are not
+scientific observations. Runtime receipts remain the execution authority.
+
+MolQuarry's existing curation accepts optional agent-authored knowledge;
+`build_target_bundle(view="knowledge")` returns it without preparing a structure
+bundle. Internal research feedback is written directly to the project journal.

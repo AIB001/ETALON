@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import posixpath
 import re
 from pathlib import Path, PurePosixPath
 
@@ -38,6 +39,7 @@ MAX_FILE_BYTES = 256 * 1024
 MAX_BUNDLE_BYTES = 4 * 1024 * 1024
 MAX_MEMBERS = 512
 SNAPSHOT_MANIFEST = "etalon-bundle-manifest.json"
+DEPENDENCIES = "skill-dependencies.json"
 
 
 def library_catalog() -> dict:
@@ -84,7 +86,7 @@ def bundle_root(slug: str) -> Path:
 
 
 def snapshot(slug: str, *, bundle_ref: dict | None = None) -> tuple[dict, dict[str, bytes]]:
-    """Read a bounded bundle once, computing the manifest from exactly those bytes."""
+    """Read one bounded bundle; host exports use snapshot_selection for dependencies."""
     if bundle_ref is None:
         root = bundle_root(slug)
     else:
@@ -136,10 +138,92 @@ def snapshot(slug: str, *, bundle_ref: dict | None = None) -> tuple[dict, dict[s
         "files": [{"path": name, "bytes": len(data), "sha256": sha256(data)}
                   for name, data in sorted(contents.items())],
     }
+    if DEPENDENCIES in contents:
+        manifest["dependencies"] = _dependencies(contents[DEPENDENCIES])
     manifest = {**manifest, "manifest_sha256": digest(manifest)}
     if bundle_ref and bundle_ref.get("manifest_sha256") not in (None, manifest["manifest_sha256"]):
         raise ValueError("bundle manifest digest mismatch")
     return manifest, contents
+
+
+def _dependencies(content: bytes) -> dict:
+    """Declarations travel with their exact bundle; old bundles remain unchanged."""
+    value = json.loads(content)
+    if (not isinstance(value, dict) or set(value) != {"schema", "required", "optional"}
+            or value["schema"] != "etalon-skill-dependencies/1"):
+        raise ValueError("skill dependencies need schema, required and optional")
+    names = []
+    for kind in ("required", "optional"):
+        rows = value[kind]
+        if (not isinstance(rows, list) or len(rows) > 64
+                or any(not isinstance(name, str) or not re.fullmatch(r"[a-z0-9][a-z0-9-]{0,63}", name)
+                       for name in rows)):
+            raise ValueError("skill dependencies must be bounded lists of exact slugs")
+        names.extend(rows)
+    if len(names) != len(set(names)):
+        raise ValueError("duplicate required or optional skill dependency")
+    return value
+
+
+def snapshot_selection(selection: list[dict]) -> tuple[list[dict], list[tuple[dict, dict[str, bytes]]]]:
+    """Read selected bundles and their declared required closure, never optional skills.
+
+    Required means files must be available, not that a procedure is activated.
+    Explicit archived/custom bundles cannot silently acquire current dependencies:
+    the caller must select their exact dependency bundles as well. Partial member
+    selections remain exact, including when they are another skill's dependency.
+    """
+    selected = [dict(row) for row in selection]
+    by_slug = {row["slug"]: row for row in selected}
+    explicit = set(by_slug)
+    if len(by_slug) != len(selected):
+        raise ValueError("ambiguous selected skill slug")
+    snapshots = []
+    output_names = set()
+    for chosen in selected:
+        slug = chosen["slug"]
+        manifest, contents = snapshot(slug, bundle_ref=chosen.get("bundle_ref"))
+        if manifest["name"] in output_names:
+            raise ValueError("selected skills collide in the host export directory")
+        output_names.add(manifest["name"])
+        if chosen.get("manifest_sha256", manifest["manifest_sha256"]) != manifest["manifest_sha256"]:
+            raise ValueError("workset skill version changed before export")
+        if "members" in chosen:
+            if not set(chosen["members"]) <= set(contents):
+                raise ValueError("workset skill member is unavailable")
+            contents = {name: contents[name] for name in chosen["members"]}
+        snapshots.append((manifest, contents))
+        for required in manifest.get("dependencies", {}).get("required", []):
+            if chosen.get("bundle_ref") is not None and required not in explicit:
+                raise ValueError(f"archived/custom skill {slug!r} requires an explicitly selected "
+                                 f"dependency bundle: {required!r}")
+            if required in by_slug:
+                continue
+            if required not in WORKFLOWS:
+                raise ValueError(f"required skill dependency is unavailable: {required!r}")
+            dependency = {"slug": required}
+            selected.append(dependency)
+            by_slug[required] = dependency
+        if len(selected) > 64:
+            raise ValueError("skill dependency closure exceeds 64 bundles")
+    # A caller-selected partial dependency stays partial. Report an unavailable
+    # link instead of restoring excluded instructions behind the host's back.
+    available = {f"{manifest['name']}/{member}" for manifest, contents in snapshots
+                 for member in contents}
+    for manifest, contents in snapshots:
+        required_names = {WORKFLOWS.get(slug, slug)
+                          for slug in manifest.get("dependencies", {}).get("required", [])}
+        for member, data in contents.items():
+            if not member.endswith(".md"):
+                continue
+            for target in re.findall(r"\[[^\]]*\]\(([^)]+)\)", data.decode("utf-8")):
+                if not target.startswith("../"):
+                    continue
+                path = posixpath.normpath(posixpath.join(manifest["name"],
+                    posixpath.dirname(member), target.split("#", 1)[0]))
+                if path.split("/", 1)[0] in required_names and path not in available:
+                    raise ValueError(f"required skill member is unavailable in selection: {path}")
+    return selected, snapshots
 
 
 def _selection(selected: list[str] | None, known, label: str) -> list[str]:

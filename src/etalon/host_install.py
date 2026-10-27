@@ -64,11 +64,12 @@ def _finish(archive, intent, adapter):
     _immutable(archive / "receipt.json", adapter._json({**intent, "status": "complete"}))
 
 
-def _initial(root, entry, host, hook_transport, adapter):
+def _initial(root, entry, host, hook_transport, adapter, selected_skills=None):
     """Publish a complete new directory; preserve a resumable sibling staging area."""
     config = {"entry": str(entry), "state_dir": str(root / ".etalon/research-hook-receipts"),
               "launcher": str(root / ".etalon/research-hook.py")}
-    current, files = adapter._payload(host, config, hook_transport=hook_transport, portable=True)
+    current, files = adapter._payload(host, config, hook_transport=hook_transport, portable=True,
+                                     selected_skills=selected_skills)
     new_bytes = adapter._json(current)
     stage = adapter._root(root.parent / (".etalon-install-" + hashlib.sha256(str(root).encode()).hexdigest()[:24]))
     operation = hashlib.sha256(b"initial\0" + new_bytes).hexdigest()
@@ -111,7 +112,7 @@ def _initial(root, entry, host, hook_transport, adapter):
             "operation": str(final_archive), "native_activation": "requires_host_discovery_and_trust_review"}
 
 
-def install(target, *, research_entry, host="codex", hook_transport="mcp_tool"):
+def install(target, *, research_entry, host="codex", hook_transport="mcp_tool", selected_skills=None):
     """Create a project or rebind an unchanged portable export after moving it.
 
     No dependency installation or shared-runtime upgrade is implicit. Existing
@@ -126,7 +127,7 @@ def install(target, *, research_entry, host="codex", hook_transport="mcp_tool"):
     lock = root.parent / (".etalon-install-" + hashlib.sha256(str(root).encode()).hexdigest()[:24] + "-writer")
     with adapter._consumer_lock(_io(lock)):
         if not _io(root).exists():
-            return _initial(root, entry, host, hook_transport, adapter)
+            return _initial(root, entry, host, hook_transport, adapter, selected_skills)
         manifest_path = adapter._member(root, adapter.MANIFEST)
         if not _io(manifest_path).is_file():
             raise ValueError("existing project is not an ETALON export; choose a new adapter directory")
@@ -138,6 +139,9 @@ def install(target, *, research_entry, host="codex", hook_transport="mcp_tool"):
             raise ValueError("rebind requires a portable ETALON export")
         if old.get("host") != host:
             raise ValueError("install host differs; use a separate project for another host")
+        if selected_skills is not None and selected_skills != old.get("selected_skills"):
+            raise ValueError("install skill selection differs; export a new adapter version")
+        selected_skills = old.get("selected_skills")
         workset = None
         if "task_workset_digest" in old:
             workset = json.loads(_read(adapter._member(root, ".etalon/task-workset.json")))
@@ -146,7 +150,8 @@ def install(target, *, research_entry, host="codex", hook_transport="mcp_tool"):
         config = {"entry": str(entry), "state_dir": str(root / ".etalon/research-hook-receipts"),
                   "launcher": str(root / ".etalon/research-hook.py")}
         current, files = adapter._payload(host, config, workset,
-                                          hook_transport=hook_transport, portable=True)
+                                          hook_transport=hook_transport, portable=True,
+                                          selected_skills=selected_skills)
         new_bytes = adapter._json(current)
         pending = None
         installation_root = adapter._member(root, ".etalon/installations")

@@ -81,6 +81,16 @@ class PaperReview(InputModel):
     reason: str
 
 
+class Knowledge(InputModel):
+    """Agent-authored synthesis; useful conditions stay beside the conclusion."""
+    statement: str = Field(min_length=1)
+    conditions: dict
+    implications: list[str]
+    limitations: list[str]
+    references: list[EvidenceReference] = Field(min_length=1)
+    basis: Literal["reported_observation", "authors_interpretation", "agent_inference"]
+
+
 class Curation(InputModel):
     schema_version: Literal["1"] = "1"
     reviewed_at: str
@@ -88,6 +98,7 @@ class Curation(InputModel):
     candidates: list[Candidate]
     papers_reviewed: list[PaperReview]
     limitations: list[str]
+    knowledge: list[Knowledge] = Field(default_factory=list)
 
 
 def normalized_measurement(measurement: Measurement):
@@ -154,6 +165,13 @@ def bindingdb_evidence_id(record):
 def integrate_review(dossier, curation: Curation):
     """Link reviewed assertions to fetched records, without pretending to validate their science."""
     index = reference_index(dossier)
+    for item in curation.knowledge:
+        for ref in item.references:
+            if (ref.source, ref.record_id) not in index:
+                raise ValueError(f"Unfetched knowledge basis: {ref.source}:{ref.record_id}")
+            if ref.source == "europepmc" and ref.record_id.startswith("PMC"):
+                if not any(ref.locator in {p["block_id"], p["locator"]} for p in dossier["fulltexts"][ref.record_id]):
+                    raise ValueError(f"Unknown full-text locator: {ref.record_id}:{ref.locator}")
     targets = {t["accession"] for t in dossier["targets"]}
     candidates, conflicts, identities, ids = [], [], defaultdict(list), set()
     for candidate in curation.candidates:
@@ -216,4 +234,19 @@ def integrate_review(dossier, curation: Curation):
         "limitations": curation.limitations,
         "coverage": dossier["coverage"],
         "claim": "Reviewed candidates within declared coverage; not all known inhibitors.",
+        **({"knowledge": [k.model_dump() for k in curation.knowledge]} if curation.knowledge else {}),
+    }
+
+
+def knowledge_context(reviewed):
+    """Deliver the host's synthesis without re-emitting every assay or source row."""
+    return {
+        "knowledge": [{k: v for k, v in item.items() if k != "references"}
+                      for item in reviewed.get("knowledge", [])],
+        "limitations": reviewed["limitations"],
+        "conflicts": [{k: v for k, v in row.items() if k != "measurements"}
+                      for row in reviewed["conflicts"]],
+        "unreviewed_paper_count": reviewed["unreviewed_paper_count"],
+        "coverage": reviewed["coverage"],
+        "basis": "agent-authored synthesis; full reviewed material retains source references",
     }

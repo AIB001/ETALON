@@ -12,13 +12,11 @@ import os
 from contextlib import closing
 from pathlib import Path
 import re
-import shutil
 import sqlite3
-import tempfile
 
 from etalon.active import CampaignSpec, CampaignStore, Endpoint
 from etalon.active.schema import canonical, digest
-from etalon.host import _consumer_lock
+from etalon.runtime.files import _consumer_lock, _read, _save, _copy, _sync_directory
 from .continuation import (CHECKPOINT, STEP, MAX_CONTENT_BYTES, _content_result, _exact_refs,
                            read_content, record_content, validate_content)
 from .evidence_refs import (
@@ -34,73 +32,12 @@ DISPOSITION = "etalon-research-publication-disposition/1"
 TERMINAL_DISPOSITIONS = {"withdrawn", "replaced"}
 
 
-def _read(path):
-    path = Path(path)
-    if path.stat().st_size > 4 * 1024 * 1024:
-        raise EvidenceError("publication metadata exceeds 4 MiB")
-    return json.loads(path.read_text(encoding="utf-8-sig"))
 
 
-def _sync_directory(path):
-    if os.name != "nt":
-        fd = os.open(path, os.O_RDONLY)
-        try:
-            os.fsync(fd)
-        finally:
-            os.close(fd)
 
 
-def _save(path, value, *, replace=False):
-    """Durable bytes; immutable by default. Only the index and entry are replaced."""
-    path = Path(path)
-    path.parent.mkdir(parents=True, exist_ok=True)
-    data = (canonical(value) + "\n").encode()
-    with tempfile.NamedTemporaryFile(dir=path.parent, prefix=".publication-", delete=False) as out:
-        temporary = Path(out.name)
-        out.write(data)
-        out.flush()
-        os.fsync(out.fileno())
-    try:
-        if replace:
-            os.replace(temporary, path)
-        else:
-            try:
-                os.link(temporary, path)
-            except FileExistsError:
-                if path.read_bytes() != data:
-                    raise EvidenceError("immutable publication metadata conflicts: " + path.name) from None
-        _sync_directory(path.parent)
-    finally:
-        temporary.unlink(missing_ok=True)
 
 
-def _copy(source, target, identity):
-    """A complete copy is recoverable even if the producer's original is gone."""
-    target = Path(target)
-    if target.exists():
-        if file_identity(target) != identity:
-            raise EvidenceError("saved publication result identity changed")
-        return
-    target.parent.mkdir(parents=True, exist_ok=True)
-    temporary = None
-    try:
-        with tempfile.NamedTemporaryFile(dir=target.parent, prefix=".publication-", delete=False) as out:
-            temporary = Path(out.name)
-            with Path(source).open("rb") as inp:
-                shutil.copyfileobj(inp, out)
-            out.flush()
-            os.fsync(out.fileno())
-        if file_identity(temporary) != identity:
-            raise EvidenceError("producer result identity changed; no scientific retry performed")
-        try:
-            os.link(temporary, target)
-        except FileExistsError:
-            if file_identity(target) != identity:
-                raise EvidenceError("saved publication result identity conflicts") from None
-        _sync_directory(target.parent)
-    finally:
-        if temporary is not None:
-            temporary.unlink(missing_ok=True)
 
 
 def _stage(root, phase, payload):

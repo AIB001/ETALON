@@ -8,6 +8,7 @@ import sqlite3
 from pathlib import Path
 
 from etalon.active.schema import canonical, digest
+from .selection import byte_size, project_json
 from .evidence_refs import (
     CONTENT_SCHEMAS, EvidenceError, EvidenceResolver, EvidenceWorkspace, _identity, _local, file_identity,
     load_workspace, make_ref, validate_claim, validate_ref,
@@ -129,6 +130,14 @@ def _project_contents(ws, source, indexed):
             elif schema == "etalon-method-revision/1":
                 from .method_revision import build_method_revision
                 build_method_revision(**{k: v for k, v in payload.items() if k != "schema"})
+            elif schema == "etalon-research-note/1":
+                from .notes import _check_result_meanings
+                for key in ("task_id", "branch_id", "question", "summary"):
+                    if not isinstance(payload.get(key), str) or not payload[key].strip():
+                        raise EvidenceError("note requires " + key)
+                if not isinstance(payload.get("conditions", {}), dict):
+                    raise EvidenceError("note conditions must be explicit fields")
+                _check_result_meanings(payload)
             else:
                 from .continuation import validate_content
                 validate_content(payload)
@@ -510,25 +519,60 @@ def _slice_text(text, offset, limit):
             "offset": offset, "next_offset": end if end < len(data) else None, "total_bytes": len(data)}
 
 
+def _fit_read(result, max_bytes, envelope):
+    """Fit an existing byte fragment without changing source identity or coverage."""
+    if byte_size(result, envelope) <= max_bytes:
+        return result
+    fragment = result.get("fragment")
+    if fragment is None:
+        raise EvidenceError("evidence metadata and wrapper exceed max_bytes; narrow the request")
+    data = base64.b64decode(fragment["content"])
+    low, high = 0, len(data)
+    while low < high:
+        middle = (low + high + 1) // 2
+        end = fragment["offset"] + middle
+        fragment.update(content=base64.b64encode(data[:middle]).decode(),
+            next_offset=end if end < fragment["total_bytes"] else None)
+        if byte_size(result, envelope) <= max_bytes:
+            low = middle
+        else:
+            high = middle - 1
+    end = fragment["offset"] + low
+    fragment.update(content=base64.b64encode(data[:low]).decode(),
+        next_offset=end if end < fragment["total_bytes"] else None)
+    if (data and not low) or byte_size(result, envelope) > max_bytes:
+        raise EvidenceError("evidence metadata and wrapper exceed max_bytes; narrow the request")
+    return result
+
+
 def read_evidence(workspace=None, ref=None, *, view="record", member=None, selector=None, offset=0, limit=100,
-                  entry=None, read_context=None):
+                  entry=None, read_context=None, max_bytes=MAX_READ_BYTES, response_envelope=None):
     from .entry import resolve_read_workspace
     return _read_evidence(resolve_read_workspace(workspace, entry=entry, read_context=read_context),
-                          ref, view=view, member=member, selector=selector, offset=offset, limit=limit)
+                          ref, view=view, member=member, selector=selector, offset=offset, limit=limit,
+                          max_bytes=max_bytes, response_envelope=response_envelope)
 
 
 def _read_evidence(workspace, ref, *, view="record", member=None, selector=None, offset=0, limit=100,
-                   collection=None):
+                   collection=None, max_bytes=MAX_READ_BYTES, response_envelope=None):
     """Internal single-call reuse; callers must validate the collected view's lifetime."""
     ws = workspace if collection is not None and isinstance(workspace, EvidenceWorkspace) else load_workspace(workspace)
     ref = validate_ref(ref)
     _bounded_int(offset, 0, 2**63 - 1, "offset")
     _bounded_int(limit, 1, 32768, "limit")
+    _bounded_int(max_bytes, 4096, MAX_READ_BYTES, "max_bytes")
     if view not in {"record", "summary", "lineage", "artifact"}:
         raise EvidenceError("unsupported evidence view")
     selector = selector if selector is not None else ref.get("selector") if view == "artifact" else None
-    if selector not in (None, "bytes"):
-        raise EvidenceError("only the bytes selector is supported")
+    json_pointers = selector.get("json") if isinstance(selector, dict) else None
+    if isinstance(selector, dict):
+        if (set(selector) != {"json"} or not isinstance(json_pointers, list)
+                or not 1 <= len(json_pointers) <= 16
+                or len(set(p for p in json_pointers if isinstance(p, str))) != len(json_pointers)
+                or any(not isinstance(p, str) or not p.startswith("/") or p == "/" for p in json_pointers)):
+            raise EvidenceError('JSON selection requires {"json": [1..16 explicit pointers]}')
+    elif selector not in (None, "bytes"):
+        raise EvidenceError('use bytes or {"json": [explicit pointers]}')
     if member is not None and (not isinstance(member, str) or not member):
         raise EvidenceError("member must be explicit text")
     if view != "artifact" and (member is not None or selector is not None):
@@ -545,7 +589,7 @@ def _read_evidence(workspace, ref, *, view="record", member=None, selector=None,
                 break
             result["coverage"].append(cov)
         result["warnings"] = [{"code": "see_source_coverage"}] if warnings else []
-        return result
+        return _fit_read(result, max_bytes, response_envelope)
     body = row["record"]
     if digest(body) != ref["record_digest"]:
         raise EvidenceError("record digest mismatch")
@@ -629,6 +673,25 @@ def _read_evidence(workspace, ref, *, view="record", member=None, selector=None,
             raise EvidenceError("ref artifact identity mismatch")
         try:
             path = EvidenceResolver._from_validated(ws, ref["source_id"]).resolve(artifact["path"], sha256=artifact["sha256"], bytes=artifact["bytes"])
+            if json_pointers is not None:
+                if artifact["bytes"] > MAX_SOURCE_BYTES:
+                    raise EvidenceError("JSON original exceeds read bound; use byte pages or a scientific reducer")
+                data = path.read_bytes()
+                if len(data) != artifact["bytes"] or hashlib.sha256(data).hexdigest() != artifact["sha256"]:
+                    raise EvidenceError("artifact changed during read")
+                try:
+                    decoded = json.loads(data.decode("utf-8-sig"))
+                except (ValueError, UnicodeError) as exc:
+                    raise EvidenceError("selected artifact is not UTF-8 JSON") from exc
+                result["verification"]["artifact"] = "verified"
+                result["ref"] = {**ref, "sha256": artifact["sha256"], "bytes": artifact["bytes"]}
+                if member is not None:
+                    result["ref"]["member"] = member
+                try:
+                    return project_json(result, decoded, json_pointers, offset=offset, limit=min(limit, 50),
+                        max_bytes=max_bytes, envelope=response_envelope)
+                except ValueError as exc:
+                    raise EvidenceError(str(exc)) from exc
             with path.open("rb") as handle:
                 handle.seek(offset)
                 data = handle.read(limit)
@@ -644,9 +707,9 @@ def _read_evidence(workspace, ref, *, view="record", member=None, selector=None,
                                   "next_offset": end if end < artifact["bytes"] else None, "total_bytes": artifact["bytes"]}
         except OSError as exc:
             result.update(availability="unavailable", missing=[type(exc).__name__])
-    if len(canonical(result).encode()) > MAX_READ_BYTES:
+    if byte_size(result, response_envelope) > max_bytes and "fragment" not in result:
         # Metadata can be arbitrarily large too. Return a bounded original JSON fragment.
         result = {"ref": ref, "view": view, "truncated": True,
                   "fragment": _slice_text(canonical(body), offset, min(limit, 32768)),
                   "verification": {"record": "verified", "artifact": "not_checked"}}
-    return result
+    return _fit_read(result, max_bytes, response_envelope)

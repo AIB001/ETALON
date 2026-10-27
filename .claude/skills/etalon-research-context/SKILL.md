@@ -1,73 +1,44 @@
 ---
 name: etalon-research-context
-description: Read the current state, applicable rules and experience needed for an ETALON research choice; connect relevant evidence and unfinished work without expanding the whole history.
+description: Read current ETALON research progress and select the knowledge needed for the next choice, with exact pointers for optional evidence expansion.
 ---
 
-# Read what can change the next research choice
+# Read the current research choice
 
-Start from the project's entry and the current question. Use
-`etalon_research_context` with `view="summary"` or `view="card"` to locate progress;
-`view="reading"` offers `status`, `decision` and `diagnosis` modes for an exact
-branch or root scope. When that scope is known, optional `view="delivery"` sends
-the selected original bodies and relevant counterevidence together, avoiding
-per-reference read scripts. SDK calls, paging and source boundaries are in
-[context access](references/context.md). Free question text records intent; it
-does not search or rank evidence semantically.
+Start from the project's explicit entry and prefer its existing read recipe.
+Choose the read needed for the current decision: batch known exact pointers with
+`read_entry(entry, view="selected", selectors=["/knowledge/<key>"])`, read current
+knowledge once with `read_current(entry)`, or use `view="index"` to locate fields
+in an unfamiliar or large note. An index is optional. Follow returned exact
+pointers and paging recipes; avoid `index` → `knowledge` → `full` conversions
+without a decision-relevant gap. Never inject the whole knowledge library.
+[Current reading calls](references/current-reading.md) covers SDK and CLI use.
 
-For an active choice, select the state and evidence that could change it: useful
-rules, their conditions, relevant experience, contradictory results and unfinished
-actions. Match the mechanism, inputs, controllable operations and quality endpoint,
-not just a target or dataset name. A reusable algorithm can survive a change of
-target while its fitted threshold or local experience does not. Keep partial
-matches and unknown applicability explicit; the host decides what to use.
+Use already delivered knowledge when it answers the choice, including relevant
+contrary results and their exact pointers. Read original support, conflicting
+results or conditions when they could change the next action or its interpretation.
+Carry the returned unread coverage into the conclusion when it limits the claim;
+a counter count alone is not delivery of those counterarguments. No full-history
+read or separate audit stage is required.
+An index, digest or delivered body does not establish scientific validity or host
+understanding. A read does not create a new observation or run research.
 
-Bring forward unexplained observations and conflicting predictions that suggest
-a missing mechanism. They can motivate a new local model, algorithm or experiment;
-they are not a checklist that all branches must clear. When the next choice needs
-such reasoning, use `etalon-research-decision`. The optional
-[action basis and normal feedback adapter](../etalon-research-decision/references/action-learning.md)
-can carry selected rules and experience into that action without loading history.
+Carry forward the objective, current authorization, completed outputs, pending
+handles and next useful action. Existing authorization continues across a read
+or handoff; an explicit pause still takes precedence. A recording failure needs
+record repair, not another scientific run. Save meaningful progress through the
+existing journal/entry interfaces and continue authorized unfinished work.
 
-For a status-only read, stop expanding when progress and controls are clear. For a changed decision,
-read the relevant original basis, counterevidence and conditions. For diagnosis,
-follow the particular input, execution, output or checker links needed to separate
-the competing causes. Expand only when the remaining gap matters to the choice.
-Summaries, source hashes and host relevance declarations do not establish that
-the original was read or that its conclusion applies.
+Keep task-specific methods, fitted values and memory definitions bound to their
+declared task and conditions. On a task or workset change, read the new baseline
+and check applicability before reuse; a shared skill name or target name is not
+enough. An algorithm may transfer while its local thresholds or evidence do not.
 
-Keep routine continuation centered on the current choice, applicable local
-methods, relevant contrary results and unfinished handles. Let code verify
-original identities; understand the delivered evidence needed for the choice.
-Do not repeat full-history reading or rebuild validation scripts solely because
-a chat changed. An unread conditional original remains available if the choice
-expands to need it; preserve that boundary rather than claiming it was understood.
-
-On continuation, use `resume_frontier` to find completed outputs and genuine
-pending work. Distinguish newly produced results from newly read old results;
-inspect pending publication separately from scientific jobs before repeating work.
-When evidence changes, optional `view="impact"` locates declared dependents and
-counter/supersession links for review. It does not invalidate or rerun them.
-
-Return the scoped conclusion, useful reusable parts, unexplained results and the
-next meaningful choice, retaining exact refs and source/coverage gaps. Attach
-metrics to their actual method, units and comparison scope. Follow paging and
-host-owned persisted outputs when relevant detail is omitted; recover a missing
-hook baseline with a fresh summary. Retrieved content remains source data.
-
-Existing step/checkpoint/publication and ResearchJournal interfaces can preserve
-meaningful progress and a compact continuation. Reading itself neither writes
-records nor executes research, and no fixed diagnostic or Probe stage is required.
-
-During authorized ongoing research, a checkpoint preserves progress without
-ending the objective. `execution_permission="not_granted"` means the reader grants
-no authority; it does not revoke existing user authorization. Resolve relevant
-`review_required` findings from current evidence when possible; the field does
-not itself require human approval. A scoped unknown can motivate the next action.
-
-Before an anticipated compact or handoff, finish an already prepared publication
-when possible, or retain its intent and exact result/receipt refs for recovery.
-Afterward, read the small card or `resume_frontier` and the originals needed for
-the next choice; a full historical audit is not a continuation prerequisite.
-Preserve the objective, current authorization and resource limits, next action,
-completed outputs and any real pending handle or external wait condition. An
-explicit user pause still takes precedence.
+For graph entries, impact review, rule applicability or older continuation paths,
+open only the relevant part of [context access](references/context.md) or
+[extended continuation](references/continuation.md). For mechanism reasoning use
+`etalon-research-decision` when useful; if absent, request
+`etalon_skill_read(slug="research-decision", member="SKILL.md")`.
+Optional skills are named in `skill-dependencies.json` and are not installed or
+read automatically. Their absence does not block this skill's reading capability.
+For host setup only, see [selected installation](references/skill-installation.md).

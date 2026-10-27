@@ -1,0 +1,5 @@
+{
+  "schema": "etalon-skill-dependencies/1",
+  "required": [],
+  "optional": ["research-decision", "skill-improvement", "research", "research-index"]
+}

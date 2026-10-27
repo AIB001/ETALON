@@ -69,19 +69,20 @@ def topology_sections(path):
     return atoms, bonds
 
 
-def chemistry(system, mapping, topology):
+def chemistry(system, mapping, topology, *, root=None, ligand_path=None, coordinates_path=None):
     from rdkit import Chem, RDConfig
     from rdkit.Chem import ChemicalFeatures
-    root = P4 / 'controls' / system
+    root = Path(root) if root is not None else P4 / 'controls' / system
     protein, protein_bonds = topology_sections(root / 'topol.top')
     ligand, ligand_bonds = topology_sections(root / 'ligand.itp')
     offset = len(protein)
     if list(mapping['ligand_indices0']) != list(range(offset, offset + len(ligand))):
         raise ValueError('Ligand index map differs from explicit native topology')
-    molecule = Chem.SDMolSupplier(str(P4 / 'inputs' / system.split('-')[1] / 'ligand.sdf'), removeHs=False)[0]
+    ligand_path = ligand_path or P4 / 'inputs' / system.split('-')[1] / 'ligand.sdf'
+    molecule = Chem.SDMolSupplier(str(ligand_path), removeHs=False)[0]
     if molecule is None or molecule.GetNumAtoms() != len(ligand):
         raise ValueError('Missing explicit-H ligand graph')
-    gro_lines = (root / 'complex.gro').read_text('utf-8').splitlines()
+    gro_lines = Path(coordinates_path or root / 'complex.gro').read_text('utf-8').splitlines()
     raw_names = [line[10:15].strip() for line in gro_lines[2:-1]]
     # MDTraj normalizes e.g. ILE CD -> CD1 and H1 -> H. Native GRO and ITP
     # names, element identities and indexed positions establish the binding.

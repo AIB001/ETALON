@@ -24,11 +24,64 @@ MAX_RESPONSE_BYTES = 65536
 MAX_SKILLS = 64
 QUERY_PAGE = 50
 TYPED_KINDS = {
+    "etalon-research-note/1": "experience",
     "etalon-method-version/1": "method",
     "etalon-research-workflow/1": "workflow",
     "etalon-research-claim/1": "claim",
     "etalon-method-experience/1": "experience",
 }
+
+
+def _note_catalog(entry, *, kinds, skill_refs, purpose, limit, cursor, max_bytes, source_ids):
+    """Expose current project heads through the existing catalog, not a new index."""
+    from .notes import read_entry
+    selected = _selection(kinds if kinds is not None else sorted(KINDS), "kinds", allowed=KINDS)
+    if purpose not in {None, "research"} or source_ids is not None:
+        raise EvidenceError("note catalog uses its project journal in research scope")
+    skill_rows = _skill_inventory(skill_refs, None)
+    branches = sorted(entry.get("branches", {entry["branch_id"]: entry["record_id"]}))
+    stamp = digest({"entry": entry, "kinds": selected, "skills": skill_rows})
+    offset = 0
+    if cursor is not None:
+        try:
+            saved = json.loads(base64.urlsafe_b64decode(cursor))
+            if saved["stamp"] != stamp:
+                raise StaleCursorError("project heads or selection changed; restart catalog")
+            _bounded(saved["offset"], 0, len(branches) + len(skill_rows), "offset")
+            offset = saved["offset"]
+        except (KeyError, TypeError, ValueError) as exc:
+            if isinstance(exc, EvidenceError):
+                raise
+            raise EvidenceError("invalid project catalog cursor") from None
+    rows = []
+    def render(end):
+        more = end < len(branches) + len(skill_rows)
+        return dict(schema=SCHEMA, items=rows,
+            next_cursor=base64.urlsafe_b64encode(canonical({"stamp": stamp, "offset": end}).encode()).decode() if more else None,
+            coverage={"scope": "current_project_heads_and_selected_skills", "discovery_complete": not more,
+                "status": "partial" if more else "complete", "originals": "not_read",
+                "outside_scope": "historical notes remain available through find_notes and exact references"},
+            warnings=[], automatic_adoption=False, execution_permission="not_granted")
+    while offset < len(branches) + len(skill_rows) and len(rows) < limit:
+        if offset < len(branches):
+            context = read_entry(entry, branch_id=branches[offset], view="knowledge")
+            k = context["knowledge"]
+            row = dict(kind="experience", resource_id=context["record_id"], branch_id=context["branch_id"],
+                summary=k["summary"], conditions=k.get("conditions", {}), outcome=k.get("outcome"),
+                content_ref=context["details"], coverage=context["coverage"], applicability="host_selects")
+            if "definitions" in context:
+                row["definitions"] = context["definitions"]
+        else:
+            row = skill_rows[offset - len(branches)]
+        if row["kind"] in selected:
+            rows.append(row)
+            if len(canonical(render(offset + 1)).encode()) > max_bytes:
+                rows.pop()
+                if not rows:
+                    raise EvidenceError("one resource exceeds delivery budget; use its exact knowledge entry")
+                break
+        offset += 1
+    return render(offset)
 
 
 def _bounded(value, lower, upper, name):
@@ -251,6 +304,12 @@ def build_resource_catalog(workspace=None, *, entry=None, read_context=None,
     _bounded(limit, 1, 50, "limit")
     _bounded(scan_limit, 1, 200, "scan_limit")
     _bounded(max_bytes, 4096, MAX_RESPONSE_BYTES, "max_bytes")
+    if entry is not None and workspace is None and read_context is None:
+        from .notes import ENTRY, entry_value
+        candidate = entry_value(entry)
+        if candidate.get("schema") == ENTRY:
+            return _note_catalog(candidate, kinds=kinds, skill_refs=skill_refs, purpose=purpose,
+                limit=limit, cursor=cursor, max_bytes=max_bytes, source_ids=source_ids)
     # Validate pinned contexts before inspecting their fields, and enforce the
     # exactly-one selector rule before any optional entry metadata is consulted.
     ws = load_workspace(resolve_read_workspace(workspace, entry=entry, read_context=read_context))

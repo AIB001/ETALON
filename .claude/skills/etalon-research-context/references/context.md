@@ -39,9 +39,10 @@ costs separately; cached input tokens are not zero-cost work.
 
 When using experience for a new action, choose the particular rule and condition
 that matter, including conflicting experience and remaining coverage gaps. The
-optional [action-learning adapter](../../etalon-research-decision/references/action-learning.md)
-accepts those selected references. It does not perform semantic retrieval or
-choose applicability, and no adapter call is required for a status answer.
+optional action-learning adapter accepts those selected references. Retrieve it
+with `etalon_skill_read(slug="research-decision", member="references/action-learning.md")`
+when useful. It does not perform semantic retrieval or choose applicability, and
+no adapter call or decision-bundle installation is required for a status answer.
 
 ## Deliver the selected evidence directly
 

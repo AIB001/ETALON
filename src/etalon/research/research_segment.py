@@ -213,12 +213,16 @@ def publish_segment_result(result, work, directory, *, entry, operation_id, pare
         return receipt
 
 
-def run_segment(work, directory, *, producer, method_id, entry, operation_id, parent_entry=None):
+def run_segment(work, directory, *, producer, method_id, entry, operation_id, parent_entry=None,
+                recover=None):
     """Call a task-owned producer(work, output_directory) once, then publish.
 
     The producer batches known operations until a new residual requires judgment.
     If the process dies before saving its response, inspect its outputs/handles;
     this adapter will not invoke that producer again on an uncertain outcome.
+    An explicit task-owned recover(work, directory) callback may inspect saved
+    handles, reuse completed operations and finish the result. It owns native
+    recovery; this adapter neither retries scientific work nor infers completion.
     """
     validate_work(work)
     if not isinstance(method_id, str) or not method_id.strip():
@@ -238,7 +242,14 @@ def run_segment(work, directory, *, producer, method_id, entry, operation_id, pa
             saved = _read(response)
             result, producer_wall = saved["result"], saved["producer_wall_seconds"]
         elif existed:
-            raise EvidenceError("unknown producer outcome; inspect existing outputs/handles, do not automatically repeat")
+            if recover is None:
+                raise EvidenceError("unknown producer outcome; inspect existing outputs/handles, do not automatically repeat")
+            started = time.perf_counter()
+            result = _validate_result(recover(work, directory))
+            producer_wall = None  # The interrupted attempt was not fully timed.
+            _save(response, {"result": result, "producer_wall_seconds": producer_wall,
+                "recovery_wall_seconds": time.perf_counter() - started,
+                "cost_status": "partial; original attempt duration unknown"})
         else:
             # Bind the destination before executing the method. A second writer
             # advancing it during computation must not be silently overwritten.
@@ -250,7 +261,11 @@ def run_segment(work, directory, *, producer, method_id, entry, operation_id, pa
             _save(response, {"result": result, "producer_wall_seconds": producer_wall})
         publication = publish_segment_result(result, work, directory, entry=entry,
             operation_id=operation_id, parent_entry=parent_entry)
-    return {**publication, "producer_reused": reused, "producer_wall_seconds": producer_wall,
+    saved_response = _read(response)
+    return {**publication, "producer_reused": reused,
+        "producer_recovered": "recovery_wall_seconds" in saved_response,
+        "producer_wall_seconds": producer_wall,
+        "recovery_wall_seconds": saved_response.get("recovery_wall_seconds"),
         "invocation_wall_seconds": time.perf_counter() - began,
         "compact_bytes": file_identity(directory / "result.json")["bytes"] + file_identity(directory / "work.json")["bytes"],
         "host_token_cost": None, "cost_scope": "local adapter/producer elapsed and compact file bytes; no token or scientific gain inference"}

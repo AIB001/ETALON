@@ -11,7 +11,7 @@ profile = make_task_profile(
     critical_conditions=["target", "objective"], available_stages=["input"])
 ```
 
-Unknown values are `None`. A resource part has exactly:
+Unknown values are `None`. A resource part has these required fields:
 
 ```python
 part = {
@@ -24,6 +24,17 @@ part = {
 
 Only declare irrelevance where the capability actually does not depend on that
 dimension. Dependencies are `{resource_id, part_id}` pairs and must be enabled.
+Both task profiles and resource parts accept an optional `definitions` map from
+meaning name to its SHA256 (for example `metric:dual_contact`). Task profiles may
+use `None` for an unknown definition; resource parts declare exact identities.
+Use `result_semantics.profile_definitions(profile)` when using a producer result
+profile. A method's identity may change without changing its external metric
+definition. Missing definitions do not match; label equality is insufficient.
+An independent parser/template can explicitly include `definition:<name>` in
+`irrelevant`, but cannot also declare that definition as a dependency.
+`workset_summary(..., definitions=expected)` suppresses old activation when a
+requested definition is missing or changed. The host can still explore or build
+a new compatible workset. These optional bindings do not migrate old history.
 For skills use `content_ref={slug, manifest_sha256}` from `skills.snapshot`;
 optional `bundle_ref={root, manifest_sha256}` pins an external complete bundle.
 Other resources use existing exact evidence refs. `kind` is skill, method,

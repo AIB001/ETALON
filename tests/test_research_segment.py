@@ -80,6 +80,28 @@ def test_producer_unknown_outcome_and_changed_method_do_not_repeat(case, tmp_pat
     assert calls == [True]
 
 
+def test_explicit_handle_recovery_does_not_rerun_producer(case, tmp_path):
+    work = segment.work_from_entry('Fixture native recovery', case['parent'])
+    calls = []
+    def producer(work, directory):
+        calls.append('launch')
+        (directory/'native-handle.json').write_text('{"handle":"fixture-owned"}')
+        raise SystemExit('Fixture host exits after publishing the native handle')
+    def recover(work, directory):
+        assert json.loads((directory/'native-handle.json').read_text())['handle']=='fixture-owned'
+        calls.append('recover')
+        return response(case)
+    kwargs=dict(producer=producer,method_id='native-fixture/1',entry=case['entry'],
+                parent_entry=case['parent'],operation_id='recover-native')
+    with pytest.raises(SystemExit):
+        segment.run_segment(work,tmp_path/'native',**kwargs)
+    receipt=segment.run_segment(work,tmp_path/'native',recover=recover,**kwargs)
+    assert receipt['producer_recovered'] and receipt['producer_wall_seconds'] is None
+    assert receipt['recovery_wall_seconds']>=0 and calls==['launch','recover']
+    again=segment.run_segment(work,tmp_path/'native',recover=recover,**kwargs)
+    assert again['producer_reused'] and calls==['launch','recover']
+
+
 def test_next_segment_is_executable_context_with_checked_dependencies(case, tmp_path):
     command = {"argv": [sys.executable, "-c", "print('fixture')"], "cwd": str(tmp_path),
         "reason": "Read saved fixture evidence", "ends_when": "One saved batch has been interpreted",

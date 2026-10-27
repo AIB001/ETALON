@@ -20,10 +20,10 @@ def capabilities():
         "structure-templates", "target-modulators")]
     return {"schema": "etalon-component-catalog/1", "capabilities": [
         {"id": "molquarry.data", "owner": "MolQuarry", "views": ["E"],
-         "operations": ["query", "collect", "download", "import_catalog", "search_catalog", "sourcing", "bundle"],
+         "operations": ["query", "collect", "download", "import_catalog", "search_catalog", "sourcing", "bundle", "knowledge"],
          "entrypoints": ["etalon.data.service.plan_data", "etalon.data.service.run_data", "etalon.data.artifacts.read_snapshot"],
          "skills": quarry_skills, "memory_reader": "data_snapshot", "integration": "existing_consumer",
-         "boundary": "Source evidence and sourcing leads; no purchase, chemical synthesis or lab execution."},
+         "boundary": "Source evidence, agent-authored scoped knowledge and sourcing leads; no purchase, chemical synthesis or lab execution."},
         {"id": "molcascade.screen", "owner": "MolCascade", "views": ["X", "R"],
          "operations": ["plan", "run", "read", "metrics", "recall", "export_shortlist", "handoff"],
          "entrypoints": ["etalon.boundary.screen.Screen"], "skills": [],

@@ -178,10 +178,11 @@ class TaskSplit(Record):
 
     def __post_init__(self):
         tasks = self.development + self.validation + self.transfer
-        # A task-local improvement need not claim cross-task transfer. Keep the
-        # old wire format and identities; an empty transfer set states no test.
-        if not all((self.development, self.validation)) or len(set(tasks)) != len(tasks):
-            raise ValueError('development/validation tasks must be nonempty and all groups disjoint')
+        # Task-local diagnostic learning need not invent an unrun validation
+        # task. Independent evaluation still requires an actual held-out task
+        # and frozen-policy receipt in ResearchJournal.
+        if not self.development or len(set(tasks)) != len(tasks):
+            raise ValueError('development tasks must be nonempty and all groups disjoint')
         if set(tasks) != set(self.frozen_initial_configuration):
             raise ValueError('every frozen task needs an initial configuration identity')
         nonempty(self.independent_objective)

@@ -249,13 +249,48 @@ def create_server(quarry: MolQuarry | None = None):
         output_relative_path: str,
         purchasing: bool = True,
         max_purchase_queries: int = 20,
+        view: str = "bundle",
     ) -> CallToolResult:
         """Build PDB, Excel, SDF and AF3 inputs from a dossier and explicit curation.
         Requires the deliverables extra. All paths are relative to MOLQUARRY_WORKSPACE or cwd.
+        view='knowledge' saves the explicit curation and delivers condensed knowledge,
+        without structure preparation or network queries. Does not infer the synthesis.
         Does not submit AF3 jobs or claim that catalog presence is live stock.
         """
 
         def run():
+            if view == "knowledge":
+                from .workflows.review import Curation, integrate_review, knowledge_context
+                dossier = json.loads(workspace_path(dossier_relative_path).read_text(encoding="utf-8"))
+                reviewed = integrate_review(dossier, Curation.model_validate(curation))
+                output = workspace_path(output_relative_path)
+                output.mkdir(parents=True, exist_ok=True)
+                # Content addressed full material: later syntheses never overwrite it.
+                import hashlib
+                body = json.dumps(reviewed, sort_keys=True, ensure_ascii=False).encode("utf-8")
+                identity = hashlib.sha256(body).hexdigest()
+                path = output / (identity + ".json")
+                if path.exists() and path.read_bytes() != body:
+                    raise ValueError("saved knowledge body changed")
+                if not path.exists():
+                    import tempfile
+                    with tempfile.NamedTemporaryFile(dir=output, delete=False) as stream:
+                        temporary = Path(stream.name)
+                        stream.write(body)
+                        stream.flush()
+                        os.fsync(stream.fileno())
+                    try:
+                        try:
+                            os.link(temporary, path)
+                        except FileExistsError:
+                            if path.read_bytes() != body:
+                                raise ValueError("saved knowledge body changed") from None
+                    finally:
+                        temporary.unlink(missing_ok=True)
+                return {**knowledge_context(reviewed), "details": {"path": str(path),
+                    "sha256": identity, "bytes": len(body)}}
+            if view != "bundle":
+                raise ValueError("view must be bundle or knowledge")
             from .workflows.bundle import build_target_bundle as build
 
             return build(

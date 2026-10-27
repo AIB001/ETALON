@@ -2,6 +2,12 @@
 
 MolQuarry gives agents a consistent way to discover CADD data sources, query scientific evidence, download official files, and search authorized local catalogs. Its target workflow produces organized **PDB structures and alignments, an Excel compound workbook, RDKit-prepared 3D SDF files, source evidence and AF3 job inputs**.
 
+For a knowledge-only handoff, pass agent-authored `knowledge` items in the existing
+curation and call `build_target_bundle(view="knowledge")`. It saves the full reviewed
+material and returns conclusions, conditions, implications, limitations and a detail
+reference without structure preparation or additional network queries. SDK callers
+use `integrate_review` and `knowledge_context`; the host supplies the interpretation.
+
 **Version 0.5.0 covers 51 sources in 12 categories:** 41 remote query/file-discovery adapters and 10 official access guides with local import/search. There are **110 query/discovery operations and 28 download operations**, plus `resources` on each source. These counts describe implemented operations, not complete coverage or public API availability at every website.
 
 Six bundled skills turn these adapters into focused search workflows:

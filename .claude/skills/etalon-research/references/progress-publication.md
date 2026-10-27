@@ -1,5 +1,44 @@
 # Archive progress and advance the research entry
 
+For ordinary progress, use the project's existing `ResearchJournal` and stable
+entry: `research.notes.save_progress(journal, entry, note)`. The note carries
+`task_id`, `branch_id`, `question`, `summary`, conditions and original references;
+add a useful lesson, limitations, unresolved questions, pending native handles
+and next action when they change. The helper keeps branch heads in one entry,
+reuses identical writes and preserves older knowledge. `activate=False` updates
+a background branch without switching the current question. Do not create a
+database or publication graph for each round.
+An execution producer should pass `publication_id=request_digest + ':result'`;
+replaying it then preserves a later host interpretation instead of republishing
+the producer's older summary. Host knowledge revisions use their own write.
+
+Cite immutable execution outputs/receipts, not a changing `latest` or `last-call`
+pointer. Save native outputs before wrapping them for research publication; a
+binding or publication failure can then reuse those bytes. When revising a read
+note, pass the new knowledge body without its old `publication_id` or `supersedes`;
+the helper binds the current parent. An explicitly supplied parent is still
+checked, so a concurrent update is not silently overwritten.
+
+Portable entries use `entry_journal(entry_value(entry), read_only=False)` for
+continued writing. This preserves the sealed source and reuses an active copy of
+the same journal; do not open the entry's historical database path directly.
+
+Routine continuation uses `read_entry(entry, view="knowledge")` or the existing
+context tool's card view. It returns condensed knowledge and exact detail
+navigation. Expand `read_entry(details, view="full")` when the decision needs
+originals; this checks the original bytes and keeps all counter references.
+Knowledge delivery alone does not claim those originals were read. New chats
+receive a fresh baseline; existing hook cursors deliver only changes.
+
+Use task-local `methods/` for evolving algorithms and `runs/` for original
+executions. `memory/` holds meaningful knowledge; generated views are disposable.
+Native work and receipts use `runtime.native` / `runtime.reuse`, independently
+of memory. A failed note publication is retried with its existing outputs, not
+by recomputing science. Saving progress does not end an authorized research goal.
+
+The remaining interfaces below support existing graph publications and advanced
+attribution. They are optional compatibility paths, not prerequisites for notes.
+
 For an open research goal, preserve both the scientific residual and the next
 executable segment when one is known. The optional
 `research_segment.work_from_entry(goal, entry, branch_id=...)` builds a compact
