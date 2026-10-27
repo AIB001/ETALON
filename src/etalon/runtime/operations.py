@@ -18,6 +18,7 @@ from etalon.data.artifacts import file_hash, read_snapshot
 from etalon.runtime.schema import absolute, bounded_int, fields, references
 
 _OPERATIONS = {
+    "method.run": ({"method_id", "command", "files", "inputs"}, {"cwd", "outputs"}),
     "data.acquire": ({"request", "budget"}, {"allow_partial", "min_records"}),
     "data.prepare": ({"snapshot"}, {"id_field", "smiles_field", "identity_policy", "allow_partial", "min_records"}),
     "campaign.create": ({"spec", "endpoints", "executors"}, set()),
@@ -41,6 +42,9 @@ def validate_arguments(operation: str, arguments: dict, *, deferred: bool = Fals
     if operation not in _OPERATIONS:
         raise ValueError("operation is not in the installed ETALON registry")
     fields(arguments, *_OPERATIONS[operation])
+    if operation == "method.run":
+        from etalon.runtime.method import validate
+        validate(arguments)  # Executable identity is static; only inputs may use references.
     if deferred and references(arguments):
         return
     if references(arguments):
@@ -115,6 +119,10 @@ def input_hashes(value: Any) -> dict[str, str]:
                     if not resource.is_file():
                         raise FileNotFoundError(resource)
                     result[str(resource)] = file_hash(resource)
+            elif key == "command" and isinstance(item, list):
+                for name in item:
+                    if isinstance(name, str) and Path(name).is_absolute() and Path(name).is_file():
+                        result[str(Path(name))] = file_hash(Path(name))
             elif key == "snapshot" and isinstance(item, str):
                 snapshot = read_snapshot(absolute(item))
                 result[str(Path(snapshot["snapshot"]) / "snapshot.json")] = file_hash(Path(snapshot["snapshot"]) / "snapshot.json")
@@ -165,6 +173,8 @@ def action_binding(operation: str, parameters: dict) -> dict:
 def preflight(operation: str, parameters: dict, resources: dict) -> dict:
     validate_arguments(operation, parameters)
     inputs = input_hashes(parameters)
+    if operation == "method.run" and resources.get("wall_second", 0) <= 0:
+        raise ValueError("method.run requires an explicit wall_second allowance")
     if operation == "data.acquire":
         from etalon.boundary.quarry import DataBudget
         from etalon.data.service import plan_data
@@ -225,6 +235,9 @@ def preflight(operation: str, parameters: dict, resources: dict) -> dict:
 
 def execute(operation: str, params: dict, ctx: Any) -> dict:
     """Execute exactly once in an operation-owned workspace. The caller persists then verifies."""
+    if operation == "method.run":
+        from etalon.runtime.method import execute as execute_method
+        return execute_method(params, ctx)
     if operation == "data.acquire":
         from etalon.boundary.quarry import DataBudget
         from etalon.data.artifacts import summary
@@ -624,7 +637,10 @@ def verify(operation: str, params: dict, result: dict, *, active_start: dict | N
     if not isinstance(result, dict):
         raise ValueError("operation did not return a structured result")
     evidence = {"operation": operation, "result_sha256": digest(result)}
-    if operation in {"data.acquire", "data.prepare"}:
+    if operation == "method.run":
+        from etalon.runtime.method import verify as verify_method
+        evidence.update(verify_method(params, result))
+    elif operation in {"data.acquire", "data.prepare"}:
         snapshot = read_snapshot(Path(result["snapshot"]))
         status = snapshot["result"].get("status")
         allowed = {"query": {"complete"}, "import_catalog": {"complete"}, "search_catalog": {"complete"},
@@ -700,6 +716,11 @@ def accounting(operation: str, result: dict, resources: dict, *, database: str |
                active_start: dict | None = None, action_receipts: dict | None = None) -> tuple[dict, dict]:
     spent = dict(resources)
     basis = dict.fromkeys(resources, "declared execution quote; not measured")
+    if operation == "method.run":
+        from etalon.runtime.native import recover_attempt
+        receipt = recover_attempt(result["native_directory"])["receipt"]
+        spent["wall_second"] = receipt["finished"]["worker_wall_second"]
+        basis["wall_second"] = "native elapsed wall time; includes failed execution; excludes host/model overhead"
     if operation == "data.acquire":
         usage = read_snapshot(Path(result["snapshot"]))["usage"]
         for unit, key in (("http_requests", "requests"), ("http_bytes", "response_bytes")):
@@ -728,6 +749,9 @@ def recover(operation: str, params: dict, ctx: Any) -> dict | None:
             _active_facts(result, database=params["database"], active_start=receipts["active_start"],
                           action_receipts=receipts)
         return result
+    if operation == "method.run":
+        from etalon.runtime.method import read_result
+        return read_result(params, ctx.root)
     if operation in {"data.acquire", "data.prepare"}:
         path = ctx.root / "data" / ("acquisition" if operation == "data.acquire" else "library")
         if (path / "snapshot.json").is_file():

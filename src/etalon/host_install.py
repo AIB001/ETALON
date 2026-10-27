@@ -139,9 +139,13 @@ def install(target, *, research_entry, host="codex", hook_transport="mcp_tool", 
             raise ValueError("rebind requires a portable ETALON export")
         if old.get("host") != host:
             raise ValueError("install host differs; use a separate project for another host")
-        if selected_skills is not None and selected_skills != old.get("selected_skills"):
-            raise ValueError("install skill selection differs; export a new adapter version")
-        selected_skills = old.get("selected_skills")
+        if selected_skills is None:
+            selected_skills = old.get("selected_skills")
+        else:
+            previous = adapter.skills._selection(old.get("selected_skills"), adapter.skills.WORKFLOWS, "selected_skills")
+            selected = adapter.skills._selection(selected_skills, adapter.skills.WORKFLOWS, "selected_skills")
+            if not set(previous) <= set(selected):
+                raise ValueError("install cannot remove selected skills; export a new adapter version")
         workset = None
         if "task_workset_digest" in old:
             workset = json.loads(_read(adapter._member(root, ".etalon/task-workset.json")))

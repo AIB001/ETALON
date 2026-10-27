@@ -163,10 +163,15 @@ def register(mcp: Any) -> None:
     @mcp.tool()
     @threaded_tool(Cost.SPENDS)
     def etalon_workflow_advance(workspace: str, job_id: str, proposal: dict[str, Any]) -> str:
-        """SPENDS. Accept one external model decision and dispatch its ready node through the worker.
+        """SPENDS. Advance an external decision or queue a side-channel revision for an ordered worker.
 
-        Proposal contains only observation_id, node_id and reason. Rejects stale state, invented
-        nodes and unverified finish claims. pause requests a stop and never establishes success.
+        External mode: proposal contains observation_id, node_id, reason, selecting a ready node.
+        Ordered mode: {kind:"revise", revision_id, expected_plan_id, nodes, reason, remove_nodes?}.
+        Copy expected_plan_id from status.plan.revision_id. Nodes are full replacement/addition
+        definitions. Applies at a node boundary, only to unstarted work, within existing limits.
+        Current computation continues without waiting for this optional advice. Retries with the
+        same revision_id are idempotent. Single actions remain immutable. Inspect revision events
+        to distinguish queued, applied and too-late suggestions; no automatic model invocation.
         """
         from etalon.runtime.service import advance
 

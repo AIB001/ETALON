@@ -26,3 +26,19 @@ using the fixed external evaluation contract; improved internal objective or a
 looser acceptance threshold alone does not establish better scientific quality.
 Use the RSI skill for conditional adoption, retention and experience; no fixed
 Probe phase or global-default promotion is required.
+
+Let an established computation or batch run under the ordered worker without
+model calls between steps. A host may inspect compact feedback alongside it and
+send `etalon_workflow_advance` a `kind: revise` proposal for future nodes: new
+methods, changed parameters, additions or omissions. Read `status.plan.revision_id`
+for the base; queued advice is not yet applied. The active node keeps its method.
+If there is no useful change, let the worker continue without a proposal.
+
+For a new algorithm outside built-in components, use `method.run` through the
+existing action or workflow API. Its program receives `--request` and `--result`;
+declare source/model files, inputs, outputs and a wall-time allowance. Return a
+compact summary, outputs and optional feedback; keep large arrays in artifacts.
+Resolve a concrete uncertainty or bottleneck before spending model turns on a
+revision. Execution receipts establish what ran; quality comparisons still use
+the task's scientific criteria. Recover existing handles before submitting again.
+See the runtime resource for the method contract and side-channel revision shape.

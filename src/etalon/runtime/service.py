@@ -60,7 +60,9 @@ def status(workspace: str | Path, job_id: str) -> dict:
     job["heartbeat_age_seconds"] = None if job["heartbeat"] is None else max(0, time.time() - job["heartbeat"])
     job["needs_reconciliation"] = (job["state"] in {"starting", "running", "cancel_requested"} and not job["worker_alive"]
                                     or any(n["state"] == "reconciliation_required" for n in job["nodes"]))
-    job["plan"] = {"plan_id": job["plan_id"], "objective": job["plan"]["spec"]["objective"],
+    job["pending_revision"] = (job["proposal"]["proposal"]["revision_id"]
+                               if job["proposal"] and job["proposal"].get("kind") == "revision" else None)
+    job["plan"] = {"plan_id": job["plan_id"], "revision_id": job["plan"]["plan_id"], "objective": job["plan"]["spec"]["objective"],
                    "controller": job["plan"]["spec"]["controller"], "max_seconds": job["plan"]["spec"]["max_seconds"]}
     for node in job["nodes"]:
         node["operation"] = node["definition"]["operation"]
@@ -72,6 +74,15 @@ def status(workspace: str | Path, job_id: str) -> dict:
         node.pop("definition", None)
         node.pop("parameters", None)
     job.pop("proposal", None)
+    for event in job["events"]:
+        if event["kind"] == "revision_queued":
+            proposal, prepared = event["body"]["proposal"], event["body"]["prepared"]
+            event["body"] = {"revision_id": proposal["revision_id"],
+                             "expected_plan_id": proposal["expected_plan_id"],
+                             "proposed_plan_id": prepared["plan_id"],
+                             "changed_nodes": [n["id"] for n in proposal["nodes"]],
+                             "removed_nodes": proposal.get("remove_nodes", []),
+                             "reason": proposal["reason"]}
     return job
 
 
@@ -126,6 +137,9 @@ def submit(spec: dict, workspace: str | Path, *, job_id: str, expected_plan_id: 
 
 
 def advance(workspace: str | Path, job_id: str, proposal: dict) -> dict:
+    if isinstance(proposal, dict) and proposal.get("kind") == "revise":
+        from etalon.runtime.revisions import queue
+        return queue(workspace, job_id, proposal)
     store = RuntimeStore(workspace)
     with process.job_lock(store.job_root(job_id)):
         job = store.get(job_id)
@@ -234,6 +248,8 @@ def _complete(ctx: Context, node: dict, parameters: dict, result: dict, *, recov
 def _control(store: RuntimeStore, job_id: str, epoch: int, checkpoint, *, transport=None) -> None:
     while True:
         checkpoint()
+        from etalon.runtime.revisions import apply_pending
+        apply_pending(store, job_id, epoch)
         job = store.get(job_id)
         operations.check_inputs(job["plan"]["inputs"])
         observed = _observation(job)
@@ -242,8 +258,9 @@ def _control(store: RuntimeStore, job_id: str, epoch: int, checkpoint, *, transp
             return
         if observed["all_verified"]:
             _verify_dependencies(job, [n["id"] for n in job["nodes"]])
-            store.set_state(job_id, epoch, "succeeded")
-            return
+            if store.set_state(job_id, epoch, "succeeded") is not False:
+                return
+            continue  # A side-channel proposal arrived before terminal commit.
         if any(n["state"] in {"failed", "reconciliation_required", "running"} for n in job["nodes"]):
             store.set_state(job_id, epoch, "reconciliation_required" if any(
                 n["state"] in {"running", "reconciliation_required"} for n in job["nodes"]) else "failed")
@@ -528,6 +545,8 @@ def reconcile(workspace: str | Path, job_id: str, *, resume: bool = False, reaso
                         store.unresolved(job_id, epoch, node["id"], "no complete result receipt; reservations retained")
                 except Exception as error:
                     store.unresolved(job_id, epoch, node["id"], f"reconciliation failed: {error}")
+        from etalon.runtime.revisions import apply_pending
+        apply_pending(store, job_id, epoch)
         current = store.get(job_id)
         if any(n["state"] in {"running", "reconciliation_required"} for n in current["nodes"]):
             state = "reconciliation_required"
@@ -542,7 +561,9 @@ def reconcile(workspace: str | Path, job_id: str, *, resume: bool = False, reaso
             state = "cancelled"
         else:
             state = "queued" if resume else "paused"
-        store.set_state(job_id, epoch, state)
+        if store.set_state(job_id, epoch, state) is False:
+            state = "queued" if resume else "paused"
+            store.set_state(job_id, epoch, state)
     if state == "queued":
         _launch(store, job_id)
     return status(workspace, job_id)

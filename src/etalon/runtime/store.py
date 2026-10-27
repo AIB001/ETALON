@@ -97,8 +97,9 @@ class RuntimeStore:
             old = db.execute("SELECT plan_id,plan FROM jobs WHERE id=?", (job,)).fetchone()
             if old:
                 recorded = json.loads(old["plan"])
+                recorded = recorded.get("initial_plan", recorded)
                 attributed_action = "action_request" in recorded["spec"] and "action_request" in plan["spec"]
-                if old["plan_id"] != plan["plan_id"] or (not attributed_action and old["plan"] != canonical(plan)):
+                if old["plan_id"] != plan["plan_id"] or (not attributed_action and canonical(recorded) != canonical(plan)):
                     raise StateError("job id already belongs to a different workflow or input plan")
             else:
                 if self.job_root(job).exists():
@@ -159,9 +160,11 @@ class RuntimeStore:
             value["remaining"] = None if value["limit"] is None else value["limit"] - value["spent"] - value["reserved"]
         return result
 
-    def set_state(self, job: str, epoch: int, state: str, *, error: str | None = None) -> None:
+    def set_state(self, job: str, epoch: int, state: str, *, error: str | None = None) -> bool | None:
         with self.connection(write=True) as db:
-            self.owned(db, job, epoch)
+            row = self.owned(db, job, epoch)
+            if state == "succeeded" and row["proposal"] and json.loads(row["proposal"]).get("kind") == "revision":
+                return False
             db.execute("UPDATE jobs SET state=?,error=?,updated=? WHERE id=?", (state, error, time.time(), job))
             self.event(db, job, state, {"error": error})
 

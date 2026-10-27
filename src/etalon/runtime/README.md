@@ -85,10 +85,11 @@ python -m etalon workflow artifact --workspace /absolute/new/runtime-demo --job-
 
 工作流顶层必需 `schema="etalon-workflow/1"`、`objective`、`nodes`、`limits`；可选 `controller`、`max_seconds`。每个 node 必需 `id`、`operation`、`arguments`；可选 `depends_on`、`resources`。使用 1–100 个节点；ID 为 1–80 个字母、数字、下划线或连字符，不使用保留名 `pause`/`finish`。
 
-在任意参数中使用 `{"$ref":"library.snapshot"}` 引用前一步输出；引用自动形成依赖。节点的某个输出可继续引用嵌套对象字段。不能引用未验证节点，不能产生环，不能提交任意 shell/Python 命令。所有 API/MCP 路径必须绝对化；CLI 顶层路径会转成绝对路径，JSON 内路径仍需调用者明确提供。
+在任意参数中使用 `{"$ref":"library.snapshot"}` 引用前一步输出；引用自动形成依赖。节点的某个输出可继续引用嵌套对象字段。不能引用未验证节点或产生环。宿主自选程序通过下面的显式 `method.run` 契约执行；数据引用本身不会被解释成代码。所有 API/MCP 路径必须绝对化；CLI 顶层路径会转成绝对路径，JSON 内路径仍需调用者明确提供。
 
 | operation | 必需参数 | 可选参数 / 产物 |
 |---|---|---|
+| `method.run` | `method_id`, `command`, `files`, `inputs` | `cwd`, `outputs`；返回紧凑结果、反馈、原件引用及 native 耗时 |
 | `data.acquire` | `request`, `budget` | `allow_partial`, `min_records`；返回 sealed `snapshot` |
 | `data.prepare` | `snapshot` | `id_field`, `smiles_field`, `identity_policy`, `allow_partial`, `min_records`；返回 `snapshot`, `library_path` |
 | `screen.run` | `config_path`, `library_path` | `workers`, `devices`, `allow_copyleft`；返回 `workspace`, `run_id`, `run` |
@@ -100,6 +101,40 @@ python -m etalon workflow artifact --workspace /absolute/new/runtime-demo --job-
 | `active.run` | `database`, `max_rounds` | `min_new_admitted` 默认 1；返回观测、准入数、费用与 action 身份 |
 
 `data.acquire` 复用现有请求协议，覆盖查询、目标证据、目录导入/搜索、下载、结构 bundle、sourcing。`needs_target_resolution` 等状态不能被当作完整获取；允许 partial 必须明示，且不能免除目标身份或科学审阅。标准化默认至少需要一条候选，active 默认至少需要一条新准入观测。
+
+### 自选方法与旁路策略
+
+默认 `ordered` worker 连续执行就绪节点，不调用模型。宿主可以同时研究反馈；
+没有建议时，计算不等待宿主。数值算法、批处理和自适应循环属于具体方法程序，
+不需要拆成每次都让模型决策的 workflow 节点。
+
+`method.run` 是现有 action/workflow 的一种 operation，不新增工具或科学账本。
+`command` 是显式 argv（首项为解释器/程序的绝对路径，无 shell 插值）；`files`
+列出需要固定的源码、模型和资源文件；`inputs` 为 JSON，可用已有 `$ref` 接上游结果。
+`outputs` 可声明名字到步骤目录内相对路径的映射，程序从 request 获取完整路径。
+节点 resources 必须给出 `wall_second` 额度；其它额度仍按原语义记为报价。
+程序被追加 `--request <JSON路径> --result <JSON路径>` 参数，request 中含
+`schema=etalon-method-request/1, method_id, inputs, outputs`。
+result 为 `schema=etalon-method-result/1, summary, outputs`，可加 `feedback` 对象。
+输出正文最多 1 MiB，批量结果放入声明的文件。执行成功不自动生成科学准入或亲和力结论。
+实际耗时来自原生收据，包含失败；模型、宿主和其它组件开销应另计，不能把报价当测量。
+worker 退出后原生计算可以继续；通过既有 reconcile 恢复结果，禁止无结果时自动重跑。
+
+运行中用原有 `workflow advance` / `etalon_workflow_advance` 提交可选建议：
+
+```json
+{"kind":"revise", "revision_id":"strategy-2", "expected_plan_id":"status.plan.revision_id",
+ "nodes":[{"id":"next", "operation":"method.run", "arguments":{}, "resources":{"wall_second":60}}],
+ "remove_nodes":[], "reason":"根据已完成批次的反馈改变后继方法"}
+```
+
+`arguments` 应替换为上述完整方法参数。`nodes` 是完整的新建/替换节点；
+`remove_nodes` 仅移除未开始且不再被依赖的节点。保持原预算、目标和期限。
+建议在下一个节点边界生效，不改在途输入、不重写完成结果。若建议到达太晚，
+保留 `revision_not_applied` 并继续原计划。队列接收和实际采用分开报告；同 revision_id
+重发不重复采用。原提交 plan_id 和句柄不变，当前修订见 `status.plan.revision_id`；
+原计划和变更保存在同一个 runtime journal。单 action 保持不可变；终局后新工作用后继 workflow。
+宿主是否、何时提出建议由其自身能力和任务价值决定，没有强制 Probe 或逐节点审核。
 
 Executor 采用 `etalon-executor/1`，提供 `molcascade`、旧 `prism` 和独立 `prism_bridge_v1`。先 prepare 得到不可变配置、协议与 endpoint，再用返回的 endpoint 创建 campaign。已有 campaign 使用 register，要求 endpoint 完全匹配。相同记录重复注册幂等；修改协议需使用新 endpoint。配置摘要绑定科学输入内容及资产身份，派发前再次验证。
 

@@ -74,6 +74,26 @@ def test_install_preserves_user_changes_and_arbitrary_project(tmp_path):
     assert (exported / "AGENTS.md").read_text() == "modified guidance"
 
 
+def test_rebind_can_add_skills_without_replacing_the_project(tmp_path):
+    entry = tmp_path / "entry.json"
+    entry.write_text("{}")
+    project = tmp_path / "claude"
+    host.install(project, research_entry=entry, host="claude", selected_skills=["research"])
+    settings = (project / ".claude/settings.json").read_bytes()
+    sentinel = project / ".etalon/research-hook-receipts/session-existing.json"
+    sentinel.parent.mkdir(parents=True, exist_ok=True)
+    sentinel.write_text('{"existing": true}')
+    upgraded = host.install(project, research_entry=entry, host="claude",
+                            selected_skills=["research", "method-configuration"])
+    assert upgraded["changed"] and host.doctor(project)["configuration_verified"]
+    assert (project / ".claude/skills/etalon-method-configuration/SKILL.md").is_file()
+    assert (project / ".claude/settings.json").read_bytes() == settings
+    assert sentinel.read_text() == '{"existing": true}'
+    assert not host.install(project, research_entry=entry, host="claude")["changed"]
+    with pytest.raises(ValueError, match="cannot remove"):
+        host.install(project, research_entry=entry, host="claude", selected_skills=["research"])
+
+
 def test_rebind_resumes_interrupted_owned_file_replacement(tmp_path, monkeypatch):
     entry = tmp_path / "first.json"
     entry.write_text("{}")
