@@ -107,7 +107,7 @@ def test_portable_rebind_preserves_selected_closure_and_never_widens(tmp_path):
     assert {row["slug"] for row in saved["skills"]} == {"research-context"}
     assert host.install(moved, research_entry=entry)["status"] == "already_installed"
     before = (moved / host.MANIFEST).read_bytes()
-    with pytest.raises(ValueError, match="selection differs"):
+    with pytest.raises(ValueError, match="cannot remove selected skills"):
         host.install(moved, research_entry=entry, selected_skills=["skill-improvement"])
     assert (moved / host.MANIFEST).read_bytes() == before
 

@@ -26,7 +26,9 @@ def test_v_original_sources_complete_and_zero_argument_shape_remains_additive():
     originals = [path for path in (ROOT / ".claude/skills").glob("*/SKILL.md")
                  if path.parent.name != "rsi-skill-creator"]
     originals += list((ROOT / "asset/molquarry/skills").glob("*/SKILL.md"))
-    assert {skills.bundle_root(s) / "SKILL.md" for s in rows} == set(originals)
+    # Unix host-discovery symlinks point at the same original MolQuarry bundles.
+    assert {(skills.bundle_root(s) / "SKILL.md").resolve() for s in rows} == {
+        path.resolve() for path in originals}
     for slug in MQ:
         manifest, content = skills.snapshot(slug)
         original = ROOT / "asset/molquarry/skills" / slug
