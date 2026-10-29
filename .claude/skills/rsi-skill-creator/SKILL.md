@@ -25,6 +25,11 @@ description: "Create or revise RSI skills that themselves improve research metho
 研究笔记即可；实际需要细粒度归因时再展开完整改进图。不要让创建 context、
 opportunity、patch 等记录成为执行前提。课题参数和实验配方留在课题文件中。
 
+改进结果可以分别落成计算代码、可调用 method、参数或运行配置、优化后的使用 skill、
+条件性 memory；用现有笔记的 resources 引用把这些层次关联，不复制成多份方法库。
+本 skill 只在改进程序本身需要创建或修订时介入，不要求每次尝试生成新的 SKILL.md。
+下游可用性应由独立上下文实际找到并调用方法来检验，不能以文件存在或生成数量代替。
+
 先理解用户要提高的研究能力、当前瓶颈、可改变的对象和已有改进方式。
 利用已有证据、失败轨迹和技能库定位问题；信息不足时明确假设，仍可产出待试用版本，
 无需为了写 skill 先启动一轮科研实验。

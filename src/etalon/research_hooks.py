@@ -169,7 +169,7 @@ def _source_complete(context):
 
 def _context_scope(context):
     """Compare declared task/branch bindings, without judging applicability."""
-    return (context.get("task_id"), context.get("branch_id"),
+    return (context.get("task_id"), context.get("branch_id"), context.get("memory_scope", "shared"),
             context.get("task_workset", {}).get("digest"),
             _digest(context.get("definitions", {})),
             _digest(context.get("conditions", context.get("controls", {}).get("conditions", {}))))

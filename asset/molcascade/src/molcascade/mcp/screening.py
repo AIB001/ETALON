@@ -448,6 +448,9 @@ def register(mcp: Any) -> None:
                 for stage in state.stages
             ],
         }
+        from molcascade.parallel.progress import stage_progress
+        for item, stage in zip(payload["stages"], state.stages, strict=True):
+            item["progress"] = stage_progress(runner.checkpoints_root, stage)
         if include_events:
             # The log is a bounded control-plane JSONL under the workspace, read
             # through AuditLog so a truncated final line is the model's problem

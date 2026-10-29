@@ -9,6 +9,23 @@ from etalon.mcp._common import Cost, absolute_path, ok, threaded_tool, tool
 
 def register(mcp: Any) -> None:
     @mcp.tool()
+    @threaded_tool(Cost.CHEAP)
+    def etalon_wait_register(declaration: dict[str, Any], workspace: str) -> str:
+        """CHEAP. Share bounded observations of an existing task's completion.
+
+        Prefer an existing host background notification. Otherwise use schema
+        etalon-host-wait/1 with checks (native_attempt, file or json_status),
+        wake_when any/all, poll_seconds and max_checks. Repeated registrations
+        in the same workspace reuse the first policy and handle; etalon_action_result
+        refreshes it at most once per saved interval across readers. No extra worker,
+        scientific dispatch, retry or automatic host notification. A stage and a
+        whole-run condition differ.
+        """
+        from etalon.runtime.host_wait import register_wait
+
+        return ok(**register_wait(declaration, absolute_path(workspace, label="workspace")))
+
+    @mcp.tool()
     @threaded_tool(Cost.FREE)
     def etalon_action_prepare(request: dict[str, Any]) -> str:
         """FREE. Validate and bind one supported host-selected action without dispatch or a skill gate."""
@@ -34,6 +51,7 @@ def register(mcp: Any) -> None:
 
         Also accepts a fixed PRISM handle from execution_recovery.bind_native_handle;
         it verifies the original job/profile and never restarts scientific work.
+        A saved etalon-wait-handle/1 reuses a shared observation, refreshing when due.
         Pass the complete handle object returned by etalon_action_submit unchanged. A campaign
         action ID or an offline etalon_active_replay result is not a runtime action handle.
         Inspect replay outcomes through campaign status and campaign events instead.

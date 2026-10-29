@@ -14,6 +14,47 @@ from etalon.mcp._common import Cost, ok, tool
 
 def register(mcp: Any) -> None:
     @mcp.tool()
+    @tool(Cost.CHEAP)
+    def etalon_generation_runtime(python: str, config: str, model: str, prism_source: str | None = None,
+                                  environment: dict | None = None) -> str:
+        """CHEAP. Inspect a selected PRISM interpreter/config/weights into a callable profile.
+
+        No installation, model execution or environment upgrade. Inspection is
+        distinct from an actual GPU/model call. Keep the returned profile in a
+        task resource; setup strategy belongs to the install skill.
+        """
+        from etalon.generate.runtime import inspect_runtime
+        return ok(profile=inspect_runtime(python, config, model, prism_source=prism_source, environment=environment))
+
+    @mcp.tool()
+    @tool(Cost.FREE)
+    def etalon_generation_feedback(manifests: list[str], criteria: dict) -> str:
+        """FREE. Analyze normal generation outputs with explicit property windows.
+
+        Counts preserve unknown properties, overlapping failures and individual
+        run identities. Host decides whether to change a method or continue.
+        """
+        from etalon.generate.feedback import generation_feedback
+        return ok(**generation_feedback(manifests, criteria))
+
+    @mcp.tool()
+    @tool(Cost.CHEAP)
+    def etalon_generation_handoff(manifests: list[str], destination: str, operation: str,
+                                 candidates: list[str] | None = None, locations: dict | None = None,
+                                 include_scaffolds: bool = False) -> str:
+        """CHEAP. Prepare selected native poses as SDF for a host-chosen next action.
+
+        Choose inspect_pose, redock or properties. No automatic screening/MD;
+        source coordinates and quality annotations survive the handoff. Repeating
+        an unchanged completed request verifies and reuses its outputs.
+        Model/run membership is retained even for duplicate molecular identities.
+        include_scaffolds annotates Murcko groups; it does not cap or select them.
+        """
+        from etalon.generate.handoff import prepare_handoff
+        return ok(**prepare_handoff(manifests, destination, operation=operation,
+                                    candidates=candidates, locations=locations, include_scaffolds=include_scaffolds))
+
+    @mcp.tool()
     @tool(Cost.FREE)
     def etalon_plan_campaign(
         pool: int,

@@ -4,6 +4,27 @@ Use this optional guide when an actual research step reveals a method or
 workflow problem. The host may retain the current method. No fixed Probe stage
 or automatic optimization follows a journal write.
 
+Normal execution can be successful yet unnecessarily expensive. Existing screen
+status exposes `progress.execution_feedback` (or `Screen.progress`'s
+`execution_feedback`) from checkpoint counters; these are observations, not a
+forced trigger. A selected snapshot can be ordinary problem evidence below.
+For cost and adoption timing use `etalon.economics.execution.compare_execution_costs`:
+include development and failed trials, distinguish current remaining work from
+future amortization, and retain unknown token/cost fields. The optional
+skill-improvement execution-efficiency reference explains how to investigate the
+limiting operation. Unchanged reads do not warrant repeated proposals.
+Compare the observed CPU/GPU phase with the task's available resources, not
+hardware totals. Reuse the existing host completion handle; when absent,
+`etalon_wait_register` shares bounded observations and `etalon_action_result`
+refreshes only when due. Neither waiting nor low utilization forces an RSI attempt.
+
+Large runs still require observing throughput/reuse after a representative first
+completion and material phase changes. Existing status returns `resource_review`
+with a stable condition key; save one disposition in the current note/checkpoint
+and reuse it while unchanged. This is a host continuation obligation, not an extra
+scientific stage or a gate. Mixed stages report GPU lanes and CPU pool separately;
+partial quality progress does not imply that the whole docking batch is published.
+
 1. `improvement.build_revision_context(workspace, task_id=..., scope=...,
    conditions=..., target_ref=..., problem_refs=..., evidence_refs=...)` reads
    only the selected existing evidence. Inspect missing evidence and originals;

@@ -175,6 +175,8 @@ class StageOutcome:
     attempts: int
     artifact_id: str | None
     error: dict[str, Any] | None
+    progress: dict[str, Any] = field(default_factory=dict)
+    cache_key: str | None = None
 
     @property
     def committed(self) -> bool:
@@ -198,6 +200,8 @@ class ScreenPlan:
     _internal: dict[str, Any] = field(repr=False, default_factory=dict)
 
     def as_dict(self) -> dict[str, object]:
+        from etalon.screening_delivery import screening_contract
+
         return {
             "revision_id": self.revision_id,
             "stage_count": self.stage_count,
@@ -206,6 +210,8 @@ class ScreenPlan:
             "asset_count": len(self.assets),
             "backend_count": len(self.backends),
             "configuration_kind": self.configuration_kind,
+            "execution_contract": screening_contract(self._internal["pipeline"].model_dump(mode="json"))
+                if "pipeline" in self._internal else {},
         }
 
 
@@ -620,6 +626,7 @@ class Screen:
         """Read validated persisted state without constructing an executor or creating paths."""
         load("molcascade")
         from molcascade.runtime.runner import read_run_state
+        from molcascade.parallel.progress import stage_progress
 
         try:
             state = read_run_state(workspace, run_id)
@@ -660,6 +667,8 @@ class Screen:
                     attempts=stage.attempts,
                     artifact_id=(None if stage.output_ref is None else stage.output_ref.artifact_id),
                     error=(None if stage.error is None else stage.error.model_dump(mode="json")),
+                    progress=stage_progress(Path(workspace).expanduser() / "checkpoints", stage),
+                    cache_key=stage.cache_key,
                 )
                 for stage in state.stages
             ),
@@ -703,6 +712,11 @@ class Screen:
         reached = sum(
             1 for stage in result.stages if stage.status in ("SUCCEEDED", "FAILED", "CACHED")
         )
+        detail = next((stage.progress for stage in result.stages if stage.stage_id == running), {})
+        from etalon.economics.execution import execution_feedback
+        current = next((stage for stage in result.stages if stage.stage_id == running), None)
+        feedback = execution_feedback(detail, run_id=run_id, stage_id=running,
+            method_id=current.plugin, input_id=current.cache_key) if current else None
         return {
             "run_id": run_id,
             "exists": True,
@@ -711,6 +725,8 @@ class Screen:
             "stage": reached + (1 if running else 0),
             "stages": len(result.stages),
             "current": running,
+            "detail": detail,
+            "execution_feedback": feedback,
             "terminal": result.terminal,
         }
 

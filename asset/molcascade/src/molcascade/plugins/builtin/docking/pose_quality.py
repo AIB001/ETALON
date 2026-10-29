@@ -924,6 +924,7 @@ class PoseQualitySession:
         rows: list[dict[str, Any]],
         *,
         keep_poses: bool,
+        progress: Callable[..., None] | None = None,
     ) -> list[dict[str, Any]]:
         """Repair and judge one batch of ``docking_score/v1`` rows.
 
@@ -973,17 +974,23 @@ class PoseQualitySession:
         report.considered += len(pending)
 
         if config.relax and pending:
+            if progress:
+                progress("pose_relax", poses_total=len(pending), poses_completed=0)
             field_ = self._receptor_field()
-            for _position, molecule in pending:
+            for index, (_position, molecule) in enumerate(pending):
                 moved = relax_pose(molecule, receptor=field_, config=config)
                 if moved is None:
                     report.relax_failed += 1
                 else:
                     report.relaxed += 1
                     report.displacement_total += moved
+                if progress and (index % 64 == 0 or index + 1 == len(pending)):
+                    progress("pose_relax", poses_completed=index + 1)
 
         rejected: set[int] = set()
         if config.checks and pending:
+            if progress:
+                progress("pose_check", poses_total=len(pending), poses_completed=0)
             verdicts = judge_poses(
                 [molecule for _position, molecule in pending],
                 receptor=self._receptor_molecule(),
@@ -997,6 +1004,8 @@ class PoseQualitySession:
                     rejected.add(position)
                 else:
                     report.passed += 1
+            if progress:
+                progress("pose_check_complete", poses_completed=len(pending))
         else:
             report.passed += len(pending)
 

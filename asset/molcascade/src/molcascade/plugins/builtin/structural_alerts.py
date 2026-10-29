@@ -332,6 +332,7 @@ class RDKitStructuralAlertPlugin:
                 "decisions": _DECISION_PATH.as_posix(),
             },
             context=context,
+            device="cpu",
             stage_id=request.stage_id,
             config=config.model_dump(mode="json"),
         )

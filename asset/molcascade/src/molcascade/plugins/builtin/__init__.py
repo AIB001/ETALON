@@ -10,6 +10,7 @@ from molcascade.plugins.builtin.custom_model import CustomModelPredictorPlugin
 from molcascade.plugins.builtin.diversity import (
     NativeHashBudgetSelectorPlugin,
     NativeScaffoldRoundRobinSelectorPlugin,
+    NativeScaffoldRoundRobinSelectorV2Plugin,
     NativeStreamingLeaderPlugin,
     RDKitMurckoScaffoldPlugin,
     RDKitScaffoldGroupClusterPlugin,
@@ -20,6 +21,9 @@ from molcascade.plugins.builtin.docking import (
     RDKitLigandConformerPlugin,
     UniDockPlugin,
 )
+from molcascade.plugins.builtin.docking.unidock import PipelinedUniDockPlugin
+from molcascade.plugins.builtin.docking.unidock import FineGrainedUniDockPlugin
+from molcascade.plugins.builtin.registered_geometry import RegisteredConformerPlugin
 from molcascade.plugins.builtin.docking.redock import RedockPlugin
 from molcascade.plugins.builtin.druglikeness import RDKitDrugLikenessPlugin
 from molcascade.plugins.builtin.evidence_gates import (
@@ -67,11 +71,13 @@ from molcascade.plugins.builtin.sources import (
     XlsxSourcePlugin,
 )
 from molcascade.plugins.builtin.specificity_panel import SpecificityPanelPlugin
+from molcascade.plugins.builtin.registered_source import RegisteredParentSourcePlugin
 from molcascade.plugins.builtin.standardize import RDKitStandardizePlugin
 from molcascade.plugins.builtin.structural_alerts import RDKitStructuralAlertPlugin
 from molcascade.plugins.builtin.synthesis import RDKitSAScorePlugin
 
 BUILTIN_STAGE_PLUGINS: tuple[StagePlugin, ...] = (
+    RegisteredParentSourcePlugin(),
     DelimitedSmilesSourcePlugin(),
     SDFSourcePlugin(),
     RawMoleculeParquetSourcePlugin(),
@@ -103,6 +109,9 @@ BUILTIN_STAGE_PLUGINS: tuple[StagePlugin, ...] = (
     AiZynthFinderRoutePlugin(),
     RDKitLigandConformerPlugin(),
     UniDockPlugin(),
+    PipelinedUniDockPlugin(),
+    FineGrainedUniDockPlugin(),
+    RegisteredConformerPlugin(),
     KarmaDockPlugin(),
     GninaPlugin(),
     NativeDockingScoreEvidenceGatePlugin(),
@@ -123,6 +132,7 @@ BUILTIN_STAGE_PLUGINS: tuple[StagePlugin, ...] = (
     RDKitScaffoldGroupClusterPlugin(),
     NativeHashBudgetSelectorPlugin(),
     NativeScaffoldRoundRobinSelectorPlugin(),
+    NativeScaffoldRoundRobinSelectorV2Plugin(),
     NativeSmilesShortlistPlugin(),
     RDKitSDFShortlistPlugin(),
 )

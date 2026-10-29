@@ -1,16 +1,49 @@
 ---
 name: etalon-skill-improvement
-description: Improve a scientific algorithm, workflow or improvement procedure from research feedback, then use measured quality and full cost to choose local use, revision or no-change.
+description: Coordinate research improvement when the limiting layer is unclear or revise an improvement procedure; use focused execution, method, or workflow skills for a known bottleneck.
 ---
 
 # Improve the operation limiting this research
 
+Choose a focused skill directly when the bottleneck is known: `etalon-execution-tuning`
+for execution efficiency and resource use, `etalon-method-optimization` for a
+scientific method, or `etalon-workflow-optimization` for branch and workflow choices.
+Use this entry when improvement spans layers, the limiting layer is unclear, or the
+improvement procedure itself needs revision. These entries are optional guidance,
+not a mandatory routing or evaluation sequence.
+
 Identify a concrete limitation from ordinary results: repeated work, a missed
-useful branch, unexplained failure or an ineffective algorithm. Change the
+useful branch, unexplained failure, disproportionate cost in a successful run,
+or an ineffective algorithm. Change the
 operation, action representation, internal objective, parameter binding, selection
 or sequence that could produce a useful effect. A task-local algorithm is valuable;
 transfer is a separate claim.
 Keep the current method and cheap reuse as real alternatives.
+
+Retain improvements in their useful form: component code or a callable method,
+tuned configuration, better usage skill, or conditional memory. Link these through
+the existing note `resources` view; do not turn every outcome into a new SKILL.md.
+Use `research-index`'s layered-method reference when the next host cannot discover
+or execute what was learned. A new record alone is not a reusable capability.
+
+Successful execution can still expose an improvable limitation. A current
+implementation constraint is a hypothesis, not necessarily a constraint of the
+scientific operation. When ordinary feedback shows a consequential throughput,
+reuse or resource discrepancy, read [execution efficiency](references/execution-efficiency.md).
+Use the task's accessible CPU/GPU/memory envelope and measured limiting phase,
+not the server's advertised card count, to choose a configuration. Reuse its
+existing completion handle instead of adding another waiting loop.
+Inspect the limiting operation and choose a proportionate attempt; do not start
+an optimization review on every status read. Keeping an active run and adopting
+a measured change only for later work is a valid outcome.
+
+Large-scale execution requires a throughput/reuse observation after a representative
+first completion and a material phase change, even without errors. Read the existing
+status feedback, not every raw log. Record the condition key and the choice to
+continue, investigate or defer once; unchanged polls/new chats reuse it. Observation
+is obligatory at that scope; a speculative optimization, extra model judge and
+interruption of running science are not. Delegate mechanical waiting to the saved
+handle and use reasoning on a new discrepancy that can change the next action.
 
 If the current solver is already strong but the research outcome is weak, inspect
 the representation, proxy objective and population it optimizes before spending

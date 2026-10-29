@@ -5,6 +5,12 @@ description: Find and review versioned skills, methods, evidence and workflows f
 
 # Research resource index
 
+For a small note-based project, use the existing resources view or
+`python -m etalon research resources --entry ENTRY`. Explicit note resources
+separate executable methods, tuned configurations, usage skills and conditional
+knowledge without a second library. Read [layered methods](references/layered-methods.md)
+when retaining a useful improvement or finding an executable entry.
+
 Use this when deciding what earlier research can contribute to the current task,
 or when organizing new resources for later retrieval. The host owns the decision;
 direct SDK use, partial adoption, a task template or no change remain valid.

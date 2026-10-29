@@ -2,23 +2,26 @@
 
 from __future__ import annotations
 
+import json
+import shutil
 import sqlite3
+from collections import Counter
 from pathlib import Path
 
+import pyarrow.parquet as pq
 from pydantic import Field, ValidationError
 
+from molcascade.artifacts.hashing import sha256_file
 from molcascade.chemistry.datasets import (
-    iter_contract_batches,
+    discover_contract_files,
     open_stage_database,
     write_query_parquet,
 )
 from molcascade.chemistry.identity import (
-    ParentStandardizer,
-    RegisteredParent,
-    StandardizationFailure,
     rdkit_identity_metadata,
 )
 from molcascade.chemistry.policies import IdentityPolicy
+from molcascade.chemistry.sharding import shard_stage
 from molcascade.config.canonical import canonical_json
 from molcascade.config.models import StrictFrozenModel
 from molcascade.contracts import (
@@ -30,6 +33,8 @@ from molcascade.contracts import (
     DataContract,
 )
 from molcascade.errors import PluginError
+from molcascade.io.atomic import atomic_write_bytes
+from molcascade.parallel.progress import write_progress
 from molcascade.plugins.api import (
     PendingOutput,
     StageContext,
@@ -37,6 +42,7 @@ from molcascade.plugins.api import (
     StageRequest,
     StageResponse,
 )
+from molcascade.plugins.builtin.standardize_map import standardize_shard
 from molcascade.plugins.manifest import (
     Cardinality,
     Determinism,
@@ -75,42 +81,6 @@ class RDKitStandardizePlugin:
         ),
     )
     config_model = StandardizePluginConfig
-
-    @staticmethod
-    def _create_schema(connection: sqlite3.Connection) -> None:
-        connection.executescript(
-            """
-            CREATE TABLE sources (
-                source_record_id TEXT PRIMARY KEY NOT NULL,
-                raw_format TEXT NOT NULL
-            );
-            CREATE TABLE parents (
-                parent_id TEXT PRIMARY KEY NOT NULL,
-                identity_policy_id TEXT NOT NULL,
-                parent_smiles TEXT NOT NULL,
-                registration_key TEXT NOT NULL,
-                stereo_key TEXT,
-                formula TEXT,
-                duplicate_count INTEGER NOT NULL CHECK (duplicate_count > 0)
-            );
-            CREATE TABLE mappings (
-                source_record_id TEXT PRIMARY KEY NOT NULL,
-                parent_id TEXT NOT NULL,
-                relation TEXT NOT NULL
-            );
-            CREATE INDEX mappings_parent_id ON mappings(parent_id, source_record_id);
-            CREATE TABLE decisions (
-                entity_id TEXT NOT NULL,
-                entity_kind TEXT NOT NULL,
-                stage_id TEXT NOT NULL,
-                outcome TEXT NOT NULL,
-                reason_code TEXT NOT NULL,
-                rule_id TEXT,
-                detail TEXT,
-                PRIMARY KEY (entity_id, entity_kind, stage_id, reason_code)
-            );
-            """
-        )
 
     @staticmethod
     def _select_input(request: StageRequest) -> tuple[StageInput, DataContract]:
@@ -188,41 +158,6 @@ class RDKitStandardizePlugin:
             (entity_id, stage_id, outcome, reason_code, detail),
         )
 
-    @staticmethod
-    def _register_parent(
-        connection: sqlite3.Connection,
-        parent: RegisteredParent,
-    ) -> None:
-        cursor = connection.execute(
-            """
-            INSERT INTO parents (
-                parent_id, identity_policy_id, parent_smiles, registration_key,
-                stereo_key, formula, duplicate_count
-            ) VALUES (?, ?, ?, ?, ?, ?, 1)
-            ON CONFLICT(parent_id) DO UPDATE SET
-                duplicate_count = parents.duplicate_count + 1
-            WHERE parents.identity_policy_id = excluded.identity_policy_id
-              AND parents.parent_smiles = excluded.parent_smiles
-              AND parents.registration_key = excluded.registration_key
-              AND parents.stereo_key = excluded.stereo_key
-              AND parents.formula = excluded.formula
-            """,
-            (
-                parent.parent_id,
-                parent.identity_policy_id,
-                parent.parent_smiles,
-                parent.registration_key,
-                parent.stereo_key,
-                parent.formula,
-            ),
-        )
-        if cursor.rowcount != 1:
-            raise PluginError(
-                "parent ID collision produced inconsistent canonical parent values",
-                code="STANDARDIZE_PARENT_ID_COLLISION",
-                context={"parent_id": parent.parent_id},
-            )
-
     def execute(self, request: StageRequest, context: StageContext) -> StageResponse:
         try:
             config = self.config_model.model_validate(dict(request.config))
@@ -245,100 +180,95 @@ class RDKitStandardizePlugin:
         connection: sqlite3.Connection | None = None
         try:
             connection = open_stage_database(database_path)
-            self._create_schema(connection)
-            standardizer = ParentStandardizer(config.identity_policy)
-            input_count = 0
-            reject_count = 0
-            format_counts: dict[str, int] = {}
+            # Chemistry is independent per source; only global deduplication is serial.
+            # Keep map outputs durable using the existing shard checkpoint protocol.
+            resources = context.resources.replace(devices=("cpu",) * context.resources.workers)
+            checkpoint = resources.checkpoint_dir
+            files = discover_contract_files(stage_input, input_contract)
+            binding = {
+                "map_version": 1, "stage_id": request.stage_id,
+                "input_digests": [sha256_file(f) for f in files],
+                "config": config.model_dump(mode="json"),
+                "implementation": rdkit_identity_metadata(config.identity_policy),
+                "shard_rows": min(resources.shard_rows, 10000),
+            }
+            if checkpoint is not None:
+                checkpoint.mkdir(parents=True, exist_ok=True)
+                identity_file = checkpoint / "standardize-map.json"
+                if identity_file.exists() and json.loads(identity_file.read_text()) != binding:
+                    raise PluginError("standardization checkpoint belongs to different inputs or policy",
+                                      code="STANDARDIZE_CHECKPOINT_MISMATCH")
+                atomic_write_bytes(identity_file, canonical_json(binding).encode())
+            mapped_root = context.staging_root / ".standardize-map"
+            result = shard_stage(
+                worker=standardize_shard, stage_input=stage_input, contract=input_contract,
+                output_paths={"registrations": "registrations/part-00000.parquet",
+                              "decisions": "decisions/part-00000.parquet"},
+                context=StageContext(mapped_root, resources), stage_id=request.stage_id,
+                config=config.model_dump(mode="json"), shard_rows=10000,
+            )
+            input_count = result.rows_in
+            reject_count = result.total("reject_count")
+            format_counts = Counter()
+            for item in result.shard_metadata:
+                format_counts.update(item.get("format_counts", {}))
+            write_progress(checkpoint, phase="global_merge", effective_workers=1,
+                           rows_completed=input_count, rows_total=input_count,
+                           merge_rows_loaded=0, map_workers=min(resources.workers, result.shard_count))
+            # Append first, index once. Random primary-key updates used to rewrite
+            # many gigabytes of B-tree pages while doing every molecule serially.
+            connection.execute("PRAGMA cache_size=-65536")
+            connection.executescript("""
+                CREATE TABLE registrations (source_record_id TEXT, raw_format TEXT,
+                    parent_id TEXT, identity_policy_id TEXT, parent_smiles TEXT,
+                    registration_key TEXT, stereo_key TEXT, formula TEXT);
+                CREATE TABLE decisions (entity_id TEXT, entity_kind TEXT, stage_id TEXT,
+                    outcome TEXT, reason_code TEXT, rule_id TEXT, detail TEXT);
+            """)
+            loaded = 0
             with connection:
-                for batch in iter_contract_batches(
-                    stage_input,
-                    input_contract,
-                    batch_size=config.batch_size,
-                ):
-                    for row in batch.to_pylist():
-                        input_count += 1
-                        if input_contract.id == RAW_MOLECULE_V2.id:
-                            value = row.get("raw_format")
-                            raw_format = value if isinstance(value, str) else "UNSPECIFIED"
-                        else:
-                            raw_format = self._v1_raw_format(row)
-                        format_counts[raw_format] = format_counts.get(raw_format, 0) + 1
-                        source_id = row.get("source_record_id")
-                        if not isinstance(source_id, str) or not source_id:
-                            raise PluginError(
-                                "raw molecule contains an invalid source_record_id",
-                                code="STANDARDIZE_SOURCE_ID_INVALID",
+                for port, table in [("registrations", "registrations"), ("decisions", "decisions")]:
+                    for relative in result.file_paths[port]:
+                        for batch in pq.ParquetFile(mapped_root / relative).iter_batches(batch_size=config.batch_size):
+                            columns = batch.schema.names
+                            connection.executemany(
+                                f"INSERT INTO {table} VALUES ({','.join('?' for _ in columns)})",
+                                (tuple(row[c] for c in columns) for row in batch.to_pylist()),
                             )
-                        try:
-                            connection.execute(
-                                "INSERT INTO sources (source_record_id, raw_format) VALUES (?, ?)",
-                                (source_id, raw_format),
-                            )
-                        except sqlite3.IntegrityError as error:
-                            raise PluginError(
-                                f"duplicate source_record_id across input partitions: {source_id}",
-                                code="STANDARDIZE_DUPLICATE_SOURCE_ID",
-                                context={"source_record_id": source_id},
-                            ) from error
-                        try:
-                            if input_contract.id == RAW_MOLECULE_V2.id:
-                                parent = standardizer.standardize(
-                                    raw_format=row.get("raw_format"),
-                                    raw_structure=row.get("raw_structure"),
-                                )
-                            else:
-                                parent = standardizer.standardize(
-                                    raw_smiles=row.get("raw_smiles"),
-                                    raw_molblock=row.get("raw_molblock"),
-                                )
-                        except StandardizationFailure as error:
-                            reject_count += 1
-                            self._decision(
-                                connection,
-                                entity_id=source_id,
-                                stage_id=request.stage_id,
-                                outcome="REJECT",
-                                reason_code=error.reason_code,
-                                detail=self._audit_detail(
-                                    raw_format,
-                                    message=error.detail,
-                                ),
-                            )
-                            continue
-
-                        self._register_parent(connection, parent)
-                        connection.execute(
-                            """
-                            INSERT INTO mappings (source_record_id, parent_id, relation)
-                            VALUES (?, ?, 'PENDING')
-                            """,
-                            (source_id, parent.parent_id),
-                        )
-                        self._decision(
-                            connection,
-                            entity_id=source_id,
-                            stage_id=request.stage_id,
-                            outcome="PASS",
-                            reason_code="STANDARDIZED",
-                            detail=self._audit_detail(
-                                raw_format,
-                                parent_id=parent.parent_id,
-                            ),
-                        )
-                        for notice in parent.notices:
-                            self._decision(
-                                connection,
-                                entity_id=source_id,
-                                stage_id=request.stage_id,
-                                outcome="WARN",
-                                reason_code=notice.code,
-                                detail=self._audit_detail(
-                                    raw_format,
-                                    message=notice.detail,
-                                ),
-                            )
-
+                            if port == "registrations":
+                                loaded += batch.num_rows
+                        write_progress(checkpoint, merge_rows_loaded=loaded)
+                try:
+                    connection.execute("CREATE UNIQUE INDEX registration_source ON registrations(source_record_id)")
+                except sqlite3.IntegrityError as error:
+                    raise PluginError("duplicate source_record_id across input partitions",
+                                      code="STANDARDIZE_DUPLICATE_SOURCE_ID") from error
+                connection.execute("CREATE INDEX registration_parent ON registrations(parent_id)")
+                conflict = connection.execute("""
+                    SELECT parent_id FROM registrations WHERE parent_id IS NOT NULL
+                    GROUP BY parent_id HAVING COUNT(DISTINCT identity_policy_id) > 1
+                        OR COUNT(DISTINCT parent_smiles) > 1 OR COUNT(DISTINCT registration_key) > 1
+                        OR COUNT(DISTINCT COALESCE(stereo_key, '')) > 1
+                        OR COUNT(DISTINCT COALESCE(formula, '')) > 1 LIMIT 1
+                """).fetchone()
+                if conflict:
+                    raise PluginError("parent ID collision produced inconsistent canonical parent values",
+                                      code="STANDARDIZE_PARENT_ID_COLLISION")
+                connection.executescript("""
+                    CREATE TABLE sources AS SELECT source_record_id, raw_format FROM registrations;
+                    CREATE UNIQUE INDEX sources_id ON sources(source_record_id);
+                    CREATE TABLE parents AS
+                        SELECT parent_id, identity_policy_id, parent_smiles, registration_key,
+                               stereo_key, formula, COUNT(*) AS duplicate_count
+                        FROM registrations WHERE parent_id IS NOT NULL GROUP BY parent_id;
+                    CREATE UNIQUE INDEX parents_id ON parents(parent_id);
+                    CREATE INDEX parents_registration ON parents(registration_key);
+                    CREATE TABLE mappings AS SELECT source_record_id, parent_id, 'PENDING' AS relation
+                        FROM registrations WHERE parent_id IS NOT NULL;
+                    CREATE UNIQUE INDEX mappings_source ON mappings(source_record_id);
+                    CREATE INDEX mappings_parent_id ON mappings(parent_id, source_record_id);
+                    DROP TABLE registrations;
+                """)
                 if input_count == 0:
                     raise PluginError(
                         "standardizer input dataset contains no rows",
@@ -411,6 +341,7 @@ class RDKitStandardizePlugin:
                         ),
                     )
 
+            connection.execute("CREATE UNIQUE INDEX decisions_key ON decisions(entity_id, entity_kind, stage_id, reason_code)")
             map_count = connection.execute("SELECT COUNT(*) FROM mappings").fetchone()[0]
             parent_count = connection.execute("SELECT COUNT(*) FROM parents").fetchone()[0]
             registration_key_count = connection.execute(
@@ -475,8 +406,11 @@ class RDKitStandardizePlugin:
                 destination=context.staging_root / decision_path,
                 batch_size=config.batch_size,
             )
+            shutil.rmtree(mapped_root)
+            write_progress(checkpoint, phase="ready_to_publish", effective_workers=0)
             implementation = rdkit_identity_metadata(config.identity_policy)
             response_metadata = {
+                **result.response_metadata(),
                 **implementation,
                 "input_contract_id": input_contract.id,
                 "format_counts": dict(sorted(format_counts.items())),

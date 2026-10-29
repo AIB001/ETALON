@@ -21,7 +21,10 @@ failures are counted and skipped rather than raised.
 from __future__ import annotations
 
 import math
+import json
 import tempfile
+import shutil
+from dataclasses import replace
 from pathlib import Path
 from typing import Any, ClassVar, Literal
 
@@ -35,6 +38,7 @@ from molcascade.config.canonical import canonical_sha256
 from molcascade.contracts import DOCKING_SCORE_V1, LIGAND_CONFORMER_V1, PARENT_V1
 from molcascade.errors import PluginError
 from molcascade.parallel import ShardOutcome, ShardTask, iter_shard_batches
+from molcascade.parallel.progress import report_activity
 from molcascade.plugins.api import PendingOutput, StageContext, StageRequest, StageResponse
 from molcascade.plugins.builtin.docking.common import (
     BoxedDockingEngineConfig,
@@ -145,6 +149,7 @@ class UniDockConfig(BoxedDockingEngineConfig):
     keep_poses: bool = True
     #: A hang guard, not a search budget. Uni-Dock spends about 0.1 s per ligand.
     timeout_per_molecule_seconds: float = Field(default=5.0, gt=0.0, le=86_400.0)
+    quality_chunk_rows: int = Field(default=128, ge=1, le=20000)
 
     @field_validator("receptor_pdbqt_path")
     @classmethod
@@ -341,7 +346,7 @@ def _dock_batch(
     return rows, unscored
 
 
-def _run_shard(task: ShardTask) -> ShardOutcome:
+def _run_shard(task: ShardTask, *, defer_quality: bool = False) -> ShardOutcome:
     """Dock one contiguous range of the population in whichever process owns it."""
 
     config = UniDockConfig.model_validate(dict(task.config))
@@ -368,7 +373,15 @@ def _run_shard(task: ShardTask) -> ShardOutcome:
             task.output_paths["scores"], DOCKING_SCORE_V1.schema, compression="zstd"
         ) as score_writer,
     ):
-        for batch in iter_shard_batches(task, batch_size=config.batch_size):
+        batches = iter_shard_batches(task, batch_size=config.batch_size)
+        if defer_quality:
+            # A task is exactly one original engine batch. Re-reading a range
+            # from a different row-group boundary may fragment it; coalesce it
+            # before invoking the engine so seed/batch semantics do not change.
+            parts = list(batches)
+            batches = iter(pa.Table.from_batches(parts).combine_chunks().to_batches()) if parts else iter(())
+        for batch in batches:
+            report_activity(task, "ligand_prepare", rows_completed=input_count)
             parent_ids = [str(value) for value in batch.column("parent_id").to_pylist()]
             input_count += len(parent_ids)
             parent_writer.write_batch(batch)
@@ -391,6 +404,7 @@ def _run_shard(task: ShardTask) -> ShardOutcome:
             if not ligands:
                 continue
 
+            report_activity(task, "gpu_search_and_decode", batch_rows=len(ligands))
             rows, batch_unscored = _dock_batch(
                 ligands,
                 config=config,
@@ -402,7 +416,9 @@ def _run_shard(task: ShardTask) -> ShardOutcome:
             unscored += batch_unscored
             # Repaired and judged before the rows are written, so what lands in
             # the score table is what passed.
-            rows = pose_session.apply(rows, keep_poses=config.keep_poses)
+            if not defer_quality:
+                rows = pose_session.apply(rows, keep_poses=config.keep_poses,
+                    progress=lambda phase, **kw: report_activity(task, phase, **kw))
             score_count += len(rows)
             if rows:
                 score_writer.write_table(pa.Table.from_pylist(rows, schema=DOCKING_SCORE_V1.schema))
@@ -420,6 +436,93 @@ def _run_shard(task: ShardTask) -> ShardOutcome:
             **pose_session.report.metadata(),
         },
     )
+
+
+def _produce_shard(task: ShardTask) -> ShardOutcome:
+    return _run_shard(task, defer_quality=True)
+
+
+def _check_shard(task: ShardTask) -> ShardOutcome:
+    """Same checks on the same engine batch, in a separate bounded CPU pool."""
+    from molcascade.parallel.shards import OUTCOME_FILENAME
+    config = UniDockConfig.model_validate(dict(task.config))
+    session = PoseQualitySession(config.pose_quality, receptor_path=config.receptor_path)
+    scores = task.output_paths['scores']
+    metadata = json.loads((scores.parent / OUTCOME_FILENAME).read_text())
+    report_activity(task, "pose_load", rows_completed=0)
+    rows = pq.read_table(scores).to_pylist()
+    rows = session.apply(rows, keep_poses=config.keep_poses,
+        progress=lambda phase, **kw: report_activity(task, phase, **kw))
+    report_activity(task, "publish", rows_completed=task.row_count)
+    temporary = scores.with_suffix('.checked.parquet')
+    try:
+        with pq.ParquetWriter(temporary, DOCKING_SCORE_V1.schema, compression='zstd') as writer:
+            if rows:
+                writer.write_table(pa.Table.from_pylist(rows, schema=DOCKING_SCORE_V1.schema))
+        temporary.replace(scores)
+    finally:
+        temporary.unlink(missing_ok=True)
+    return ShardOutcome(rows_in=task.row_count,
+        rows_out={'primary': task.row_count, 'scores': len(rows)},
+        metadata={**metadata, 'scored_pose_count': len(rows), **session.report.metadata()})
+
+
+def _split_quality(task: ShardTask, produced: ShardTask):
+    """Keep every pose of a parent together; never change a native docking call."""
+    config = UniDockConfig.model_validate(dict(task.config))
+    parents = pq.read_table(produced.output_paths['primary'])
+    scores = pq.read_table(produced.output_paths['scores'])
+    import pyarrow.compute as pc
+    root = next(iter(task.output_paths.values())).parent / 'quality'
+    for index, offset in enumerate(range(0, max(1, parents.num_rows), config.quality_chunk_rows)):
+        subset = parents.slice(offset, config.quality_chunk_rows)
+        values = subset.column('parent_id')
+        poses = scores.filter(pc.is_in(scores.column('parent_id'), value_set=values))
+        directory = root / f'shard-{index:05d}'
+        directory.mkdir(parents=True, exist_ok=True)
+        # Input and checked output are distinct: an interrupted check cannot
+        # relax its own partly repaired output a second time.
+        raw = directory / 'raw.parquet'
+        pq.write_table(poses, raw, compression='zstd')
+        yield replace(task, index=index, row_offset=offset, row_count=subset.num_rows,
+            input_files=(raw,), output_paths={'scores': directory / 'scores.parquet'},
+            device='cpu')
+
+
+def _check_quality_chunk(task: ShardTask) -> ShardOutcome:
+    config = UniDockConfig.model_validate(dict(task.config))
+    session = PoseQualitySession(config.pose_quality, receptor_path=config.receptor_path)
+    rows = pq.read_table(task.input_files[0]).to_pylist()
+    rows = session.apply(rows, keep_poses=config.keep_poses,
+        progress=lambda phase, **kw: report_activity(task, phase, **kw))
+    pq.write_table(pa.Table.from_pylist(rows, schema=DOCKING_SCORE_V1.schema),
+                   task.output_paths['scores'], compression='zstd')
+    return ShardOutcome(task.row_count, {'scores': len(rows)}, session.report.metadata())
+
+
+def _join_quality(task: ShardTask, produced: ShardTask, chunks) -> ShardOutcome:
+    from molcascade.parallel.shards import _read_checkpoint
+    prod_root = next(iter(produced.output_paths.values())).parent.parent
+    original = _read_checkpoint(prod_root, produced.index, tuple(produced.output_paths))
+    if original is None:
+        raise PluginError('produced docking batch changed', code='DOCKING_PRODUCTION_CHANGED')
+    counters = {}
+    count = 0
+    with pq.ParquetWriter(task.output_paths['scores'], DOCKING_SCORE_V1.schema, compression='zstd') as writer:
+        for chunk in chunks:
+            root = next(iter(chunk.output_paths.values())).parent.parent
+            outcome = _read_checkpoint(root, chunk.index, tuple(chunk.output_paths))
+            if outcome is None:
+                raise PluginError('checked docking chunk changed', code='DOCKING_QUALITY_CHANGED')
+            count += outcome.rows_out['scores']
+            for key, value in outcome.metadata.items():
+                if key.startswith('pose_'):
+                    counters[key] = counters.get(key, 0) + value
+            for batch in pq.ParquetFile(chunk.output_paths['scores']).iter_batches():
+                writer.write_batch(batch)
+    shutil.copyfile(produced.output_paths['primary'], task.output_paths['primary'])
+    return ShardOutcome(task.row_count, {'primary': task.row_count, 'scores': count},
+        {**original.metadata, **counters, 'scored_pose_count': count})
 
 
 class UniDockPlugin:
@@ -445,6 +548,8 @@ class UniDockPlugin:
         ),
     )
     config_model = UniDockConfig
+    pipelined = False
+    split_quality = False
 
     def execute(self, request: StageRequest, context: StageContext) -> StageResponse:
         config = validated_config(request, UniDockConfig, engine=_ENGINE, hint=_EXECUTABLE_HINT)
@@ -463,7 +568,12 @@ class UniDockPlugin:
         method_id = _method_id(config, receptor_id=receptor_id, prepared_id=prepared_id)
 
         result = shard_stage(
-            worker=_run_shard,
+            worker=_produce_shard if self.pipelined else _run_shard,
+            postprocess=_check_quality_chunk if self.split_quality else _check_shard if self.pipelined else None,
+            postprocess_split=_split_quality if self.split_quality else None,
+            postprocess_join=_join_quality if self.split_quality else None,
+            batch_shards=config.batch_size if self.pipelined else None,
+            report_batches=True,
             stage_input=parents,
             contract=PARENT_V1,
             output_paths={
@@ -522,4 +632,16 @@ class UniDockPlugin:
         )
 
 
-__all__ = ["UniDockConfig", "UniDockPlugin"]
+class PipelinedUniDockPlugin(UniDockPlugin):
+    """v0.3 changes execution layout; explicit v0.2 configurations remain valid."""
+    descriptor = UniDockPlugin.descriptor.model_copy(update={'version': '0.3.0'})
+    pipelined = True
+
+
+class FineGrainedUniDockPlugin(PipelinedUniDockPlugin):
+    """Independent CPU chunks with durable native output; old versions stay selectable."""
+    descriptor = UniDockPlugin.descriptor.model_copy(update={'version': '0.4.0'})
+    split_quality = True
+
+
+__all__ = ["UniDockConfig", "UniDockPlugin", "PipelinedUniDockPlugin", "FineGrainedUniDockPlugin"]

@@ -33,55 +33,91 @@ TYPED_KINDS = {
 
 
 def _note_catalog(entry, *, kinds, skill_refs, purpose, limit, cursor, max_bytes, source_ids):
-    """Expose current project heads through the existing catalog, not a new index."""
+    """Page current notes and their explicit resources; no second resource store."""
     from .notes import read_entry
+    from .selection import pointer
     selected = _selection(kinds if kinds is not None else sorted(KINDS), "kinds", allowed=KINDS)
     if purpose not in {None, "research"} or source_ids is not None:
         raise EvidenceError("note catalog uses its project journal in research scope")
     skill_rows = _skill_inventory(skill_refs, None)
     branches = sorted(entry.get("branches", {entry["branch_id"]: entry["record_id"]}))
-    stamp = digest({"entry": entry, "kinds": selected, "skills": skill_rows})
-    offset = 0
+    stamp = digest({"entry": entry, "kinds": selected, "skills": skill_rows, "layout": 2})
+    offset, member = 0, 0
     if cursor is not None:
         try:
             saved = json.loads(base64.urlsafe_b64decode(cursor))
             if saved["stamp"] != stamp:
                 raise StaleCursorError("project heads or selection changed; restart catalog")
             _bounded(saved["offset"], 0, len(branches) + len(skill_rows), "offset")
-            offset = saved["offset"]
+            offset, member = saved["offset"], saved["member"]
+            if type(member) is not int or member < 0:
+                raise ValueError("invalid resource offset")
         except (KeyError, TypeError, ValueError) as exc:
             if isinstance(exc, EvidenceError):
                 raise
             raise EvidenceError("invalid project catalog cursor") from None
     rows = []
-    def render(end):
-        more = end < len(branches) + len(skill_rows)
+    def render():
+        more = offset < len(branches) + len(skill_rows)
         return dict(schema=SCHEMA, items=rows,
-            next_cursor=base64.urlsafe_b64encode(canonical({"stamp": stamp, "offset": end}).encode()).decode() if more else None,
+            next_cursor=base64.urlsafe_b64encode(canonical({"stamp": stamp, "offset": offset, "member": member}).encode()).decode() if more else None,
             coverage={"scope": "current_project_heads_and_selected_skills", "discovery_complete": not more,
                 "status": "partial" if more else "complete", "originals": "not_read",
                 "outside_scope": "historical notes remain available through find_notes and exact references"},
+            memory_scope=entry.get("memory_scope", "shared"),
             warnings=[], automatic_adoption=False, execution_permission="not_granted")
+    cached_branch, context = None, None
     while offset < len(branches) + len(skill_rows) and len(rows) < limit:
         if offset < len(branches):
-            context = read_entry(entry, branch_id=branches[offset], view="knowledge")
-            k = context["knowledge"]
-            row = dict(kind="experience", resource_id=context["record_id"], branch_id=context["branch_id"],
-                summary=k["summary"], conditions=k.get("conditions", {}), outcome=k.get("outcome"),
-                content_ref=context["details"], coverage=context["coverage"], applicability="host_selects")
-            if "definitions" in context:
-                row["definitions"] = context["definitions"]
+            if cached_branch != offset:
+                context = read_entry(entry, branch_id=branches[offset], view="full", verify_originals=False)
+                cached_branch = offset
+            note = context["note"]
+            resources = note.get("resources", {})
+            if not isinstance(resources, dict):
+                raise EvidenceError("note resources must be a name to descriptor mapping")
+            names = sorted(resources)
+            details = {k: entry[k] for k in ("schema", "database", "task_id", "workspace", "source_id", "memory_scope", "definitions", "definitions_digest") if k in entry}
+            details.update(branch_id=context["branch_id"], record_id=context["record_id"])
+            if member == 0:
+                row = dict(kind="experience", resource_id=context["record_id"], branch_id=context["branch_id"],
+                    summary=note["summary"][:600], conditions=note.get("conditions", {}), outcome=note.get("outcome"),
+                    content_ref=details, applicability="host_selects",
+                    coverage={"originals": "not_read", "support_count": len(note.get("evidence", [])),
+                              "counter_count": len(note.get("counterevidence", []))})
+            elif member <= len(names):
+                name = names[member - 1]
+                resource = resources[name]
+                if not isinstance(resource, dict) or resource.get("kind") not in KINDS:
+                    raise EvidenceError("resource needs an existing catalog kind")
+                selector = pointer("/resources", name)
+                row = dict(kind=resource["kind"], resource_id=name, branch_id=context["branch_id"],
+                    form=resource.get("form"), summary=str(resource.get("summary", ""))[:600],
+                    conditions=resource.get("conditions", note.get("conditions", {})),
+                    content_ref=details, pointer=selector, applicability="host_selects",
+                    next_read={"entry": details, "view": "selected", "selectors": [selector]},
+                    links=resource.get("links", []), verification="descriptor_only; resolve source before execution")
+            else:
+                offset, member = offset + 1, 0
+                continue
+            if "definitions" in note:
+                row["definitions"] = note["definitions"]
         else:
             row = skill_rows[offset - len(branches)]
+        old_offset, old_member = offset, member
+        if offset < len(branches) and member < len(names):
+            member += 1
+        else:
+            offset, member = offset + 1, 0
         if row["kind"] in selected:
             rows.append(row)
-            if len(canonical(render(offset + 1)).encode()) > max_bytes:
+            if len(canonical(render()).encode()) > max_bytes - 32:
                 rows.pop()
+                offset, member = old_offset, old_member
                 if not rows:
                     raise EvidenceError("one resource exceeds delivery budget; use its exact knowledge entry")
                 break
-        offset += 1
-    return render(offset)
+    return render()
 
 
 def _bounded(value, lower, upper, name):

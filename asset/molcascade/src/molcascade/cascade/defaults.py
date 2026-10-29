@@ -1522,11 +1522,11 @@ def default_cascade(
             _step_if_available("diversity_groups", "cluster.rdkit_scaffold_groups@0.1.0", active),
             _step_if_available(
                 "shortlist_select",
-                "select.native_scaffold_round_robin@0.1.0",
+                "select.native_scaffold_round_robin@0.2.0",
                 active,
-                # A generated library is full of near-neighbours, and docking
-                # budget spent on the twenty-sixth analogue of one scaffold buys
-                # nothing that the first twenty-five did not.
+                # This starter allocation favours breadth. Within-family SAR
+                # can require more analogues; the host should choose a cap or
+                # another selector for that task, not infer scientific failure.
                 settings={"max_per_scaffold": 25},
             ),
             _step_if_available(

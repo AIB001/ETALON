@@ -317,6 +317,31 @@ def test_wait_bound_is_visible_without_llm_polling_or_job_retry(tmp_path):
     assert result["wait_observation"]["state"] == "running" and result["wait_observation"]["check_count"] == 2
 
 
+def test_shared_wait_handle_continues_once_without_polling_science(tmp_path, monkeypatch):
+    from etalon.runtime.host_wait import register_wait, read_wait
+    path, _, calls, fixture_host = setup(tmp_path, ["waiting", "complete"])
+    marker = tmp_path / "completed"
+    marker.write_text("fixture completion marker")
+    handle = register_wait({"schema": "etalon-host-wait/1", "poll_seconds": .05,
+        "max_checks": 10, "checks": [{"kind": "file", "path": str(marker)}]}, str(tmp_path))["handle"]
+    deadline = time.monotonic() + 10
+    while not read_wait(handle)["terminal"] and time.monotonic() < deadline:
+        time.sleep(.05)
+    monkeypatch.setattr(lifecycle, "inspect_wait", lambda _: pytest.fail("polled science instead of shared handle"))
+
+    def host(body, folder, session):
+        receipt = fixture_host(body, folder, session)
+        if session is None:
+            lifecycle.save(folder / "wait.json", handle)
+        return receipt
+
+    result = lifecycle.run_lifecycle(path, tmp_path / "run", turn_runner=host)
+    assert result["stop_reason"] == "host_complete" and calls == [None, "fixture-session"]
+    assert lifecycle.read(tmp_path / "run/turn-001/wait-state.json")["source_check_count"] == 1
+    lifecycle.run_lifecycle(path, tmp_path / "run", turn_runner=host)
+    assert calls == [None, "fixture-session"]
+
+
 def test_unknown_usage_is_null_and_exact_child_receipts_deduplicate(tmp_path):
     assert lifecycle.usage_summary([{"usage": []}], tmp_path)["input_tokens"] is None
     folder = tmp_path / "turn-001"

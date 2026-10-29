@@ -602,6 +602,7 @@ def _selection_response(
     config: HashBudgetConfig,
     strategy: str,
     scaffold_key: Callable[[dict[str, Any]], str] | None = None,
+    explain_caps: bool = False,
 ) -> StageResponse:
     stage_input = require_single_input(request.inputs, contract_id=PARENT_V1.id)
     _prepare(context, _PARENT_PATH, _SELECTION_PATH)
@@ -616,6 +617,8 @@ def _selection_response(
     if isinstance(config, ScaffoldRoundRobinConfig):
         policy_payload["max_per_scaffold"] = config.max_per_scaffold
         policy_payload["include_chirality"] = config.include_chirality
+    if explain_caps:
+        policy_payload["decision_version"] = 2
     quota_policy_id = "quota-policy:sha256:" + canonical_sha256(policy_payload)
     try:
         connection = open_stage_database(database_path)
@@ -664,15 +667,15 @@ def _selection_response(
         if input_count == 0:
             raise PluginError("selection input contains no parents", code="SELECTION_EMPTY_INPUT")
         if isinstance(config, ScaffoldRoundRobinConfig):
+            connection.execute("""CREATE TABLE ranks AS
+                SELECT parent_id, tie_break_key, ROW_NUMBER() OVER (
+                    PARTITION BY scaffold_key ORDER BY tie_break_key, parent_id
+                ) AS within_scaffold FROM parents""")
             connection.execute(
                 """
                 INSERT INTO chosen(parent_id, basket_rank, global_rank)
                 WITH ranked AS (
-                    SELECT parent_id, tie_break_key,
-                           ROW_NUMBER() OVER (
-                               PARTITION BY scaffold_key ORDER BY tie_break_key, parent_id
-                           ) AS within_scaffold
-                    FROM parents
+                    SELECT parent_id, tie_break_key, within_scaffold FROM ranks
                 ), selected AS (
                     SELECT parent_id, within_scaffold, tie_break_key,
                            ROW_NUMBER() OVER (
@@ -713,18 +716,22 @@ def _selection_response(
         quoted_policy = connection.execute("SELECT quote(?)", (quota_policy_id,)).fetchone()[0]
         quoted_basket = connection.execute("SELECT quote(?)", (basket,)).fetchone()[0]
         quoted_reason = connection.execute("SELECT quote(?)", (selected_reason,)).fetchone()[0]
+        rank_join = "LEFT JOIN ranks r USING (parent_id)" if explain_caps else ""
+        basket_rank = "r.within_scaffold - 1" if explain_caps else "c.basket_rank"
+        cap_reason = (f"WHEN r.within_scaffold > {config.max_per_scaffold} THEN 'NOT_SELECTED_SCAFFOLD_CAP' "
+                      if explain_caps else "")
         write_query_parquet(
             connection,
             f"""
             SELECT p.parent_id, {quoted_policy} AS quota_policy_id,
                    CASE WHEN c.parent_id IS NULL THEN FALSE ELSE TRUE END AS selected,
                    CASE WHEN c.parent_id IS NULL THEN NULL ELSE {quoted_basket} END AS basket,
-                   c.basket_rank, c.global_rank, NULL AS pareto_front,
+                   {basket_rank} AS basket_rank, c.global_rank, NULL AS pareto_front,
                    NULL AS priority_score,
-                   CASE WHEN c.parent_id IS NULL THEN 'NOT_SELECTED_BUDGET'
+                   CASE {cap_reason} WHEN c.parent_id IS NULL THEN 'NOT_SELECTED_BUDGET'
                         ELSE {quoted_reason} END AS reason_code,
                    p.tie_break_key, {config.seed} AS seed
-            FROM parents p LEFT JOIN chosen c USING (parent_id)
+            FROM parents p LEFT JOIN chosen c USING (parent_id) {rank_join}
             ORDER BY p.input_rank
             """,
             schema=SELECTION_DECISION_V1.schema,
@@ -821,7 +828,14 @@ class NativeScaffoldRoundRobinSelectorPlugin:
             config=config,
             strategy="native.murcko_round_robin",
             scaffold_key=scaffold_key,
+            explain_caps=self.descriptor.version == "0.2.0",
         )
+
+
+class NativeScaffoldRoundRobinSelectorV2Plugin(NativeScaffoldRoundRobinSelectorPlugin):
+    """Same selected set; distinguish family cap from total budget for every loser."""
+
+    descriptor = NativeScaffoldRoundRobinSelectorPlugin.descriptor.model_copy(update={"version": "0.2.0"})
 
 
 __all__ = [
@@ -829,6 +843,7 @@ __all__ = [
     "LeaderClusterConfig",
     "NativeHashBudgetSelectorPlugin",
     "NativeScaffoldRoundRobinSelectorPlugin",
+    "NativeScaffoldRoundRobinSelectorV2Plugin",
     "NativeStreamingLeaderPlugin",
     "RDKitMurckoScaffoldPlugin",
     "RDKitScaffoldGroupClusterPlugin",

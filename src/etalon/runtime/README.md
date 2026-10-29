@@ -1,5 +1,13 @@
 # ETALON 持久 CADD 执行层
 
+长任务等待优先复用宿主已有后台句柄及完成通知。缺少可复用通知时，可选
+`etalon_wait_register(declaration, workspace)`（SDK：`runtime.host_wait.register_wait`）
+保存既有 `etalon-host-wait/1` 声明及有界共享观测，不额外启动观察进程。同一工作区、同一完成条件
+复用首次策略和句柄；`etalon_action_result(handle)` 在间隔内共享快照，到期才由一个读取者刷新原任务状态。
+`examples/research_host_lifecycle.py` 的 `wait.json` 可直接保存该句柄。阶段完成和整轮
+完成是不同条件；终局观测不再刷新，不执行科学计算、不自动重试，也不自行向宿主发送通知。
+读取失败或耗尽检查次数保留为未解决状态；重新开始科学任务不是等待恢复。
+
 独立 PRISM v1 的 bounded 工程反馈另有显式客户端：`etalon.boundary.prism_v1.CLITransport`
 和 `etalon.active.prism.PrismV1Executor`，由 `examples/prism_round1.py` 注入 ActiveCampaign。
 它通过独立解释器的 `python -m prism.bridge` 使用 `etalon-prism-task/1`，不导入 PRISM，

@@ -2950,7 +2950,7 @@ CRITERIA: tuple[CriterionSpec, ...] = (
                     "functions and the same box, thousands of ligands resident on the "
                     "card at once."
                 ),
-                plugin_ref="docking.unidock@0.2.0",
+                plugin_ref="docking.unidock@0.4.0",
                 gate_plugin="docking.numeric_evidence_gate@0.1.0",
                 license_spdx="Apache-2.0",
                 citation=(

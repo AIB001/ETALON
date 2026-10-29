@@ -9,6 +9,11 @@ Use this capability for installation, missing dependencies or shadowed imports.
 Start from the intended task; a read-only MCP query does not require every GPU
 engine, model weight or simulation package.
 
+For selected PRISM generation models, use [runtime preparation](references/prism-runtime.md).
+Deliver a callable runtime profile, not just installation prose. Reuse compatible
+environments and shared weights; keep setup strategy here, concrete profiles in
+task resources, and conditional operating lessons in memory.
+
 - Use an isolated environment. The MCP entrypoint is `python -m etalon.mcp`;
   install the `mcp` extra for that server and only the extras needed by the task.
 - Bind the actual interpreter and source location. `etalon_capabilities` reports

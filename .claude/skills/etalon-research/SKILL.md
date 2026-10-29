@@ -43,8 +43,17 @@ interface has already verified the cited originals, routine continuation needs
 no second traversal or printed manifest. Still read the bodies of relevant
 counterevidence when they could change the scientific judgment.
 
+For large-scale computations, check measured throughput and intermediate reuse
+after a representative first batch and material phase changes; a successful launch
+or declared worker count is insufficient. Consume `execution_feedback.resource_review`
+from existing status, record its key and next action once, and continue via the
+saved completion handle. Unchanged observations need neither another proposal nor
+another model review. A normal but costly run can justify an independent method
+trial; it does not authorize replacing an active run's bound implementation.
+
 | Current question | Read only this reference |
 | --- | --- |
+| Execution succeeds but its throughput, reuse or resource use is unexpectedly costly | [Execution improvement](../etalon-skill-improvement/references/execution-efficiency.md) |
 | Find published results or counterevidence, read a known reference, or reuse another source | [Evidence reuse](references/evidence-reuse.md) |
 | Call a saved method, reuse intermediate results, read current progress or save changed fields | [Continue a note](references/progress-publication.md) |
 | Integrate a note producer, configure host lifecycle, inspect a native job handle, or resume an existing graph publication | [Advanced publication: read the matching section](references/progress-advanced.md) |

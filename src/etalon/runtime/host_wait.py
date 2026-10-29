@@ -168,3 +168,110 @@ def inspect_wait(body):
             state = "ready"
     return {"schema": "etalon-host-wait-observation/1", "state": state, "checks": results,
             "read_wall_seconds": time.perf_counter() - start, "scientific_completion_inferred": False}
+
+
+def _condition(body):
+    """Policy changes do not create a second observer of the same condition."""
+    validate_wait(body)
+    checks = []
+    for original in body["checks"]:
+        check = dict(original, path=os.path.normcase(os.path.abspath(original["path"])))
+        if check["kind"] != "native_attempt":
+            check.setdefault("missing_is_running", True)
+        if check["kind"] == "json_status":
+            for name in ("running", "ready", "failed"):
+                check[name] = sorted(check.get(name, []))
+        checks.append(check)
+    return {"schema": SCHEMA, "wake_when": body.get("wake_when", "any"),
+            "checks": sorted(checks, key=lambda item: json.dumps(item, sort_keys=True))}
+
+
+def register_wait(body, workspace):
+    """Share bounded observations of the existing task; no extra worker.
+
+    Prefer a host's existing completion notification when available. Otherwise
+    save this handle in the task entry; subscribers read it, not the source job.
+    The first registration's policy wins. Re-registration never resets an
+    exhausted observation budget or starts/restarts the scientific task.
+    """
+    import hashlib
+    from .files import _read, _save
+
+    root = Path(workspace)
+    if not root.is_absolute():
+        raise EvidenceError("wait workspace must be absolute")
+    condition = _condition(body)
+    key = hashlib.sha256(json.dumps(condition, sort_keys=True).encode()).hexdigest()
+    folder = root / "waits" / key
+    folder.mkdir(parents=True, exist_ok=True)
+    handle = {"schema": "etalon-wait-handle/1", "directory": str(folder), "condition_id": key}
+    with _wait_lock(folder):
+        declaration = folder / "declaration.json"
+        if declaration.exists():
+            saved = _read(declaration)
+            if _condition(saved) != condition:
+                raise EvidenceError("saved wait condition changed")
+        else:
+            # Normalize for deduplication only. Native receipts deliberately
+            # preserve the producer's exact path spelling (including Windows case).
+            saved = dict(body, wake_when=body.get("wake_when", "any"), poll_seconds=body.get("poll_seconds", 5),
+                         max_checks=body.get("max_checks", 1200))
+            _save(declaration, saved)
+    return {"handle": handle, "policy": {k: saved[k] for k in ("poll_seconds", "max_checks")},
+            "observation": read_wait(handle)}
+
+
+def read_wait(handle):
+    """Refresh once when due, shared by all readers. Never dispatch any process."""
+    import hashlib
+    from .files import _read, _save
+
+    if not isinstance(handle, dict) or handle.get("schema") != "etalon-wait-handle/1":
+        raise EvidenceError("saved wait handle required")
+    folder = Path(handle["directory"])
+    if not folder.is_absolute():
+        raise EvidenceError("wait handle directory must be absolute")
+    saved = _read(folder / "declaration.json")
+    key = hashlib.sha256(json.dumps(_condition(saved), sort_keys=True).encode()).hexdigest()
+    if key != handle["condition_id"] or folder.name != key:
+        raise EvidenceError("wait handle does not identify its saved condition")
+    terminal, snapshot = folder / "result.json", folder / "observation.json"
+    with _wait_lock(folder):
+        if terminal.exists():
+            return dict(_read(terminal), handle=handle, terminal=True)
+        previous = _read(snapshot) if snapshot.exists() else {}
+        now = time.time()
+        if previous and 0 <= now - previous["checked_at_unix"] < saved["poll_seconds"]:
+            return dict(previous, handle=handle, terminal=False)
+        observed = inspect_wait(saved)
+        observed.update(check_count=previous.get("check_count", 0) + 1,
+            checked_at_unix=now,
+            total_read_seconds=previous.get("total_read_seconds", 0) + observed["read_wall_seconds"])
+        # An observation error can be repaired without changing the scientific
+        # attempt. It consumes the same finite read budget, not a new task.
+        if observed["state"] not in {"ready", "failed"} and observed["check_count"] >= saved["max_checks"]:
+            observed.update(last_observed_state=observed["state"], state="wait_check_bound")
+        _save(snapshot, observed, replace=True)
+        done = observed["state"] in {"ready", "failed", "wait_check_bound"}
+        if done:
+            _save(terminal, observed)
+        return dict(observed, handle=handle, terminal=done)
+
+
+def _wait_lock(folder):
+    """Serialize short observations across clients; not a job polling loop."""
+    import errno
+    from contextlib import ExitStack
+    from .files import _consumer_lock
+
+    locks = ExitStack()
+    deadline = time.monotonic() + 5
+    while True:
+        try:
+            locks.enter_context(_consumer_lock(folder / "registration"))
+            return locks
+        except OSError as exc:
+            if exc.errno not in {errno.EACCES, errno.EAGAIN} or time.monotonic() >= deadline:
+                locks.close()
+                raise
+            time.sleep(.05)

@@ -53,9 +53,29 @@ def _absolute_input_path(path: str | Path) -> Path:
 
 def _configuration_input_paths(configuration: Mapping[str, Any]) -> set[Path]:
     paths: set[Path] = set()
+    bundle_roots: set[Path] = set()
 
     def inspect(value: Any) -> None:
         if isinstance(value, dict):
+            if str(value.get("plugin", "")).split("@")[0] in {
+                    "source.registered_parents", "docking.registered_conformers"}:
+                # A bundle is a declared set of files, not a recursively hashed store.
+                from molcascade.artifacts.store import LocalArtifactStore
+                config = value["config"]
+                if not Path(config["path"]).is_absolute():
+                    raise ValueError("registered bundle path must be absolute")
+                bundle_roots.add(_absolute_input_path(config["path"]))
+                store = LocalArtifactStore(config["path"], create=False)
+                manifest = store.get_manifest(config["artifact_id"])
+                root = store.artifact_directory(manifest.artifact_id)
+                paths.add(root / "artifact.json")
+                paths.update(root / item.path for item in manifest.files)
+                if config.get('selection_path'):
+                    selection = Path(config['selection_path'])
+                    if not selection.is_absolute():
+                        raise ValueError('registered selection path must be absolute')
+                    paths.add(_absolute_input_path(selection))
+                return
             for key, item in value.items():
                 if (key.endswith("_path") or key == "path") and isinstance(item, str) and item:
                     path = Path(item)
@@ -68,7 +88,7 @@ def _configuration_input_paths(configuration: Mapping[str, Any]) -> set[Path]:
                 inspect(item)
 
     inspect({key: value for key, value in configuration.items() if key not in {"library", "ingest"}})
-    return paths
+    return paths - bundle_roots
 
 
 @dataclass(frozen=True)

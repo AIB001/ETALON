@@ -32,10 +32,16 @@ def shard_stage(
     contract: DataContract,
     output_paths: Mapping[str, str],
     context: StageContext,
+    device: str | None = None,
     stage_id: str = "",
     config: Mapping[str, Any] | None = None,
     shard_rows: int | None = None,
     side_inputs: Mapping[str, tuple[StageInput, DataContract]] | None = None,
+    postprocess: Callable[[ShardTask], ShardOutcome] | None = None,
+    postprocess_split: Callable | None = None,
+    postprocess_join: Callable | None = None,
+    batch_shards: int | None = None,
+    report_batches: bool = False,
 ) -> ShardedResult:
     """Run ``worker`` over every shard of one contract-typed stage input.
 
@@ -56,15 +62,23 @@ def shard_stage(
     this stage is entitled to break.
     """
 
+    if device not in (None, "cpu"):
+        raise ValueError("device override must be cpu or None")
+    resources = context.resources.on_cpu() if device == "cpu" else context.resources
     return run_sharded(
         worker=worker,
         input_files=discover_contract_files(stage_input, contract),
         output_paths=output_paths,
         staging_root=context.staging_root,
-        resources=context.resources,
+        resources=resources,
         stage_id=stage_id,
         config=config,
         shard_rows=shard_rows,
+        postprocess=postprocess,
+        postprocess_split=postprocess_split,
+        postprocess_join=postprocess_join,
+        batch_shards=batch_shards,
+        report_batches=report_batches,
         side_inputs={
             name: discover_contract_files(side_input, side_contract)
             for name, (side_input, side_contract) in (side_inputs or {}).items()

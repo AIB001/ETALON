@@ -18,6 +18,7 @@ from molcascade.artifacts import (
 from molcascade.io.atomic import DestinationExistsError, atomic_write_bytes
 from molcascade.pipeline import CompiledStage
 from molcascade.runtime.models import CacheEntry
+from molcascade.runtime.cache_inputs import configuration_identity
 
 EXECUTION_SEMANTICS_VERSION = "molcascade.local-stage/v1"
 _CACHE_KEY_RE = re.compile(r"^cache:sha256:([0-9a-f]{64})$")
@@ -36,7 +37,11 @@ def stage_cache_key(
     stage: CompiledStage,
     input_ref: ArtifactDatasetRef | Mapping[str, ArtifactDatasetRef] | None = None,
 ) -> str:
-    """Return a path- and time-independent identity for one stage invocation.
+    """Return an identity for one stage invocation.
+
+    Verified registered bundles use content identity rather than their location.
+    Unpinned external paths remain part of config; callers must validate pinned
+    external inputs before consulting this key.
 
     Every request-port-qualified dataset view is included, rather than only
     containing artifact IDs.  Different ports of one multi-output artifact,
@@ -68,7 +73,7 @@ def stage_cache_key(
             "input_ref must be an ArtifactDatasetRef, a request-port mapping, or None"
         )
 
-    configuration = dict(stage.config)
+    configuration = configuration_identity(stage.descriptor.id, stage.config)
     invocation = {
         "schema_version": "molcascade.stage-cache-key/v1",
         "execution_semantics": {

@@ -291,10 +291,79 @@ def test_runtime_tools_declare_dispatch_costs_and_nonblocking_preparation():
                  "etalon_workflow_reconcile"):
         assert classification[name] == "spends"
     for name in ("etalon_executor_prepare", "etalon_screen_configure", "etalon_workflow_artifact",
-                 "etalon_workflow_reconcile"):
+                 "etalon_workflow_reconcile", "etalon_wait_register"):
         assert inspect.iscoroutinefunction(collector.tools[name])
+    assert classification["etalon_wait_register"] == "cheap"
     for name in ("etalon_workflow_status", "etalon_workflow_observe", "etalon_executor_list"):
         assert classification[name] == "free"
         refused = json.loads(collector.tools[name](**({"database": "relative.sqlite"} if name.endswith("list")
                              else {"workspace": "relative", "job_id": "job"})))
         assert refused["ok"] is False and "absolute" in refused["error"]["message"]
+
+
+def test_shared_wait_mcp_registration_and_result(tmp_path):
+    from etalon.mcp import runtime
+
+    class Collector:
+        def __init__(self):
+            self.tools = {}
+
+        def tool(self):
+            def register(function):
+                self.tools[function.__name__] = function
+                return function
+            return register
+
+    collector = Collector()
+    runtime.register(collector)
+    marker = tmp_path / "finished"
+    marker.write_text("fixture completion")
+    declaration = {"schema": "etalon-host-wait/1", "poll_seconds": .05,
+                   "max_checks": 5, "checks": [{"kind": "file", "path": str(marker)}]}
+
+    async def exercise():
+        first = json.loads(await collector.tools["etalon_wait_register"](declaration, str(tmp_path)))
+        assert first["ok"]
+        again = json.loads(await collector.tools["etalon_wait_register"](declaration, str(tmp_path)))
+        assert again["handle"] == first["handle"]
+        for _ in range(100):
+            result = json.loads(await collector.tools["etalon_action_result"](first["handle"]))
+            assert result["ok"]
+            if result["result"]["terminal"]:
+                assert result["result"]["state"] == "ready"
+                return
+            await asyncio.sleep(.05)
+        pytest.fail("MCP wait did not finish")
+
+    asyncio.run(exercise())
+
+
+def test_shared_wait_survives_stdio_server_restart(tmp_path):
+    pytest.importorskip("mcp")
+    from mcp import ClientSession, StdioServerParameters
+    from mcp.client.stdio import stdio_client
+
+    marker = tmp_path / "completed"
+    declaration = {"schema": "etalon-host-wait/1", "poll_seconds": .1, "max_checks": 300,
+                   "checks": [{"kind": "file", "path": str(marker)}]}
+    server = StdioServerParameters(command=sys.executable, args=["-m", "etalon.mcp"],
+                                  env={"PYTHONPATH": str(ROOT / "src")})
+
+    async def session_call(name, arguments):
+        async with (stdio_client(server) as (read, write),
+                    ClientSession(read, write, read_timeout_seconds=timedelta(seconds=20)) as session):
+            await session.initialize()
+            response = await session.call_tool(name, arguments)
+            assert not response.isError
+            result = json.loads(response.content[0].text)
+            assert result["ok"], result
+            return result
+
+    async def exercise():
+        first = await session_call("etalon_wait_register", {"declaration": declaration, "workspace": str(tmp_path)})
+        marker.write_text("fixture completion after first MCP server exit")
+        # One fresh MCP server reads the same handle; it never dispatches science.
+        result = await session_call("etalon_action_result", {"handle": first["handle"]})
+        assert result["result"]["terminal"] and result["result"]["state"] == "ready"
+
+    asyncio.run(exercise())

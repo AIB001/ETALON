@@ -10,6 +10,19 @@ from pathlib import Path
 def register(sub):
     research = sub.add_parser("research", help="read current knowledge or save research progress")
     commands = research.add_subparsers(dest="research_command", required=True)
+    fork = commands.add_parser("fork-memory", help="create independent working memory sharing original results")
+    fork.add_argument("--entry", type=Path, required=True)
+    fork.add_argument("--destination", type=Path, required=True)
+    fork.add_argument("--scope", required=True)
+    fork.add_argument("--question", required=True)
+    fork.set_defaults(handler=handle)
+    resources = commands.add_parser("resources", help="page methods, skills and conditional knowledge in a published entry")
+    resources.add_argument("--entry", type=Path, required=True)
+    resources.add_argument("--kind", action="append")
+    resources.add_argument("--cursor")
+    resources.add_argument("--limit", type=int, default=20)
+    resources.add_argument("--max-bytes", type=int, default=16384)
+    resources.set_defaults(handler=handle)
     current = commands.add_parser("current", help="bounded current brief; honor the entry read recipe")
     detail = commands.add_parser("detail", help="read exact fields from a pinned note")
     for command in (current, detail):
@@ -145,7 +158,14 @@ def _runtime():
 
 def handle(args: argparse.Namespace) -> int:
     try:
-        if args.research_command == "method":
+        if args.research_command == "fork-memory":
+            from .notes import fork_memory
+            result = fork_memory(args.entry, args.destination, memory_scope=args.scope, question=args.question)
+        elif args.research_command == "resources":
+            from .resource_catalog import build_resource_catalog
+            result = build_resource_catalog(entry=args.entry, kinds=args.kind, cursor=args.cursor,
+                limit=args.limit, max_bytes=args.max_bytes)
+        elif args.research_command == "method":
             from .notes import resolve_method
             result = resolve_method(args.entry, args.pointer, branch_id=args.branch, max_bytes=args.max_bytes)
         elif args.research_command == "original":

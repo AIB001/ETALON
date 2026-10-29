@@ -104,7 +104,9 @@ _BY_PLUGIN_REF: dict[str, BackendSpec] = _index_by_plugin_ref(BUILTIN_BACKEND_SP
 # Re-search uses the same executable, environment variable and licence as the
 # initial search. A separate backend id would invent a second installation and
 # name an environment variable that the inherited UniDockConfig never reads.
-_BY_PLUGIN_REF["docking.redock_consistency@0.1.0"] = _BY_PLUGIN_REF["docking.unidock@0.2.0"]
+_BY_PLUGIN_REF["docking.unidock@0.3.0"] = _BY_PLUGIN_REF["docking.unidock@0.4.0"]
+_BY_PLUGIN_REF["docking.unidock@0.2.0"] = _BY_PLUGIN_REF["docking.unidock@0.4.0"]
+_BY_PLUGIN_REF["docking.redock_consistency@0.1.0"] = _BY_PLUGIN_REF["docking.unidock@0.3.0"]
 
 
 def required_backends(

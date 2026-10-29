@@ -39,7 +39,8 @@ def _note_records(journal, entry, limit):
         raise EvidenceError("note entry current branch differs from its recorded head")
     selected = {rid for rid, record in records.items() if
                 record.get("bindings", {}).get("schema") == SCHEMA and
-                record["bindings"].get("task_id") == entry["task_id"]}
+                record["bindings"].get("task_id") == entry["task_id"] and
+                record["bindings"].get("memory_scope", "shared") == entry.get("memory_scope", "shared")}
     if not set(heads.values()) <= selected:
         raise EvidenceError("note entry head is missing or belongs to another task")
     pending, visited, notes = list(selected), set(), {}
@@ -187,8 +188,10 @@ def plan_note_handoff(origin, resolved_selector, requested, selector, inventory,
                    "skill_bundles": len(bundles), "artifacts": artifacts, "members": members,
                    "files": len(inventory.files), "bytes": inventory.total},
         "continuation_at_export": {k: continuation[k] for k in ("issues", "warnings", "pending", "authority")},
-        "discovery_scope": "all notes for the entry task, explicit journal references, originals and optional published workset",
-        "history_coverage": {"notes": "all_task_notes_in_snapshot_including_unpublished_heads",
+        "discovery_scope": "notes for the entry task and memory scope, explicit references, originals and optional published workset",
+        "memory_scope": value.get("memory_scope", "shared"),
+        "history_coverage": {"notes": "all_task_scope_notes_in_snapshot_including_unpublished_heads",
+                             "scope_boundary": "entry memory_scope; SQLite backup is not a confidential redacted export",
                              "unlinked_operations": "not_discovered_without_explicit_selection",
                              "external_jobs": "handles_preserved; jobs_not_copied_or_resumed"},
         "execution_permission": "not_granted", "automatic_retry": False})

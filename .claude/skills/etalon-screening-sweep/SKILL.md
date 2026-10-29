@@ -18,6 +18,13 @@ universal prerequisite.
   `etalon_screen_plan` compiles dependencies and returns input-bound `plan_id`;
   it neither executes nor estimates/reserves cost. The matching SDK entry is
   `etalon.screening.plan_screen(config, library, workspace)`.
+  Read `plan.execution_contract` for the compiled budget/scaffold allocation and
+  actual redock gates; the requested library size is not an affinity criterion.
+  For a new task requiring per-gate SMILES and coordinate delivery, pass
+  `delivery={}` to both plan and submit. The worker writes these outputs when the
+  run ends. For a requested final strict `<2 Å` redock protocol, use
+  `delivery={"require_redock":true,"rmsd_threshold":2.0}` and an appropriate
+  redock gate in the configuration. Early library-only work need not redock.
 - If actual execution is authorized, `etalon_screen_submit` accepts that plan,
   a new `run_id`, workers and devices. Identical request replay identifies the
   same job; changing a submitted protocol is not a retry. These detached workers
@@ -42,6 +49,8 @@ artifacts are not zero hits. `cost_status=not_metered` is unknown cost, not free
 execution; retain measured or declared costs from their actual source.
 Confirm final identity, protocol and population evidence before admitting a
 readout; a shortlist file is not automatically an accepted observation.
+`result.delivery` reports output completion separately. If it failed, finish
+exporting the committed artifacts; do not restart successful scientific work.
 
 Stop after a valid zero-survivor result when further execution would not answer
 the current question. If evidence implicates a gate or unsuitable input, the
@@ -54,6 +63,8 @@ For independent Python planning/status calls and their different workspace
 requirements, read [local SDK calls](references/local-sdk.md).
 For caller-defined configuration, final shortlist export or an existing sweep's
 individual mutations, read [configuration and sweep operations](references/configuration-and-sweep.md).
+For gate-by-gate SMILES, library partitions, requested RMSD criteria and actual
+dock/redock coordinates, read [result delivery](references/result-delivery.md).
 
 Read [historical workflow and calibration measurements](references/legacy-workflow.md)
 for existing sweep ledgers, gate-token usage or diagnostic examples. The values

@@ -40,13 +40,13 @@ def _run_id(value: str) -> str:
 
 
 def _prepare(config: str | Path, library: str | Path | None, workspace: str | Path,
-             *, allow_copyleft: bool = False) -> tuple[dict[str, Any], Screen, Any]:
+             *, allow_copyleft: bool = False, delivery: dict | None = None) -> tuple[dict[str, Any], Screen, Any]:
     if type(allow_copyleft) is not bool:
         raise ValueError("allow_copyleft must be a boolean")
     config_path = Path(config).expanduser().absolute()
     library_path = Path(library).expanduser().absolute() if library else None
     # Hash before AND after compile so a plan never approves a different config/library.
-    paths = {config_path, *([library_path] if library_path else [])}
+    paths = {config_path, *([library_path] if library_path and not library_path.is_dir() else [])}
     initial = {str(p): _file_hash(p) for p in paths}
     screen = Screen(workspace, allow_copyleft=allow_copyleft)
     plan = screen.plan(config_path, library_path)
@@ -59,6 +59,9 @@ def _prepare(config: str | Path, library: str | Path | None, workspace: str | Pa
                "workspace": str(screen.workspace), "allow_copyleft": allow_copyleft,
                "revision_id": plan.revision_id, "inputs": inputs,
                "infrastructure": screen.infra.provenance()}
+    if delivery is not None:
+        from etalon.screening_delivery import delivery_options
+        request["delivery"] = delivery_options(delivery, raw)
     report = {"plan_id": _identity(request), "plan": plan.as_dict(), "request": request,
               "cost": "not estimated or reserved; determined by the supplied cascade and library",
               "scope": "bulk screening only; no automatic MD/affinity feedback or active-campaign budget"}
@@ -66,9 +69,9 @@ def _prepare(config: str | Path, library: str | Path | None, workspace: str | Pa
 
 
 def plan_screen(config: str | Path, library: str | Path | None, workspace: str | Path,
-                *, allow_copyleft: bool = False) -> dict[str, Any]:
+                *, allow_copyleft: bool = False, delivery: dict | None = None) -> dict[str, Any]:
     """Compile and check dependencies without executing any screening stage."""
-    return _prepare(config, library, workspace, allow_copyleft=allow_copyleft)[0]
+    return _prepare(config, library, workspace, allow_copyleft=allow_copyleft, delivery=delivery)[0]
 
 
 @contextmanager
@@ -104,6 +107,7 @@ def screen_status(workspace: str | Path, run_id: str) -> dict[str, Any]:
     report = dict(row)
     for key in ("request", "result"):
         report[key] = json.loads(report[key]) if report[key] else None
+    report["progress"] = Screen.read_progress(workspace, run_id)
     report["cost_status"] = "not_metered"
     report["state_semantics"] = "last journaled state; investigate logs after a host/worker crash; no automatic retry"
     # ``state`` has two values and a screen has three outcomes. A run in which every molecule was
@@ -120,7 +124,7 @@ def screen_status(workspace: str | Path, run_id: str) -> dict[str, Any]:
 
 def submit_screen(config: str | Path, library: str | Path | None, workspace: str | Path, *,
                   run_id: str, expected_plan_id: str, workers: int = 1,
-                  devices: tuple[str, ...] = (), allow_copyleft: bool = False) -> dict[str, Any]:
+                  devices: tuple[str, ...] = (), allow_copyleft: bool = False, delivery: dict | None = None) -> dict[str, Any]:
     """Submit exactly this plan once. Repeating the same run id returns the same job.
 
     Changing inputs, plan, devices or worker count under the same ID is refused.
@@ -135,7 +139,7 @@ def submit_screen(config: str | Path, library: str | Path | None, workspace: str
             or any(not isinstance(d, str) or not re.fullmatch(r"cpu|cuda:\d+", d) for d in devices)
             or len(set(devices)) != len(devices)):
         raise ValueError("devices must be distinct cpu/cuda:N lane names")
-    prepared, _, _ = _prepare(config, library, workspace, allow_copyleft=allow_copyleft)
+    prepared, _, _ = _prepare(config, library, workspace, allow_copyleft=allow_copyleft, delivery=delivery)
     if expected_plan_id != prepared["plan_id"]:
         raise ValueError("screen plan changed; inspect a new plan before submitting")
     request = {**prepared["request"], "workers": workers, "devices": list(devices)}
@@ -191,7 +195,8 @@ def _worker(workspace: str, run_id: str) -> int:
         job = screen_status(workspace, run_id)
         request = job["request"]
         prepared, screen, plan = _prepare(request["config"], request["library"], workspace,
-                                           allow_copyleft=request["allow_copyleft"])
+                                           allow_copyleft=request["allow_copyleft"],
+                                           **({"delivery": request["delivery"]} if "delivery" in request else {}))
         if prepared["plan_id"] != job["plan_id"]:
             raise ValueError("screen inputs changed between submission and execution")
         run = screen.run(plan, run_id=run_id, workers=request["workers"], devices=request["devices"] or None)
@@ -226,6 +231,21 @@ def _worker(workspace: str, run_id: str) -> int:
             )
         if any(_file_hash(Path(p)) != sha for p, sha in request["inputs"].items()):
             state, error = "failed", "screen inputs changed during execution; artifacts are not validated results"
+        if request.get("delivery") is not None:
+            from etalon.screening_delivery import export_screen_delivery
+            output = Path(workspace) / "deliveries" / run_id
+            try:
+                exported = export_screen_delivery(workspace, run_id, output,
+                    rmsd_threshold=request["delivery"]["rmsd_threshold"])
+                result["delivery"] = {"state": "incomplete" if exported["source_coverage"]["unresolved_origins"] else "complete",
+                                      "path": str(output / "delivery.json"),
+                                      "reused": exported["reused"]}
+            except Exception as delivery_error:
+                # A delivery failure is not a failed computation or permission to
+                # repeat it. The existing export endpoint can finish materialization.
+                result["delivery"] = {"state": "failed", "path": str(output),
+                                      "error": f"{type(delivery_error).__name__}: {delivery_error}",
+                                      "next": "export committed artifacts; do not resubmit science"}
     except Exception as caught:
         error = f"{type(caught).__name__}: {caught}"
     with _journal(workspace) as db:

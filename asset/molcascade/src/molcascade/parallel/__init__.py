@@ -14,18 +14,16 @@ The pieces:
   part of any stage config, because ``stage_cache_key`` hashes configs and a
   worker count in there would make one computation cache differently on every
   machine.
-- :func:`plan_lanes` -- hardware plus one ``--device`` request becomes a list of
-  execution lanes.
+- :func:`resource_request` -- requested devices and CPU concurrency stay independent.
 - :func:`run_sharded` -- the single entry point an adapter calls.  Splits, runs,
   checkpoints, resumes, and hands back staged file names in shard order.
 """
 
 from molcascade.parallel.devices import (
     FrameworkProbe,
-    LanePlan,
     describe_lanes,
     pinned_device,
-    plan_lanes,
+    resource_request,
     probe_framework_gpu,
     resolve_framework_lanes,
 )
@@ -51,7 +49,6 @@ __all__ = [
     "DEFAULT_SHARD_ROWS",
     "MAX_WORKERS",
     "FrameworkProbe",
-    "LanePlan",
     "ShardError",
     "ShardOutcome",
     "ShardTask",
@@ -62,7 +59,7 @@ __all__ = [
     "describe_lanes",
     "iter_shard_batches",
     "pinned_device",
-    "plan_lanes",
+    "resource_request",
     "plan_shards",
     "probe_framework_gpu",
     "read_side_input",

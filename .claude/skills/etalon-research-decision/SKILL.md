@@ -21,6 +21,18 @@ or workflow. State the result that would continue, change or stop that choice.
 Keep unknown and coexisting causes possible; a failed result should inform the
 next action rather than automatically reject the whole method.
 
+When a molecular screen produces a shortlist, connect it to the research goal:
+identify the main uncertainty that could change which candidates advance and
+propose a discriminating next action, or explain why the requested result is
+already sufficient. Consider methods with genuinely different evidence, receptor
+or pose uncertainty, accessible compounds or complete synthesis routes, and
+experimental binding or functional readouts where relevant. Preserve diverse
+candidate families and promising alternatives where the decision warrants it;
+screening scores and agreement alone do not establish experimental activity.
+Use the current task's evidence, available resources and authorization to choose
+whether to execute, defer, or hand off the next action. No fixed number of rounds,
+mandatory simulation or extra method is implied by this guidance.
+
 Run through existing component interfaces, retaining native handles and exact
 inputs. Compare useful output, failed attempts and complete costs under the same
 external endpoint. Prediction match, numerical convergence and scientific benefit

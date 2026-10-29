@@ -709,16 +709,29 @@ def await_completion(capsule, directory, receipts, began):
     try:
         if declaration.stat().st_size > 65536:
             raise EvidenceError("wait declaration exceeds compact bound")
-        spec = validate_wait(read(declaration))
+        declared = read(declaration)
+        shared = declared.get("schema") == "etalon-wait-handle/1"
+        if shared:
+            from etalon.runtime.host_wait import read_wait
+            spec = validate_wait(read(Path(declared["directory"]) / "declaration.json"))
+        else:
+            spec = validate_wait(declared)
         identity = file_identity(declaration)
         if previous.get("declaration_identity") is not None and previous["declaration_identity"] != identity:
             raise EvidenceError("waiting declaration changed; do not silently alter a pending handle")
         for index in range(spec.get("max_checks", 1200)):
             if file_identity(declaration) != identity:
                 raise EvidenceError("waiting declaration changed during observation")
-            observed = inspect_wait(spec)
+            started_read = time.perf_counter()
+            observed = read_wait(declared) if shared else inspect_wait(spec)
+            elapsed_read = time.perf_counter() - started_read
             count += 1
-            read_wall += observed.pop("read_wall_seconds")
+            if shared:
+                observed["source_check_count"] = observed.pop("check_count", 0)
+                observed.pop("read_wall_seconds", None)
+                read_wall += elapsed_read
+            else:
+                read_wall += observed.pop("read_wall_seconds")
             if observed["state"] == "check_error":
                 errors += 1
                 last_error = {"checked_at": stamp(), "checks": observed["checks"]}
@@ -730,6 +743,8 @@ def await_completion(capsule, directory, receipts, began):
                 return None
             if observed["state"] in {"check_error", "unknown"}:
                 return "wait_" + observed["state"]
+            if observed["state"] == "wait_check_bound":
+                return observed["state"]
             if index + 1 == spec.get("max_checks", 1200):
                 return "wait_check_bound"
             next_check = time.monotonic() + spec.get("poll_seconds", 5)

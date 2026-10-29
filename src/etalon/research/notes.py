@@ -18,9 +18,10 @@ from .selection import MISSING, byte_size, children, pointer as _pointer, resolv
 
 SCHEMA = "etalon-research-note/1"
 ENTRY = "etalon-note-entry/1"
+SHARED_SCOPE = "shared"
 _CONTINUATION = ("question", "summary", "conditions", "status", "state", "outcome",
                  "pending_handles", "completed_refs", "completed", "wait_for", "next_action",
-                 "invalid_when", "reconsider_when", "residuals", "feedback")
+                 "invalid_when", "reconsider_when", "residuals", "feedback", "shared_entry")
 _ORIGINAL_CHECKS = ContextVar("etalon_note_publication_originals", default=None)
 _CONTROLS = ("state", "status", "authorization", "constraints", "controls", "budget",
              "other_pauses", "pending_handles", "conditions", "completed_refs", "completed", "wait_for")
@@ -273,7 +274,7 @@ def _brief_note(response, note, *, max_bytes, response_envelope=None):
     response.update(view="brief", knowledge={})
     keys = ("question", "summary", "conditions", "status", "state", "outcome", "limits",
         "invalid_when", "reconsider_when", "residuals", "lesson", "knowledge", "decision",
-        "next_action", "completed_refs", "completed", "wait_for", "capability_id", "method_choices", "result_read", "scientific_result", "feedback")
+        "next_action", "completed_refs", "completed", "wait_for", "capability_id", "method_choices", "result_read", "scientific_result", "feedback", "shared_entry")
     pending = [k for k in keys if k in note]
     response["coverage"] = {"knowledge": "partial", "note_identity": "verified",
         "originals": "verified" if response["originals_verified"] is not None else "not_read",
@@ -283,6 +284,11 @@ def _brief_note(response, note, *, max_bytes, response_envelope=None):
     response["followup"] = {"entry": "details", "sdk": "etalon.research.notes.read_entry"}
     _bounded_metadata(response, note, max_bytes=max_bytes)
     _bounded_controls(response, note, max_bytes=max_bytes)
+
+    if isinstance(note.get("resources"), dict):
+        response["resource_navigation"] = {"declared_in_this_note": len(note["resources"]),
+            "sdk": "etalon.research.resource_catalog.build_resource_catalog",
+            "mcp_view": "resources", "detail_pointer": "/resources", "bodies_loaded": False}
 
     def update():
         response["coverage"]["omitted_fields"] = [_pointer("", k) for k in pending]
@@ -343,7 +349,7 @@ def _original_selection(entry, pointer, branch_id):
     value = entry_value(entry)
     result = read_entry(value, branch_id=branch_id, verify_originals=False)
     pin = {k: value[k] for k in ("schema", "database", "task_id", "workspace", "source_id",
-                                 "definitions", "definitions_digest") if k in value}
+                                 "definitions", "definitions_digest", "memory_scope") if k in value}
     result["details"] = {**pin, "branch_id": result["branch_id"], "record_id": result["record_id"]}
     selected = _selected(result["note"], pointer)
     return result, selected, entry_journal(value).resolver
@@ -461,16 +467,20 @@ def record_note(journal, note, directory, *, source_kind="existing_real_artifact
     if note.get("schema", SCHEMA) != SCHEMA:
         raise ValueError("unsupported research note")
     note["schema"] = SCHEMA
+    scope = note.get("memory_scope", SHARED_SCOPE)
+    if not isinstance(scope, str) or not scope.strip():
+        raise ValueError("memory_scope must be a nonempty name")
     _check_result_meanings(note)
     _verify(note, journal.resolver)
     supersedes = tuple(note.get("supersedes", []))
     for rid in supersedes:
         old = read_note(journal, rid, verify_originals=False)["note"]
-        if (old["task_id"], old["branch_id"]) != (note["task_id"], note["branch_id"]):
+        if (old["task_id"], old["branch_id"], old.get("memory_scope", SHARED_SCOPE)) != (
+                note["task_id"], note["branch_id"], scope):
             raise ValueError("a note may supersede only its own task branch")
     path = Path(directory).absolute() / (digest(note) + ".json")
     _save(path, note)
-    bindings = {k: note[k] for k in ("schema", "task_id", "branch_id", "capability_id", "publication_id") if k in note}
+    bindings = {k: note[k] for k in ("schema", "task_id", "branch_id", "capability_id", "publication_id", "memory_scope") if k in note}
     return journal.record(Artifact(str(path), **file_identity(path), source_kind=source_kind,
                                    role="diagnostic", bindings=bindings, parents=supersedes))
 
@@ -493,13 +503,16 @@ def publish_note(entry, journal, record_id, *, activate=True):
     note = current["note"]
     value = {"schema": ENTRY, "database": str(journal.store.path.absolute()),
              "record_id": record_id, "task_id": note["task_id"], "branch_id": note["branch_id"]}
+    if "memory_scope" in note:
+        value["memory_scope"] = note["memory_scope"]
     entry = Path(entry).absolute()
     entry.parent.mkdir(parents=True, exist_ok=True)
     with _consumer_lock(entry):
         if entry.exists():
             old = entry_value(entry)
             if (old.get("schema") != ENTRY or not _same_journal(old, journal)
-                    or old.get("task_id") != value["task_id"]):
+                    or old.get("task_id") != value["task_id"]
+                    or old.get("memory_scope", SHARED_SCOPE) != value.get("memory_scope", SHARED_SCOPE)):
                 raise ValueError("entry changed; explicitly supersede the current note")
             heads = old.get("branches", {old["branch_id"]: old["record_id"]})
             previous = heads.get(note["branch_id"])
@@ -555,7 +568,7 @@ def patch_progress(entry, patch, *, branch_id=None, expected_record=None,
         entry = target if target.is_absolute() else entry.parent / target
     if not isinstance(patch, dict):
         raise ValueError("progress patch must be an object")
-    reserved = {"schema", "task_id", "branch_id", "publication_id", "supersedes"}
+    reserved = {"schema", "task_id", "branch_id", "publication_id", "supersedes", "memory_scope"}
     if reserved.intersection(patch):
         raise ValueError("patch replaces note fields only; use a complete note for task/branch metadata")
     value = entry_value(entry)
@@ -569,8 +582,9 @@ def patch_progress(entry, patch, *, branch_id=None, expected_record=None,
         with journal.store.connection() as db:
             rows = db.execute("SELECT key FROM metadata WHERE json_extract(body,'$.bindings.schema')=? "
                 "AND json_extract(body,'$.bindings.task_id')=? AND json_extract(body,'$.bindings.branch_id')=? "
-                "AND json_extract(body,'$.bindings.publication_id')=?",
-                (SCHEMA, value["task_id"], branch, publication_id)).fetchall()
+                "AND json_extract(body,'$.bindings.publication_id')=? "
+                "AND COALESCE(json_extract(body,'$.bindings.memory_scope'),'shared')=?",
+                (SCHEMA, value["task_id"], branch, publication_id, value.get("memory_scope", SHARED_SCOPE))).fetchall()
         if len(rows) > 1:
             raise ValueError("publication identity has conflicting records")
         if rows:
@@ -608,8 +622,9 @@ def _save_progress(journal, entry, note, *, directory, activate, publication_id)
         with journal.store.connection() as db:
             prior = db.execute("SELECT key FROM metadata WHERE json_extract(body,'$.bindings.schema')=? "
                 "AND json_extract(body,'$.bindings.task_id')=? AND json_extract(body,'$.bindings.branch_id')=? "
-                "AND json_extract(body,'$.bindings.publication_id')=?",
-                (SCHEMA, body["task_id"], body["branch_id"], publication_id)).fetchall()
+                "AND json_extract(body,'$.bindings.publication_id')=? "
+                "AND COALESCE(json_extract(body,'$.bindings.memory_scope'),'shared')=?",
+                (SCHEMA, body["task_id"], body["branch_id"], publication_id, body.get("memory_scope", SHARED_SCOPE))).fetchall()
         if prior:
             if len(prior) != 1:
                 raise ValueError("publication identity has conflicting records")
@@ -619,7 +634,8 @@ def _save_progress(journal, entry, note, *, directory, activate, publication_id)
                 raise ValueError("publication identity reused for different content")
             current = entry_value(entry) if entry.exists() else None
             if current is not None and (not _same_journal(current, journal)
-                    or current.get("task_id") != body["task_id"]):
+                    or current.get("task_id") != body["task_id"]
+                    or current.get("memory_scope", SHARED_SCOPE) != body.get("memory_scope", SHARED_SCOPE)):
                 raise ValueError("progress must use the existing project journal and task")
             head = current.get("branches", {current["branch_id"]: current["record_id"]}).get(body["branch_id"]) if current else None
             if head is None or head in old.get("supersedes", []):
@@ -629,7 +645,8 @@ def _save_progress(journal, entry, note, *, directory, activate, publication_id)
     if entry.exists():
         current = entry_value(entry)
         if (current.get("schema") != ENTRY or not _same_journal(current, journal)
-                or current.get("task_id") != body["task_id"]):
+                or current.get("task_id") != body["task_id"]
+                or current.get("memory_scope", SHARED_SCOPE) != body.get("memory_scope", SHARED_SCOPE)):
             raise ValueError("progress must use the existing project journal and task")
         head = current.get("branches", {current["branch_id"]: current["record_id"]}).get(body["branch_id"])
         if head is not None:
@@ -745,9 +762,12 @@ def read_entry(entry, *, verify_originals=None, conditions=None, definitions=Non
             raise ValueError("requested definitions are missing or differ from this note; query find_notes")
     if value["task_id"] != note["task_id"] or selected != note["branch_id"]:
         raise ValueError("entry scope differs from its note")
+    if value.get("memory_scope", SHARED_SCOPE) != note.get("memory_scope", SHARED_SCOPE):
+        raise ValueError("entry memory_scope differs from its note")
     # Shape shared with existing context delivery; graph expansion is unnecessary.
     response = {**result, "context_id": "note-" + digest({"entry": value, "selected": selected}),
             "task_id": note["task_id"], "branch_id": note["branch_id"],
+            "memory_scope": note.get("memory_scope", SHARED_SCOPE),
             "source_watermarks": [{"source_id": value["database"], "status": "complete",
                                    "record_id": heads[selected]}],
             "source_issues": [], "publications": {"status": "complete", "operations": []},
@@ -762,7 +782,7 @@ def read_entry(entry, *, verify_originals=None, conditions=None, definitions=Non
     if view in {"index", "selected", "brief"}:
         response["details"] = {"schema": ENTRY, "database": value["database"],
             "task_id": note["task_id"], "branch_id": selected, "record_id": heads[selected]}
-        response["details"].update({k: value[k] for k in ("workspace", "source_id") if k in value})
+        response["details"].update({k: value[k] for k in ("workspace", "source_id", "memory_scope") if k in value})
         if definitions is not None:
             response["details"]["definitions"] = definitions
         if "task_workset" in value:
@@ -785,7 +805,7 @@ def read_entry(entry, *, verify_originals=None, conditions=None, definitions=Non
         response["branches"] = heads
         response["details"] = {"schema": ENTRY, "database": value["database"],
             "task_id": note["task_id"], "branch_id": selected, "record_id": heads[selected]}
-        response["details"].update({k: value[k] for k in ("workspace", "source_id") if k in value})
+        response["details"].update({k: value[k] for k in ("workspace", "source_id", "memory_scope") if k in value})
         if definitions is not None:
             response["details"]["definitions"] = definitions
         if "task_workset" in value:
@@ -823,12 +843,16 @@ def read_current(entry, *, recipe=None, conditions=None, definitions=None, branc
     return response
 
 
-def find_notes(journal, *, task_id, conditions, definitions=None, capability_id=None, limit=20, offset=0, verify_originals=True):
+def find_notes(journal, *, task_id, conditions, definitions=None, capability_id=None, limit=20, offset=0, verify_originals=True,
+               memory_scope=SHARED_SCOPE):
     """Exact scoped retrieval, including negative notes and applicability gaps."""
     if not isinstance(conditions, dict) or not 1 <= limit <= 50 or offset < 0:
         raise ValueError("bounded page and explicit query conditions required")
     sql = "SELECT key FROM metadata WHERE json_extract(body,'$.bindings.schema')=? AND json_extract(body,'$.bindings.task_id')=?"
-    params = [SCHEMA, task_id]
+    if not isinstance(memory_scope, str) or not memory_scope.strip():
+        raise ValueError("select one explicit memory_scope")
+    sql += " AND COALESCE(json_extract(body,'$.bindings.memory_scope'),'shared')=?"
+    params = [SCHEMA, task_id, memory_scope]
     if capability_id is not None:
         sql += " AND json_extract(body,'$.bindings.capability_id')=?"
         params.append(capability_id)
@@ -851,5 +875,44 @@ def find_notes(journal, *, task_id, conditions, definitions=None, capability_id=
         else:
             matches.append(row)
     return {"matches": matches, "related": related,
+            "memory_scope": memory_scope,
             "next_offset": offset + limit if len(ids) > limit else None,
             "selection": "host_decides; inspect supersedes and counterevidence"}
+
+
+def fork_memory(entry, destination, *, memory_scope, question):
+    """Start independent working memory in the same journal, sharing originals.
+
+    No transcript, main hypotheses or skills are copied. This is retrieval and
+    writing isolation, not a filesystem ACL. Explicit original reads stay possible.
+    Bind this new entry to the advisor's own host session/hook installation.
+    """
+    if not isinstance(memory_scope, str) or not memory_scope.strip() or memory_scope == SHARED_SCOPE:
+        raise ValueError("choose a named private memory_scope")
+    source = entry_value(entry)
+    if source.get("memory_scope", SHARED_SCOPE) != SHARED_SCOPE:
+        raise ValueError("fork from a shared research entry")
+    current = read_entry(source, verify_originals=False)
+    parent = current["note"]
+    note = {"task_id": parent["task_id"], "branch_id": "working",
+        "memory_scope": memory_scope, "question": question,
+        "summary": "Independent working memory; read shared results as needed.",
+        "conditions": parent.get("conditions", {}),
+        "shared_entry": str(Path(entry).absolute()) if isinstance(entry, (str, Path)) else source,
+        "shared_basis": {"record_id": current["record_id"], "branch_id": parent["branch_id"]},
+        "knowledge": {}, "evidence": [], "counterevidence": [],
+        "next_action": "Read relevant shared results; propose only useful changes. No automatic main-memory merge."}
+    for key in ("constraints", "authorization", "other_pauses", "budget", "pending_handles", "definitions"):
+        if key in parent:
+            note[key] = parent[key]
+    target = Path(destination).absolute()
+    if target.exists():
+        existing = read_entry(target, verify_originals=False)
+        if (existing["note"].get("memory_scope") != memory_scope
+                or existing["task_id"] != parent["task_id"]
+                or existing["note"].get("shared_entry") != note["shared_entry"]):
+            raise ValueError("destination already belongs to another memory")
+        return {"entry": str(target), "record_id": existing["record_id"], "reused": True}
+    journal = entry_journal(source, read_only=False)
+    rid = save_progress(journal, target, note, publication_id="memory-" + digest([memory_scope, note["shared_entry"]]))
+    return {"entry": str(target), "record_id": rid, "reused": False}

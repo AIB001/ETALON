@@ -81,7 +81,7 @@ from molcascade.errors import (
 from molcascade.explain import explain_molecule
 from molcascade.handoff import materialize_shortlist
 from molcascade.io.atomic import DestinationExistsError, atomic_write_bytes
-from molcascade.parallel import StageResources, count_completed_shards, describe_lanes, plan_lanes
+from molcascade.parallel import StageResources, count_completed_shards, describe_lanes, resource_request
 from molcascade.pipeline import CompiledStage, PipelineCompiler
 from molcascade.plugins import PluginKind, PluginRegistry, create_builtin_registry
 from molcascade.plugins.builtin.chemprop_model import (
@@ -1215,7 +1215,7 @@ def _doctor(*, as_json: bool, run_version_commands: bool, allow_copyleft: bool) 
     environment = detect_environment()
     # The same function a run uses, so 'doctor' cannot report lanes that a run
     # would then decline to use.
-    lanes = plan_lanes(environment)
+    lanes = resource_request(environment)
     if as_json:
         _json_dump(
             {
@@ -1594,7 +1594,7 @@ def _pins(backend: str, *, models_dir: str | None, as_json: bool) -> int:
 def _stage_resources(
     *, workers: int | None, device: str
 ) -> tuple[StageResources, HostEnvironment]:
-    """Turn one ``--device``/``--workers`` request into this run's lanes.
+    """Read hardware once and retain independent CPU and GPU requests.
 
     Measured once, here, rather than per stage: ``detect_environment`` shells
     out to ``nvidia-smi``, and twenty tiers asking the same machine the same
@@ -1609,14 +1609,7 @@ def _stage_resources(
     """
 
     environment = detect_environment()
-    plan = plan_lanes(environment, device=device, workers=workers)
-    resources = StageResources(
-        workers=plan.workers,
-        devices=plan.devices,
-        device_request=device,
-        batch_size=environment.plan.recommended_batch_size,
-        notes=plan.notes,
-    )
+    resources = resource_request(environment, device=device, workers=workers)
     return resources, environment
 
 
@@ -1624,6 +1617,7 @@ def _report_lanes(resources: StageResources) -> None:
     """Say what the run is about to use, before it starts using it."""
 
     print(f"Execution: {describe_lanes(resources.devices)}")
+    print(f"  CPU worker budget: {resources.workers} (independent of GPU count)")
     for note in resources.notes:
         print(f"  note: {note}")
 
@@ -2079,11 +2073,11 @@ def _print_planned_funnel(lowered: LoweredCascade | None, screening: ScreeningCo
     print(f"  Shortlist target: {cascade.finalize.target_count:,}")
 
 
-def _shard_counts(
+def _shard_counts_detail(
     checkpoints_root: Path | None,
     stage: StageRunState,
-) -> tuple[int, int] | None:
-    """``(37, 40)`` for a stage that was interrupted part-way through.
+) -> dict[str, int | None] | None:
+    """Visible progress and the planned total, when the producer reported one.
 
     Only meaningful while a stage is unfinished: the checkpoint directory is
     removed the moment its artifact commits, so a succeeded stage correctly
@@ -2096,8 +2090,17 @@ def _shard_counts(
         return None
     from molcascade.runtime.cache import checkpoint_directory_name
 
-    complete, total = count_completed_shards(checkpoints_root / checkpoint_directory_name(stage.cache_key))
-    return (complete, total) if total else None
+    from molcascade.parallel.shards import shard_progress_counts
+    directory = checkpoints_root / checkpoint_directory_name(stage.cache_key)
+    return shard_progress_counts(directory) if directory.is_dir() else None
+
+
+def _shard_counts(checkpoints_root: Path | None, stage: StageRunState) -> tuple[int, int] | None:
+    """Compatibility view when a producer declared the stage total."""
+    counts = _shard_counts_detail(checkpoints_root, stage)
+    if counts is None or counts['total'] is None:
+        return None
+    return counts['complete'], counts['total']
 
 
 def _print_run_state(state: RunState, *, checkpoints_root: Path | None = None) -> None:
@@ -2105,8 +2108,16 @@ def _print_run_state(state: RunState, *, checkpoints_root: Path | None = None) -
     print(f"Revision: {state.revision_id}")
     for stage in state.stages:
         artifact = stage.output_ref.artifact_id if stage.output_ref else "-"
-        counts = _shard_counts(checkpoints_root, stage)
-        shards = f" shards={counts[0]}/{counts[1]}" if counts else ""
+        counts = _shard_counts_detail(checkpoints_root, stage)
+        shards = (f" shards_complete={counts['complete']} shards_total="
+                  f"{counts['total'] if counts['total'] is not None else 'unknown'}"
+                  f" shards_started_or_materialized={counts['started_or_materialized']}") if counts else ""
+        from molcascade.parallel.progress import stage_progress
+        progress = stage_progress(checkpoints_root, stage) if checkpoints_root else {}
+        if progress:
+            shards += f" phase={progress.get('phase')} workers={progress.get('effective_workers')}/{progress.get('requested_workers')} rows={progress.get('rows_completed')}/{progress.get('rows_total')}"
+            if progress.get('worker_phases'):
+                shards += f" activity={progress['worker_phases']}"
         print(
             f"  {stage.stage_id:<24} {stage.status.value:<10} "
             f"attempts={stage.attempts} artifact={artifact}{shards}"
@@ -2145,9 +2156,12 @@ def _status(
     if as_json:
         payload: dict[str, Any] = state.model_dump(mode="json")
         for entry, stage in zip(payload["stages"], state.stages, strict=True):
-            counts = _shard_counts(checkpoints_root, stage)
+            from molcascade.parallel.progress import stage_progress
+            entry["progress"] = stage_progress(checkpoints_root, stage)
+            counts = _shard_counts_detail(checkpoints_root, stage)
             if counts is not None:
-                entry["shards"] = {"complete": counts[0], "total": counts[1]}
+                entry["shards"] = {"complete": counts["complete"], "total": counts["total"]}
+                entry["shard_counts"] = counts
         if include_events:
             payload["events"] = [event.model_dump(mode="json") for event in events]
         _json_dump(payload, sys.stdout)

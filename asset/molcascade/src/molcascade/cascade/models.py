@@ -93,6 +93,7 @@ class LibraryFormat(StrEnum):
     XLSX = "xlsx"
     SDF = "sdf"
     PARQUET = "parquet"
+    REGISTERED = "registered"
     MOL2_DIRECTORY = "mol2_directory"
 
 

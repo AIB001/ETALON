@@ -121,10 +121,10 @@ def test_actual_mcp_stdio_session_can_plan_submit_poll_and_read_workflow(prepare
 
     config, library, workspace, _ = prepared
 
-    async def roundtrip():
+    async def roundtrip(errlog):
         server = StdioServerParameters(command=sys.executable, args=["-m", "etalon.mcp"],
                                         env={**os.environ, "PYTHONUNBUFFERED": "1"})
-        async with stdio_client(server) as (read, write), ClientSession(read, write) as session:
+        async with stdio_client(server, errlog=errlog) as (read, write), ClientSession(read, write) as session:
             await session.initialize()
             catalogue = await session.list_tools()
             assert "etalon_screen_submit" in {t.name for t in catalogue.tools}
@@ -146,7 +146,10 @@ def test_actual_mcp_stdio_session_can_plan_submit_poll_and_read_workflow(prepare
                 await asyncio.sleep(0.1)
             pytest.fail("MCP screen did not finish within the test limit")
 
-    asyncio.run(asyncio.wait_for(roundtrip(), timeout=60))
+    # An SDK default captured during another test's capsys scope has no OS
+    # descriptor. Give the real child process a real file in both suite/solo runs.
+    with (config.parent / 'mcp-stderr.log').open('w') as errlog:
+        asyncio.run(asyncio.wait_for(roundtrip(errlog), timeout=60))
 
 
 # -- three outcomes, read as two ---------------------------------------------

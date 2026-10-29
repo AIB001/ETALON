@@ -10,6 +10,11 @@ allocation. Existing compounds may already answer the question: skip generation
 entirely in that case. Productivity analysis does not launch a generator and does
 not require a screening campaign, receptor simulation or complete funnel plan.
 
+For actual generation, select the model and use the install skill's PRISM runtime
+capability when needed. Then read [normal feedback and selected handoff](references/feedback-and-handoff.md).
+The host chooses whether to inspect native poses, redock, measure properties,
+change generation or stop. A completed generation never forces a downstream funnel.
+
 ## Inputs and callable method
 
 `etalon_generation_productivity(loops_json, cost_ceiling=2.0)` accepts a JSON

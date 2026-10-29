@@ -189,6 +189,7 @@ def _shard_features(
             derived_port: derived_path.as_posix(),
         },
         context=context,
+        device="cpu",
         stage_id=request.stage_id,
         config=config.model_dump(mode="json"),
     )

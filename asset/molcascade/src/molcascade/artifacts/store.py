@@ -137,7 +137,10 @@ class LocalArtifactStore:
         self.staging_root = self.root / ".staging"
         self.lock_root = self.root / ".locks"
         self.artifacts_root = self.root / "artifacts" / "sha256"
-        for directory in (self.staging_root, self.lock_root, self.artifacts_root):
+        # Reading a copied, immutable result does not require the live writer's
+        # empty staging/lock directories. Publication still validates them when used.
+        directories = (self.staging_root, self.lock_root, self.artifacts_root) if create else (self.artifacts_root,)
+        for directory in directories:
             _ensure_real_directory(
                 directory,
                 owner_root=self.root,

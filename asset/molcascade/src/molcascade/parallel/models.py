@@ -52,6 +52,8 @@ class StageResources:
     and keeps producing the same bytes.
     """
 
+    #: CPU concurrency budget. Accelerator adapters also honor this upper bound,
+    #: while their actual producer count is limited by the selected devices.
     workers: int = 1
     #: One entry per execution lane, in assignment order: ``"cpu"`` or
     #: ``"cuda:N"`` naming a *physical* device index.
@@ -94,6 +96,10 @@ class StageResources:
     @property
     def uses_gpu(self) -> bool:
         return any(device.startswith("cuda:") for device in self.devices)
+
+    def on_cpu(self) -> StageResources:
+        """Use the requested CPU budget independently of accelerator devices."""
+        return self.replace(devices=("cpu",) * self.workers)
 
     def with_shard_rows(self, shard_rows: int) -> StageResources:
         """Return a copy for an adapter that knows its own per-row cost."""
@@ -154,6 +160,7 @@ class ShardTask:
     #: set in the worker; this is the record of it, not the mechanism.
     device: str = "cpu"
     batch_size: int = 65_536
+    progress_dir: Path | None = None
 
     def __post_init__(self) -> None:
         if self.index < 0:

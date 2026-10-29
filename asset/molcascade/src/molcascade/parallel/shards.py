@@ -47,6 +47,7 @@ from molcascade.artifacts.hashing import sha256_file
 from molcascade.errors import MolCascadeError, PluginError
 from molcascade.io.atomic import atomic_write_bytes
 from molcascade.parallel.devices import pinned_device
+from molcascade.parallel.progress import write_progress, read_progress
 from molcascade.parallel.models import ShardedResult, ShardOutcome, ShardTask, StageResources
 
 #: Marker suffix for a shard whose outputs are complete and digest-verified.
@@ -110,6 +111,45 @@ def plan_shards(
     return tuple(
         (offset, min(shard_rows, total - offset)) for offset in range(0, total, shard_rows)
     )
+
+
+def plan_batch_shards(
+    input_files: Sequence[Path], shard_rows: int, batch_size: int,
+) -> tuple[tuple[int, int], ...]:
+    """Split logical shards at the existing iterator's engine-batch boundaries.
+
+    Footer-only planning preserves batch membership, order and seeded engine
+    calls even across file/row-group boundaries. It is independent of hardware.
+    """
+    if batch_size < 1:
+        raise ValueError("batch_size must be positive")
+    files = []
+    offset = 0
+    for path in input_files:
+        meta = pq.ParquetFile(path).metadata
+        groups = [meta.row_group(i).num_rows for i in range(meta.num_row_groups)]
+        files.append((offset, meta.num_rows, groups))
+        offset += meta.num_rows
+    result = []
+    for start, count in plan_shards(input_files, shard_rows):
+        if not count:
+            result.append((start, 0))
+        for file_start, size, groups in files:
+            begin, end = max(start, file_start), min(start + count, file_start + size)
+            if begin >= end:
+                continue
+            group_start = file_start
+            for rows in groups:
+                if group_start + rows > begin:
+                    break
+                group_start += rows
+            step = batch_size - (begin - group_start) % batch_size
+            while begin < end:
+                take = min(step, end - begin)
+                result.append((begin, take))
+                begin += take
+                step = batch_size
+    return tuple(result)
 
 
 def iter_shard_batches(
@@ -288,16 +328,13 @@ def _pin_worker(queue: Any) -> None:
     argument at all.  It must be set before the framework initialises, which is
     why it happens in the pool initializer and not in the task.
 
-    A worker that finds the queue empty (the pool replaced a dead process, and
-    every lane is already claimed) stays on CPU rather than doubling up on a
-    card that is already busy.
+    Queue.put uses a feeder thread: an immediate empty read does not mean there
+    is no assigned device. Wait for that assignment; an exhausted assignment
+    queue is an initialization error, never permission to switch to CPU.
     """
 
     global _WORKER_DEVICE
-    try:
-        device = queue.get_nowait()
-    except Exception:
-        device = "cpu"
+    device = queue.get(timeout=10)
     _WORKER_DEVICE = device
     if device.startswith("cuda:"):
         os.environ["CUDA_VISIBLE_DEVICES"] = device.removeprefix("cuda:")
@@ -330,6 +367,8 @@ def _execute_shard(
                 sidecar,
                 json.dumps(dict(outcome.metadata), sort_keys=True).encode("utf-8"),
             )
+        from molcascade.parallel.progress import report_activity
+        report_activity(pinned, "idle", rows_completed=task.row_count)
         return outcome
     except BaseException:
         # A half-written parquet that a later attempt might mistake for progress
@@ -347,10 +386,12 @@ def _replace_device(task: ShardTask, device: str) -> ShardTask:
         row_offset=task.row_offset,
         row_count=task.row_count,
         output_paths=task.output_paths,
+        side_inputs=task.side_inputs,
         stage_id=task.stage_id,
         config=task.config,
         device=device,
         batch_size=task.batch_size,
+        progress_dir=task.progress_dir,
     )
 
 
@@ -386,6 +427,11 @@ def run_sharded(
     config: Mapping[str, Any] | None = None,
     shard_rows: int | None = None,
     side_inputs: Mapping[str, Sequence[Path]] | None = None,
+    postprocess: Callable[[ShardTask], ShardOutcome] | None = None,
+    postprocess_split: Callable | None = None,
+    postprocess_join: Callable | None = None,
+    batch_shards: int | None = None,
+    report_batches: bool = False,
 ) -> ShardedResult:
     """Run ``worker`` over every shard of ``input_files`` and stage the results.
 
@@ -423,7 +469,8 @@ def run_sharded(
 
     ports = tuple(sorted(output_paths))
     rows_per_shard = min(shard_rows or resources.shard_rows, resources.shard_rows)
-    ranges = plan_shards(input_files, rows_per_shard)
+    ranges = (plan_batch_shards(input_files, rows_per_shard, batch_shards)
+              if batch_shards else plan_shards(input_files, rows_per_shard))
     total = len(ranges)
     lanes = resources.devices or ("cpu",)
 
@@ -435,6 +482,8 @@ def run_sharded(
         work_dir = staging_root / SCRATCH_DIRNAME
         scratch = work_dir
     work_dir.mkdir(parents=True, exist_ok=True)
+    from uuid import uuid4
+    activity_dir = work_dir / "activity" / uuid4().hex if report_batches or postprocess else None
 
     tasks = tuple(
         ShardTask(
@@ -453,6 +502,7 @@ def run_sharded(
             config=dict(config or {}),
             device=lanes[index % len(lanes)],
             batch_size=resources.batch_size,
+            progress_dir=activity_dir,
         )
         for index, (offset, count) in enumerate(ranges)
     )
@@ -471,6 +521,28 @@ def run_sharded(
             else:
                 outcomes[task.index] = reused
         reused_count = total - len(pending)
+        from datetime import datetime, timezone
+        map_started_at = datetime.now(timezone.utc).isoformat()
+        reused_rows = sum(o.rows_in for o in outcomes.values())
+        if postprocess_split:
+            write_progress(resources.checkpoint_dir, producer_batches_completed=0,
+                producer_batches_reused=0, quality_chunks_completed=0,
+                quality_chunks_reused=0, quality_rows_completed=reused_rows,
+                quality_rows_reused=reused_rows, cpu_active_chunks=0,
+                cpu_queued_chunks=0, producer_active_batches=0)
+        def report(phase: str) -> None:
+            write_progress(resources.checkpoint_dir, phase=phase, stage_id=stage_id,
+                map_started_at=map_started_at, rows_reused=reused_rows,
+                requested_workers=resources.workers,
+                effective_workers=min(resources.workers, len(lanes), len(pending)) if phase == "map" else 0,
+                shards_complete=len(outcomes), shards_total=total, shards_reused=reused_count,
+                rows_completed=sum(o.rows_in for o in outcomes.values()),
+                rows_total=sum(count for _, count in ranges), execution_lanes=list(lanes),
+                activity_dir=str(activity_dir) if activity_dir else None,
+                cpu_postprocess_workers=(resources.workers if postprocess_split else min(resources.workers, len(pending))) if postprocess else 0,
+                pipeline_capacity=(min(resources.workers, len(lanes), len(pending))
+                                   + 2 * (resources.workers if postprocess_split else min(resources.workers, len(pending)))) if postprocess else None)
+        report("map")
 
         if pending:
             durable = resources.checkpoint_dir is not None
@@ -489,15 +561,24 @@ def run_sharded(
                 if durable:
                     _write_checkpoint(work_dir, task.index, outcome)
                 outcomes[task.index] = outcome
+                report("map")
 
-            _run_tasks(
-                pending,
-                worker=worker,
-                lanes=lanes,
-                workers=resources.workers,
-                on_complete=record,
-            )
+            if postprocess:
+                from molcascade.parallel.pipeline import run_pipeline
+                run_pipeline(pending, worker=worker, postprocess=postprocess,
+                    lanes=lanes, workers=resources.workers, on_complete=record,
+                    split=postprocess_split, join=postprocess_join,
+                    reuse_checkpoints=resources.reuse_checkpoints)
+            else:
+                _run_tasks(
+                    pending,
+                    worker=worker,
+                    lanes=lanes,
+                    workers=resources.workers,
+                    on_complete=record,
+                )
 
+        report("map_complete")
         return _stage_outputs(
             tasks,
             outcomes,
@@ -736,6 +817,18 @@ def _stage_outputs(
     )
 
 
+def shard_progress_counts(checkpoint_dir: Path) -> dict[str, int | None]:
+    """Count visible markers and directories; a missing plan is not a total."""
+    if not checkpoint_dir.is_dir():
+        return {"complete": 0, "started_or_materialized": 0, "total": None}
+    done = sum(1 for path in checkpoint_dir.glob(f"*{DONE_SUFFIX}") if path.is_file())
+    started = sum(1 for path in checkpoint_dir.glob("shard-*") if path.is_dir())
+    planned = read_progress(checkpoint_dir).get("shards_total")
+    if type(planned) is not int or planned < max(done, started) or planned < 1:
+        planned = None
+    return {"complete": done, "started_or_materialized": started, "total": planned}
+
+
 def count_completed_shards(checkpoint_dir: Path) -> tuple[int, int]:
     """``(complete, total)`` for a stage in progress, for ``molcascade status``.
 
@@ -748,7 +841,8 @@ def count_completed_shards(checkpoint_dir: Path) -> tuple[int, int]:
         return (0, 0)
     done = sum(1 for path in checkpoint_dir.glob(f"*{DONE_SUFFIX}") if path.is_file())
     started = sum(1 for path in checkpoint_dir.glob("shard-*") if path.is_dir())
-    return (done, max(done, started))
+    planned = read_progress(checkpoint_dir).get("shards_total", 0)
+    return (done, max(done, started, int(planned)))
 
 
 __all__ = [

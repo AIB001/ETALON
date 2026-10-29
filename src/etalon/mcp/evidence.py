@@ -30,6 +30,19 @@ def _context_page(payload, max_bytes):
 def register(mcp: Any) -> None:
     @mcp.tool()
     @tool(Cost.CHEAP)
+    def etalon_research_fork_memory(entry: str, destination: str, memory_scope: str, question: str) -> str:
+        """CHEAP. Independent working entry in the existing journal; no transcript copy.
+
+        Shared facts remain explicitly readable. Bind the new entry to a separate
+        host session; drafts never merge into the main entry automatically.
+        This scopes ordinary retrieval, not filesystem access or global host memory.
+        """
+        from etalon.research.notes import fork_memory
+        return ok(**fork_memory(absolute_path(entry, label="entry"),
+            absolute_path(destination, label="destination"), memory_scope=memory_scope, question=question))
+
+    @mcp.tool()
+    @tool(Cost.CHEAP)
     def etalon_research_handoff(entry: str, destination: str,
                                publication_intents: list[str] | None = None,
                                limits: dict | None = None,

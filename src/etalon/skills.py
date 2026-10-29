@@ -27,6 +27,10 @@ WORKFLOWS = {
     "research-index": "etalon-research-index",
     "method-configuration": "etalon-method-configuration",
     "skill-improvement": "etalon-skill-improvement",
+    "execution-tuning": "etalon-execution-tuning",
+    "method-optimization": "etalon-method-optimization",
+    "workflow-optimization": "etalon-workflow-optimization",
+    "rsi-skill-creator": "rsi-skill-creator",
     "molquarry-analogue-search": "molquarry-analogue-search",
     "molquarry-assay-literature": "molquarry-assay-literature",
     "molquarry-compound-sourcing": "molquarry-compound-sourcing",
@@ -45,7 +49,7 @@ DEPENDENCIES = "skill-dependencies.json"
 def library_catalog() -> dict:
     """Optional discovery groups; they do not constrain selection or duplicate bundles."""
     memory = ["research-context", "research", "research-index", "research-decision"]
-    rsi = ["skill-improvement"]
+    rsi = ["skill-improvement", "execution-tuning", "method-optimization", "workflow-optimization", "rsi-skill-creator"]
     return {"schema": "etalon-skill-libraries/1", "libraries": {
         "memory": memory,
         "execution": [slug for slug in WORKFLOWS if slug not in memory + rsi],

@@ -9,6 +9,10 @@ Use this capability for an existing job, batch or uncertain response. A read-onl
 diagnosis may be the entire task. It does not require a generation, screening,
 calibration or campaign-planning step and grants no new execution authority.
 
+For a requested independent research advisor, use [separate working memory](references/independent-advice.md).
+Look for useful opportunities as well as execution failures. Unchanged observations
+need no repeated model review; the main host owns scientific choices and active jobs.
+
 ## Pick the matching existing identity
 
 - For a durable workflow use `etalon_workflow_status(workspace, job_id)` and,

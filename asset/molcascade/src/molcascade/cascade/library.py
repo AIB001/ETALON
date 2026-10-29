@@ -27,6 +27,7 @@ _FORMAT_PLUGINS: dict[LibraryFormat, str] = {
     LibraryFormat.XLSX: XLSX_SOURCE,
     LibraryFormat.SDF: SDF_SOURCE,
     LibraryFormat.PARQUET: PARQUET_SOURCE,
+    LibraryFormat.REGISTERED: "source.registered_parents@0.1.0",
     LibraryFormat.MOL2_DIRECTORY: MOL2_DIRECTORY_SOURCE,
 }
 
@@ -60,6 +61,7 @@ _FORMAT_PLACEHOLDERS: dict[LibraryFormat, str] = {
     LibraryFormat.XLSX: "molecules.xlsx",
     LibraryFormat.SDF: "molecules.sdf",
     LibraryFormat.PARQUET: "molecules.parquet",
+    LibraryFormat.REGISTERED: "registered-workspace",
     LibraryFormat.MOL2_DIRECTORY: "molecules",
 }
 
@@ -198,6 +200,8 @@ def resolve_library(
 
     if override_format is not None and override_format is not LibraryFormat.AUTO:
         library_format = override_format
+    elif library.format is LibraryFormat.REGISTERED:
+        library_format = LibraryFormat.REGISTERED
     elif library.format is LibraryFormat.AUTO or override_path is not None:
         # An explicit --library points at a different file, so re-infer instead
         # of reusing a format that described the previous one.

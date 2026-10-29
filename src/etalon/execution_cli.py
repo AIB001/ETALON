@@ -24,10 +24,14 @@ def register(sub: Any) -> None:
             command.add_argument("--config", required=True)
             command.add_argument("--library", help="library override; omit for a flat pipeline")
             command.add_argument("--allow-copyleft", action="store_true")
+            command.add_argument("--deliver", action="store_true", help="materialize gates, origins and poses after computation")
+            command.add_argument("--require-redock", action="store_true", help="require a retained-pose redock gate in this plan; implies --deliver")
+            command.add_argument("--rmsd-threshold", type=float, default=2.0)
         if name != "plan":
             command.add_argument("--run-id", required=True)
         if name == "export":
             command.add_argument("--output", required=True, help="new SDF/SMILES shortlist file")
+            command.add_argument("--view", choices=("shortlist", "research"), default="shortlist")
         if name == "submit":
             command.add_argument("--plan-id", required=True, help="plan_id returned by screen plan")
             command.add_argument("--workers", type=int, default=1)
@@ -49,17 +53,25 @@ def handle(arguments: argparse.Namespace) -> int:
                 if arguments.screen_command == "export":
                     from etalon.boundary.screen import Screen
 
-                    report = Screen(arguments.workspace).export_shortlist(arguments.run_id, arguments.output)
+                    if arguments.view == "research":
+                        from etalon.screening_delivery import export_screen_delivery
+                        report = export_screen_delivery(arguments.workspace, arguments.run_id, arguments.output)
+                    else:
+                        report = Screen(arguments.workspace).export_shortlist(arguments.run_id, arguments.output)
                 elif arguments.screen_command == "status":
                     report = screen_status(arguments.workspace, arguments.run_id)
                 elif arguments.screen_command == "plan":
                     report = plan_screen(arguments.config, arguments.library, arguments.workspace,
-                                         allow_copyleft=arguments.allow_copyleft)
+                        allow_copyleft=arguments.allow_copyleft,
+                        delivery={"rmsd_threshold": arguments.rmsd_threshold, "require_redock": arguments.require_redock}
+                        if arguments.deliver or arguments.require_redock else None)
                 else:
                     report = submit_screen(arguments.config, arguments.library, arguments.workspace,
                         run_id=arguments.run_id, expected_plan_id=arguments.plan_id,
                         workers=arguments.workers, devices=tuple(arguments.device),
-                        allow_copyleft=arguments.allow_copyleft)
+                        allow_copyleft=arguments.allow_copyleft,
+                        delivery={"rmsd_threshold": arguments.rmsd_threshold, "require_redock": arguments.require_redock}
+                        if arguments.deliver or arguments.require_redock else None)
                 success = report.get("state") != "failed"
     except Exception as error:
         report, success = {"error": {"code": type(error).__name__, "message": str(error)}}, False

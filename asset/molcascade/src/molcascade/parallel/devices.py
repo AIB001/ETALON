@@ -8,8 +8,8 @@ hardware is actually reachable, because importing torch costs seconds and
 allocates memory, and doing it as a side effect of "what is on this machine"
 would be unacceptable in a CLI.
 
-So the two halves live here instead.  :func:`plan_lanes` answers "how many
-lanes, on which cards" from the measurement alone.  :func:`probe_framework_gpu`
+So the two halves live here instead.  :func:`resource_request` validates requested devices and
+an independent CPU worker budget.  :func:`probe_framework_gpu`
 answers "can this framework actually see a device", in a short-lived subprocess
 so that a broken CUDA install cannot poison the process that asked.
 
@@ -177,90 +177,45 @@ def _parse_request(request: str) -> tuple[str, tuple[int, ...]]:
     return "cuda", tuple(indices)
 
 
-@dataclass(frozen=True, slots=True)
-class LanePlan:
-    """The lanes a run will use, and the reasoning that produced them."""
-
-    devices: tuple[str, ...]
-    workers: int
-    notes: tuple[str, ...] = ()
-
-    @property
-    def uses_gpu(self) -> bool:
-        return any(device.startswith("cuda:") for device in self.devices)
-
-
-def plan_lanes(
+def resource_request(
     environment: HostEnvironment,
     *,
     device: str = "auto",
     workers: int | None = None,
-) -> LanePlan:
-    """Decide the execution lanes for a run from hardware and one request.
+) -> StageResources:
+    """Validate requested devices and an independent CPU concurrency budget.
 
-    One lane per NVIDIA card, not one lane per core, whenever GPUs are in play:
-    two processes sharing a card contend for its memory and usually run slower
-    than one, so the useful parallelism is the card count.  ``workers`` may
-    still lower that -- a user who wants one card busy while they work says
-    ``--workers 1`` -- but it never raises it above the number of lanes,
-    because there is nothing for the extra processes to be pinned to.
-
-    Hardware only.  Whether a *framework* can reach the cards is a separate,
-    expensive question answered by :func:`resolve_framework_lanes` at the point
-    where a framework is about to be used.
+    This does not allocate the whole pipeline. CPU adapters use ``on_cpu()``;
+    GPU adapters consume the selected devices up to the requested concurrency.
     """
-
     kind, indices = _parse_request(device)
-    notes: list[str] = []
     cards = _nvidia_devices(environment)
-
+    notes: list[str] = []
     if kind == "cpu":
-        lanes = ("cpu",)
-        if cards:
-            notes.append(
-                f"{len(cards)} NVIDIA device(s) detected but --device cpu was requested"
-            )
+        devices = ("cpu",)
     elif kind == "cuda":
-        if not cards:
-            raise ConfigError(
-                "a CUDA device was requested but no NVIDIA GPU was detected on this machine",
-                code="DEVICE_UNAVAILABLE",
-                hint=(
-                    "Run 'molcascade doctor' to see what was measured. Use --device auto to "
-                    "let the run fall back to CPU, or --device cpu to say so explicitly."
-                ),
-                context={"device": device, "detected_gpus": len(environment.gpus)},
-            )
         available = {gpu.index for gpu in cards}
         chosen = indices or tuple(sorted(available))
-        missing = [index for index in chosen if index not in available]
-        if missing:
+        if not chosen or any(index not in available for index in chosen):
             raise ConfigError(
-                f"device request {device!r} names GPU(s) {missing} that this machine does not "
-                f"have; detected indices are {sorted(available)}",
+                f"requested CUDA devices are unavailable: {device}",
                 code="DEVICE_UNAVAILABLE",
-                hint="Indices are the physical numbers 'nvidia-smi' reports.",
                 context={"device": device, "detected": sorted(available)},
             )
-        lanes = tuple(f"cuda:{index}" for index in chosen)
-        notes.append(f"pinned to {len(lanes)} explicitly requested NVIDIA device(s)")
+        devices = tuple(f"cuda:{index}" for index in chosen)
+        notes.append(f"pinned to {len(devices)} explicitly requested NVIDIA device(s)")
     elif cards:
-        lanes = tuple(f"cuda:{gpu.index}" for gpu in sorted(cards, key=lambda gpu: gpu.index))
-        notes.append(f"one lane per detected NVIDIA device ({len(lanes)})")
+        devices = tuple(f"cuda:{gpu.index}" for gpu in sorted(cards, key=lambda gpu: gpu.index))
     else:
-        lanes = ("cpu",)
-        notes.append("no NVIDIA device detected; CPU lanes only")
-
-    if lanes == ("cpu",):
-        capacity = workers or cpu_lane_count(environment.cpu.usable_cores)
-        count = max(1, capacity)
-        lanes = tuple("cpu" for _ in range(count))
-        notes.append(f"{count} CPU worker(s) from {environment.cpu.usable_cores or '?'} core(s)")
-    elif workers is not None and workers < len(lanes):
-        lanes = lanes[:workers]
-        notes.append(f"--workers {workers} limited the run to {len(lanes)} of the detected lanes")
-
-    return LanePlan(devices=lanes, workers=len(lanes), notes=tuple(notes))
+        devices = ("cpu",)
+    budget = workers if workers is not None else cpu_lane_count(environment.cpu.usable_cores)
+    if devices == ("cpu",):
+        devices = ("cpu",) * budget
+    return StageResources(
+        workers=budget, devices=devices, device_request=device,
+        batch_size=environment.plan.recommended_batch_size,
+        notes=tuple(notes),
+    )
 
 
 def resolve_framework_lanes(
@@ -305,10 +260,8 @@ def resolve_framework_lanes(
             },
         )
 
-    lanes = tuple("cpu" for _ in range(max(1, cpu_lane_count())))
-    return resources.replace(
-        devices=lanes,
-        workers=len(lanes),
+    lanes = ("cpu",) * resources.workers
+    return resources.on_cpu().replace(
         notes=(
             *resources.notes,
             f"{len(resources.devices)} GPU lane(s) went unused: {probe.reason}",
@@ -361,10 +314,9 @@ def describe_lanes(devices: Sequence[str]) -> str:
 __all__ = [
     "PROBE_TIMEOUT_SECONDS",
     "FrameworkProbe",
-    "LanePlan",
     "describe_lanes",
     "pinned_device",
-    "plan_lanes",
+    "resource_request",
     "probe_framework_gpu",
     "reset_probe_cache",
     "resolve_framework_lanes",

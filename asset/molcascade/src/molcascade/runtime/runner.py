@@ -49,6 +49,7 @@ from molcascade.runtime.cache import (
     LocalStageCache,
     stage_cache_key,
 )
+from molcascade.runtime.cache_inputs import configuration_identity, verify_cache_inputs
 from molcascade.runtime.locking import acquire_run_lock
 from molcascade.runtime.models import (
     AuditEvent,
@@ -519,9 +520,11 @@ class LocalRunner:
         # Local source plugins commonly dereference mutable files or
         # directories from config.  Until the plugin API exposes a pre-run
         # content fingerprint, config-only source cache keys are unsafe across
-        # runs.  Their immutable output artifact still keys every downstream
+        # runs. Registered-parent inputs are the exception: their complete
+        # bundle and selection are verified before lookup. Other sources'
+        # immutable output artifact still keys every downstream
         # stage, and the same run may resume its verified source checkpoint.
-        if stage.descriptor.kind is PluginKind.SOURCE:
+        if stage.descriptor.kind is PluginKind.SOURCE and stage.descriptor.id != 'source.registered_parents':
             return False
         determinism = stage.descriptor.determinism
         if determinism is Determinism.DETERMINISTIC:
@@ -586,7 +589,9 @@ class LocalRunner:
             identity_errors.append("metadata.slot")
         if manifest.metadata.get("plugin_key") != stage.plugin_key:
             identity_errors.append("metadata.plugin_key")
-        if manifest.metadata.get("plugin_config") != dict(stage.config):
+        if configuration_identity(
+            descriptor.id, manifest.metadata.get("plugin_config", {})
+        ) != configuration_identity(descriptor.id, stage.config):
             identity_errors.append("metadata.plugin_config")
         if manifest.metadata.get("execution_semantics") != EXECUTION_SEMANTICS_VERSION:
             identity_errors.append("metadata.execution_semantics")
@@ -686,6 +691,7 @@ class LocalRunner:
                     context={"run_id": state.run_id, "stage_id": saved.stage_id},
                 )
             inputs = self._resolve_stage_inputs(stage, retained)
+            verify_cache_inputs(stage)
             expected_key = stage_cache_key(stage, inputs)
             if saved.cache_key != expected_key:
                 raise ArtifactIntegrityError(
@@ -1107,6 +1113,7 @@ class LocalRunner:
                             context={"stage_id": stage.stage_id},
                         )
 
+                    verify_cache_inputs(stage)
                     key = stage_cache_key(stage, bound_inputs)
                     now = self._now()
                     pending = state.stages[current_index].model_copy(

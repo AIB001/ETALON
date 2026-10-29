@@ -356,6 +356,15 @@ falling back. Shard count follows the library, not the machine, so the same casc
 the same artifacts on a laptop and on a GPU node — and an interrupted stage resumes from the
 last completed shard rather than from zero.
 
+Uni-Dock `@0.3.0` pipelines existing engine batches through GPU production and
+CPU pose repair/checking. `--workers` bounds each pool; unfinished batches are
+bounded by the GPU pool plus twice the CPU pool. Batch membership and search
+settings stay fixed across machines. A checkpoint becomes complete only after
+quality checks and output verification. Status reports worker phases and pose
+counts during a batch, alongside completed, reusable batches. Explicit `@0.2.0`
+configurations retain the sequential implementation; upgrading is a new run
+revision, not an in-place change to an active job.
+
 Inspect or resume the durable run and materialize its outputs:
 
 ```bash
@@ -772,6 +781,38 @@ python -m mypy
 python -m build
 ```
 
+### Reuse registered parents and separate execution granularity
+
+Use `library.format: registered` with `ingest.backend: source.registered_parents@0.1.0`.
+Its settings take `path` (the source workspace), `artifact_id`, and the original
+`identity_policy`. Set `standardize: null`: the input already has `parent/v1`.
+To take a frozen subset, add `selection_path` (CSV/TSV/Parquet with unique
+`parent_id`) and `selection_sha256`. Source-bundle order is preserved; unknown
+IDs fail explicitly. The output contains selected parents and mappings, plus
+all original rejection decisions marked as original-registration evidence.
+Toolkit/policy compatibility and source integrity are checked; no chemistry
+is recalculated. Keep the artifact reference through the handoff rather than
+exporting SMILES and importing them as new molecules.
+
+Prepared conformers use the same handoff pattern through
+`docking.registered_conformers@0.1.0`: input `parent/v1`, source `path` and
+`artifact_id`, plus the original RDKit preparation settings. Output remains
+`parent/v1` and `ligand_conformer/v1`. Exact parent contents, toolkit/method
+identity and source bytes must match; failed preparation outcomes are preserved.
+The execution-tuning skill's `prepare_screen_continuation.py` prepares both
+handoffs from a completed cascade and a downstream template without starting a
+job. This does not reuse a quality verdict for newly searched docking poses.
+
+New Uni-Dock plans use v0.4; explicit v0.2/v0.3 plans remain available.
+`batch_size` still defines native GPU calls and seed/batch semantics.
+`quality_chunk_rows` (default 128 parents) independently divides CPU relaxation
+and quality checks. Every pose of one parent stays together; workers share a
+single bounded CPU pool. Native outputs and checked chunks use the existing
+digest checkpoint format, so failed postprocessing can reuse completed work.
+Progress separates native batches, checked chunks, reused rows and CPU pool
+width; a checked chunk does not imply that the complete stage is published.
+Required checks and relaxation remain unchanged.
+
 Linux or WSL2 is recommended for large production workers and optional native backends.
 The generated HTML is intended to remain portable across Windows, Linux, and macOS
 browsers.
@@ -810,3 +851,20 @@ disable or remove `t9_redock` in the cascade JSON, or call
 `default_cascade(include_redock=False)`. This skips a second GPU search and is
 visible in the saved plan. Only the default retained Uni-Dock pose is tested;
 other engine poses need their own validation before being substituted downstream.
+
+## Registered-input cache identity
+
+`source.registered_parents` and `docking.registered_conformers` separate
+verified content from its location. Moving the selection file or the registered
+artifact store does not invalidate a populated cache when the artifact ID,
+selection digest, parser, toolkit and method configuration are unchanged.
+The current selection and complete source artifact are verified before cache
+lookup, including on resume. Changed content, parsing, preparation settings or
+plugin versions cannot use the old result. Other external-file plugins keep
+their existing cache behavior; paths are not globally stripped.
+
+This applies to caches populated by the content-identity implementation.
+Historical path-based keys are not silently rewritten or aliased. Keep active
+runs on their pinned release; when reusing historical stages on that release,
+preserve their prepared input locations. Use the new implementation for new
+workspaces or future stages, rather than resuming an old run with changed keys.

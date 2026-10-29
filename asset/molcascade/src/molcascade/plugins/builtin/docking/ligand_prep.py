@@ -343,6 +343,7 @@ class RDKitLigandConformerPlugin:
                 "conformers": _CONFORMER_PATH.as_posix(),
             },
             context=context,
+            device="cpu",
             stage_id=request.stage_id,
             config=config.model_dump(mode="json"),
             shard_rows=_SHARD_ROWS,
