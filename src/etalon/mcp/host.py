@@ -3,10 +3,30 @@
 from __future__ import annotations
 
 import sys
+import inspect
 from pathlib import Path
 from typing import Any
 
 from etalon.mcp._common import Cost, ok, tool
+
+
+def _registered_tool_catalog(mcp: Any) -> dict[str, dict[str, str]]:
+    """Describe this live server; registration-only collectors keep old discovery."""
+    manager = getattr(mcp, "_tool_manager", None)
+    if manager is None:
+        # Lightweight compatibility collectors have no callable-server registry.
+        from etalon.mcp.server import tool_catalog
+        return tool_catalog()
+    found = {}
+    for registered in manager.list_tools():
+        function = registered.fn
+        cost = getattr(function, "etalon_cost", None)
+        description = registered.description or inspect.getdoc(function) or ""
+        found[registered.name] = {
+            "cost": cost.value if isinstance(cost, Cost) else "not_declared",
+            "description": " ".join(description.split("\n\n", 1)[0].split()),
+        }
+    return found
 
 
 def register(mcp: Any) -> None:
@@ -54,20 +74,18 @@ def register(mcp: Any) -> None:
         skills=['campaign'], tools=[], operations=[] reads just that skill bundle.
         Summary includes entrypoints and complete selected-bundle version digests;
         detail='full' expands their member inventory. This is not a method whitelist.
+        tools lists only this server's callable registrations. operations describes
+        the general runtime API, not additional callable tools on this instance.
         """
         from etalon.skills import _selection, catalog
 
         report = catalog(detail=detail, skills=skills)
         if tools == []:
             tool_report = {}
-        elif detail == "full":
-            from etalon.mcp.server import costs
-            available = costs()
-            tool_report = {name: available[name] for name in _selection(tools, available, "tools")}
         else:
-            from etalon.mcp.server import tool_catalog
-            available = tool_catalog()
-            tool_report = {name: available[name] for name in _selection(tools, available, "tools")}
+            available = _registered_tool_catalog(mcp)
+            tool_report = {name: available[name]["cost"] if detail == "full" else available[name]
+                           for name in _selection(tools, available, "tools")}
         if operations == []:
             operation_report = {}
         else:
@@ -89,6 +107,8 @@ def register(mcp: Any) -> None:
 
         Known slugs/members can be read directly; discovery is optional. References are loaded
         only when relevant; no experiment is dispatched or skill use inferred.
+        Installed names (etalon-screening-sweep), MCP slugs (sweep), and resource
+        URIs (etalon://skills/sweep) select the same built-in bytes and version.
         """
         from etalon.skills import read_member
 

@@ -54,21 +54,92 @@ def observe(workspace: str | Path, job_id: str) -> dict:
     return _observation(RuntimeStore(workspace).get(job_id))
 
 
+def execution_status(store: RuntimeStore, job: dict, *, receipts_by_node=None) -> dict:
+    """One read-only liveness projection shared by action and workflow readers.
+
+    A controller can disappear while its detached command keeps working. Reading
+    that command's existing evidence never publishes a receipt or repeats it.
+    """
+    worker_alive = process.alive(job["process_identity"])
+    interrupted = job["state"] in {"starting", "running", "cancel_requested"} and not worker_alive
+    needs_reconciliation = interrupted or job["state"] == "reconciliation_required"
+    states = {"queued": "pending", "starting": "pending", "running": "running",
+              "succeeded": "completed", "failed": "failed", "blocked": "blocked",
+              "cancelled": "cancelled", "cancel_requested": "running",
+              "reconciliation_required": "unresolved", "awaiting_decision": "pending"}
+    nodes = {}
+    supplied = receipts_by_node or {}
+    for node in job["nodes"]:
+        state = states.get(job["state"], "unresolved")
+        receipts = supplied.get(node["id"])
+        if receipts is None:
+            receipts = store.receipts(job["id"], node["id"])
+        detail = {}
+        if node["state"] == "reconciliation_required":
+            needs_reconciliation = True
+        if node["state"] == "verified" or "completed" in receipts:
+            state = "completed"
+        elif node["state"] in {"pending", "waiting"}:
+            state = "pending"
+        elif interrupted or node["state"] == "reconciliation_required":
+            state = "unresolved"
+            attempt = store.job_root(job["id"]) / "steps" / node["id"] / "native"
+            if node["definition"]["operation"] == "method.run" and (attempt / "intent.json").is_file():
+                from etalon.runtime.native import inspect_attempt
+                try:
+                    observed = inspect_attempt(attempt)
+                    if observed["request_id"] != job["id"] or observed["attempt_id"] != node["id"]:
+                        raise ValueError("native attempt belongs to a different action")
+                    intent = json.loads((attempt / "intent.json").read_text(encoding="utf-8"))
+                    expected = node["parameters"] or node["definition"]["arguments"]
+                    if intent["request"].get("parameters_sha256") != digest(expected):
+                        raise ValueError("native method parameters differ from this action")
+                    detail = {k: observed[k] for k in ("directory", "state", "live_processes") if k in observed}
+                    if observed["state"] == "running":
+                        state = "running"
+                    elif observed["state"] == "published":
+                        state = observed["receipt"]["execution"]
+                    elif observed["state"] == "finished-unpublished":
+                        finished = observed["finished"]
+                        state = "completed" if finished["returncode"] == 0 and not finished["missing_outputs"] else "failed"
+                except (OSError, ValueError, KeyError) as error:
+                    detail = {"directory": str(attempt), "state": "unknown", "reason": str(error)}
+        elif node["state"] in {"failed", "blocked"}:
+            state = node["state"]
+        nodes[node["id"]] = {"execution_state": state, "native_attempt": detail or None}
+    return {"worker_alive": worker_alive,
+            "heartbeat_age_seconds": None if job["heartbeat"] is None else max(0, time.time() - job["heartbeat"]),
+            "needs_reconciliation": needs_reconciliation, "nodes": nodes}
+
+
+def capabilities() -> dict:
+    """Describe what this controller enforces, independently of backend promises."""
+    supported = process.identity(os.getpid()) is not None
+    return {"durable_worker": supported,
+            "unsupported_reason": None if supported else "detached workers require Linux /proc process identities",
+            "limits": "dispatch reservation; actual charges may exceed quotes and remain recorded",
+            "max_seconds": "worker cancellation request; unresolved child outcomes require reconciliation",
+            "enforcement": {"controller_deadline": "cancellation_request",
+                "native_hard_timeout": False, "hard_cpu_limit": False, "hard_gpu_limit": False,
+                "resource_allowance": "dispatch_reservation", "usage": "backend_receipts",
+                "scope": "runtime guarantees; individual native tools may enforce their own limits"}}
+
+
 def status(workspace: str | Path, job_id: str) -> dict:
-    job = RuntimeStore(workspace).get(job_id)
-    feedback = RuntimeStore(workspace).job_root(job_id) / "research-feedback.json"
+    store = RuntimeStore(workspace)
+    job = store.get(job_id)
+    projected = execution_status(store, job)
+    feedback = store.job_root(job_id) / "research-feedback.json"
     if feedback.exists():
         from etalon.runtime.files import _read
         job["research_feedback"] = _read(feedback)
-    job["worker_alive"] = process.alive(job["process_identity"])
-    job["heartbeat_age_seconds"] = None if job["heartbeat"] is None else max(0, time.time() - job["heartbeat"])
-    job["needs_reconciliation"] = (job["state"] in {"starting", "running", "cancel_requested"} and not job["worker_alive"]
-                                    or any(n["state"] == "reconciliation_required" for n in job["nodes"]))
+    job.update({k: projected[k] for k in ("worker_alive", "heartbeat_age_seconds", "needs_reconciliation")})
     job["pending_revision"] = (job["proposal"]["proposal"]["revision_id"]
                                if job["proposal"] and job["proposal"].get("kind") == "revision" else None)
     job["plan"] = {"plan_id": job["plan_id"], "revision_id": job["plan"]["plan_id"], "objective": job["plan"]["spec"]["objective"],
                    "controller": job["plan"]["spec"]["controller"], "max_seconds": job["plan"]["spec"]["max_seconds"]}
     for node in job["nodes"]:
+        node.update(projected["nodes"][node["id"]])
         node["operation"] = node["definition"]["operation"]
         if node["result"] is not None:
             result = node.pop("result")

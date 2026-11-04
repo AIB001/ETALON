@@ -11,6 +11,24 @@ campaign allocation, simulation or an active-learning loop. Select only the
 components needed for the question; neither default tiers nor this skill are a
 universal prerequisite.
 
+For multiple receptors or later tiers, inspect existing typed preparation before
+submitting another raw-library run. `etalon_screen_prepare_continuation` reuses
+parents and conformers; `through_stage="conformers"` explicitly branches from a
+committed preparation prefix even while later docking runs. Otherwise it selects
+the completed run's final parents. Keep receptor-dependent docking and checks in
+each branch. Different chemistry/preparation settings require a new preparation.
+For a paired receptor comparison, branch before receptor-specific selection so
+both arms receive the same prepared population; a final shortlist is a different
+population and should be selected only deliberately.
+
+When status exposes a new `execution_feedback.improvement_opportunities` item,
+use its exact skill address if that procedure is not already available. For slow
+or repeated work this is host skill `etalon-execution-tuning`, MCP slug
+`execution-tuning`. Apply it once to the concrete observation, or reuse the
+recorded decision while its basis holds; do not restart optimization on every
+poll. For a scientific limitation use `method-optimization`. Reading a skill is
+not evidence that an improvement was applied or helped.
+
 ## Inputs and independent operations
 
 - For one existing batch, supply absolute `config_path`, `workspace` and, for a

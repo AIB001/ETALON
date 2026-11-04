@@ -1,6 +1,6 @@
 ---
 name: etalon-research
-description: Use ETALON research SDK methods to read native job handles, retrieve and reuse published evidence, archive completed work and resume checkpoint publication, fit and calibrate group-separated policies, inspect released validation and feedback, pose and preparation evidence, or fixed-pool visible-query execution. Use campaign references for factorial or finite diagnostic basics.
+description: Continue ETALON research from recorded results. Retrieve evidence, call task-local methods, collect native jobs, and save changed conclusions or next actions.
 ---
 
 # Research methods on demand
@@ -8,6 +8,22 @@ description: Use ETALON research SDK methods to read native job handles, retriev
 Choose the part that answers the current question; none is a prerequisite for
 another. Known SDK calls can be used directly without skill discovery, method
 registration, policy fitting, or the historical R3/R4/R4b scripts.
+
+Concentrate on the current scientific decision and its main unresolved bottleneck.
+Choose an object to change or a useful observation to obtain; use and write tools
+within the user's authorization. When the mechanism is uncertain, make the idea
+concrete enough to distinguish the next choices. Known computations can proceed
+directly. Confidence to take the next useful step does not require certainty
+about the outcome. Use a targeted
+check when it can change that step; ordinary work needs no separate audit phase
+or repeated confirmation. Let existing tools record mechanical facts while your
+attention stays on the scientific question.
+
+Inherit the stable objective, definitions and resource limits. Use existing
+receipts for execution facts and read only the relevant method contract. Add the
+changed result, current gap and next useful action to the existing note; expand
+missing information only when it could change the action, cost or interpretation.
+These are context choices, not four required forms or a per-step checklist.
 
 Continue toward the scientific objective after each useful result. A completed
 phase, published note, negative result or retain/no-change decision does not by
@@ -25,7 +41,10 @@ For an ordinary note entry, start with the task's installed interpreter:
 `python -m etalon research current --entry ENTRY.json`. Read a known omitted field
 with `research detail --entry ENTRY.json --record-id RECORD --select /field`.
 Save changed knowledge with `research progress --entry ENTRY.json --patch PATCH.json`;
-the JSON contains only fields to replace, and all omitted fields are retained.
+the MCP equivalent is `etalon_research_progress(entry, patch, publication_id)`.
+Patch the note root: summary, next_action and pending_handles are continuation
+fields; do not wrap them in the reader's knowledge envelope.
+The JSON contains only fields to replace, and all omitted fields are retained.
 These commands reuse the SDK below and require no source inspection or Probe.
 For a known callable, use its declared inputs, parameters and pinned source;
 inspect implementation when adapting it or resolving a concrete mismatch. Reuse
@@ -53,6 +72,7 @@ trial; it does not authorize replacing an active run's bound implementation.
 
 | Current question | Read only this reference |
 | --- | --- |
+| Launch a side advisor, collect its sparse report, try a suggestion or preserve the main host's decision | [Side advice](../etalon-skill-improvement/references/side-advisory.md) |
 | Execution succeeds but its throughput, reuse or resource use is unexpectedly costly | [Execution improvement](../etalon-skill-improvement/references/execution-efficiency.md) |
 | Find published results or counterevidence, read a known reference, or reuse another source | [Evidence reuse](references/evidence-reuse.md) |
 | Call a saved method, reuse intermediate results, read current progress or save changed fields | [Continue a note](references/progress-publication.md) |

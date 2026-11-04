@@ -70,7 +70,7 @@ class ReadScope(_LocationCache):
         self.collection_hits = 0
         self.observed_files = {}
         self.previous = {}
-        self.code_identity = implementation_identity()
+        self._code_identity = None
         if (isinstance(previous, dict) and previous.get("schema") == CACHE_SCHEMA
                 and previous.get("implementation") == self.code_identity
                 and isinstance(previous.get("sources"), dict)
@@ -78,6 +78,15 @@ class ReadScope(_LocationCache):
             raw = json.dumps(previous["sources"], ensure_ascii=False)
             if len(raw.encode()) <= MAX_CACHE_BYTES:
                 self.previous = previous["sources"]
+
+    @property
+    def code_identity(self):
+        # Only cross-event projection reuse needs an implementation fingerprint.
+        # Ordinary selected note reads still verify their original bytes, but
+        # need not reread every research module merely to create a read scope.
+        if self._code_identity is None:
+            self._code_identity = implementation_identity()
+        return self._code_identity
 
     def remember_source(self, key, workspace, source, result):
         if result[1].get("status") != "complete":

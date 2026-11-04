@@ -1,120 +1,86 @@
 ---
 name: etalon-skill-improvement
-description: Coordinate research improvement when the limiting layer is unclear or revise an improvement procedure; use focused execution, method, or workflow skills for a known bottleneck.
+description: Improve a scientific method, its use, or its improvement procedure from ordinary task feedback; retain useful code and explore better approaches within the task.
 ---
 
 # Improve the operation limiting this research
 
-Choose a focused skill directly when the bottleneck is known: `etalon-execution-tuning`
-for execution efficiency and resource use, `etalon-method-optimization` for a
-scientific method, or `etalon-workflow-optimization` for branch and workflow choices.
-Use this entry when improvement spans layers, the limiting layer is unclear, or the
-improvement procedure itself needs revision. These entries are optional guidance,
-not a mandatory routing or evaluation sequence.
+Use this when improvement spans layers or the limiting mechanism is unclear.
+For a known bottleneck, the execution-tuning, method-optimization or
+workflow-optimization skill can help directly. The host chooses which tools,
+methods and reasoning to use.
 
-Identify a concrete limitation from ordinary results: repeated work, a missed
-useful branch, unexplained failure, disproportionate cost in a successful run,
-or an ineffective algorithm. Change the
-operation, action representation, internal objective, parameter binding, selection
-or sequence that could produce a useful effect. A task-local algorithm is valuable;
-transfer is a separate claim.
-Keep the current method and cheap reuse as real alternatives.
+Pursue a useful scientific result. Focus on the current limiting representation,
+algorithm, observation, objective or operation; choose a concrete change and the
+feedback that could alter the next decision. Use a hypothesis where the mechanism
+is uncertain, and implement an understood change directly. Unknown payoff is normal;
+a confident benefit estimate, formal method registration or a separate Probe
+stage is not a prerequisite. Keep the current method and cheap reuse available.
 
-Retain improvements in their useful form: component code or a callable method,
-tuned configuration, better usage skill, or conditional memory. Link these through
-the existing note `resources` view; do not turn every outcome into a new SKILL.md.
-Use `research-index`'s layered-method reference when the next host cannot discover
-or execute what was learned. A new record alone is not a reusable capability.
+Ordinary successes, failures and surprising costs can suggest an improvement.
+Use a normal result's `rsi_review` key to recognize an opportunity when useful;
+it does not require a review after each batch or poll. Reuse an unchanged
+decision and continue the scientific task. A no-change decision, completed
+phase or published note does not by itself complete the user's objective.
 
-Successful execution can still expose an improvable limitation. A current
-implementation constraint is a hypothesis, not necessarily a constraint of the
-scientific operation. When ordinary feedback shows a consequential throughput,
-reuse or resource discrepancy, read [execution efficiency](references/execution-efficiency.md).
-Use the task's accessible CPU/GPU/memory envelope and measured limiting phase,
-not the server's advertised card count, to choose a configuration. Reuse its
-existing completion handle instead of adding another waiting loop.
-Inspect the limiting operation and choose a proportionate attempt; do not start
-an optimization review on every status read. Keeping an active run and adopting
-a measured change only for later work is a valid outcome.
+Choose a comparison that can change the next action. A task-local change can
+be useful before its generality is known. Inspect relevant contrary evidence
+and actual quality/cost, and let the host decide local use, revision,
+exploration, retention or withdrawal. Code can compute metrics and preserve
+execution facts; a passed numeric rule does not choose scientific adoption.
+Use the [evaluation contract](references/evaluation-contract.md) only when
+machine-readable comparisons help.
 
-Large-scale execution requires a throughput/reuse observation after a representative
-first completion and a material phase change, even without errors. Read the existing
-status feedback, not every raw log. Record the condition key and the choice to
-continue, investigate or defer once; unchanged polls/new chats reuse it. Observation
-is obligatory at that scope; a speculative optimization, extra model judge and
-interruption of running science are not. Delegate mechanical waiting to the saved
-handle and use reasoning on a new discrepancy that can change the next action.
+When the proxy improves but the research outcome stays weak, examine the
+representation, sampled population and final selection. Separate a change of
+algorithm from a change of scientific endpoint, denominator or molecular state.
+Use producer result definitions and existing observations; previously examined
+outcomes are diagnostic evidence, not new independent validation.
 
-If the current solver is already strong but the research outcome is weak, inspect
-the representation, proxy objective and population it optimizes before spending
-on a harder solver. Keep the downstream scientific endpoint fixed; compare a
-revised selection objective separately from an algorithm change. Give evaluation
-queries their own role instead of counting selected examples matching themselves
-as evidence of future coverage. Preserve the old comparison and freeze a new one
-when its meaning changes; previously inspected outcomes are diagnostic evidence,
-not a new unseen evaluation.
+A cheaper path or omitted operation can be useful when a derivation or scoped
+comparison supports the decision it must preserve. Keep its applicability,
+exceptions and fallback clear. Missing counterfactual observations remain
+unknown. An unresolved alternative that matters deserves a discriminating
+calculation; an irrelevant one need not expand into an audit.
 
-Try the relevant change within the authorized task and use normal feedback.
-Unknown potential is not low value: do not require a confident payoff estimate
-before trying an informative change. Decide the next investment after seeing
-what an attempt teaches. Keep an informative failure, a disproved expectation,
-an untested idea and a temporary deferral distinct. The short research note can
-hold learned conditions, counterexamples and concrete next opportunities;
-these are not extra mandatory records or a separate model-judging call.
-Exploration needs no promotion record or fixed Probe stage. A failed expectation
-should point to a revised assumption, another discriminating action, retention
-or stopping under the task's actual conditions. Preserve failed results and costs.
+For expensive execution, use available CPU/GPU/memory and the measured limiting
+phase. Check the existing throughput/reuse feedback after a representative first
+completion or material phase change. Reuse the saved completion handle and
+unchanged findings. A new discrepancy can justify a scoped attempt; ongoing
+science keeps its bound implementation. See
+[execution efficiency](references/execution-efficiency.md) for the relevant tools.
 
-When evaluation would help the next decision, use a short review of the existing
-results: the external quality endpoint, comparable conditions, measured difference,
-complete cost and unresolved counterevidence. Choose the next action and the
-conditions that would change it. Code can compute metrics and check declared
-comparability; the host interprets scientific meaning and chooses local use,
-revision, exploration, retain/no-change, withdrawal or stop. A passed numeric rule
-is not itself a scientific adoption decision. Read the
-[optional evaluation contract](references/evaluation-contract.md) only when exact
-machine-readable comparisons are useful. No separate judge service or per-read
-model evaluation is required.
+Retain an improvement in its useful form: component code, a callable method,
+configuration, usage guidance or conditional experience. `etalon_method_publish`
+saves callable code. `etalon_method_call` and `etalon_method_collect` can carry
+its handle and execution results into an ordinary note. Direct tools and SDK
+calls remain available without registration or a research graph.
 
-Skip or replace an expensive computational path, including a comparator, when an
-exact argument or relevant scoped evidence supports the same required decision and
-external quality. State the applicability and known exceptions; outside them use
-the original method or another justified fallback. If an unresolved alternative
-could change the choice, use a discriminating comparison at the necessary scope.
-Do not report skipped work as a measurement or relax the scientific endpoint to
-manufacture improvement. Read [mechanism revision](references/mechanism-revision.md)
-when changing how paths are formed, chosen or combined.
+Save only useful changed knowledge and the next action through
+`etalon_research_progress(entry, patch, publication_id)` or `research progress`.
+Patch summary, next_action and pending_handles at the note root; omitted fields
+and contrary evidence remain. Do not wrap the patch in the reader's knowledge
+envelope. Complete receipts stay on disk, so the next host need not reconstruct
+hash lists or reread the whole history. See the research-index layered-method
+reference when an existing resource is hard to discover or invoke.
 
-Keep external metric/state definition identities when changing algorithms. A
-different method version can be comparable; a changed denominator, structure
-state or assay endpoint requires an explicit new comparison. Use producer result
-profiles and the task workset's definition bindings instead of importing another
-task's thresholds or judgments by name. Include relevant contrary findings and
-unread scope in the short result; do not measure quality by documents read.
+Keep native outputs and their request before result interpretation or
+publication. If recording fails, recover from the saved result. A genuinely
+lost output may require a new calculation within the remaining budget; retain
+the failed cost. Distinguish method formation, failed attempts and repeated use,
+and preserve scientific, usage and improvement-procedure versions when they
+change. Existing user pauses and resource limits still govern execution.
 
-Preserve separate scientific-method, usage-guidance and improvement-procedure
-versions when they actually change. Distinguish formation/failed-attempt costs
-from repeated-use costs, exploratory use from adoption, and adoption from measured
-benefit. An unfinished task can continue within existing authorization after a
-checkpoint. An explicit user pause still controls execution.
-Separate computation from result interpretation and publication: persist native
-outputs and their exact request before wrapping or judging them. If that later
-step fails, repair it from the saved output rather than rerunning the method.
-If output was lost, distinguish a necessary replacement calculation from cache
-reuse; use the authorized remaining budget and preserve the failed cost.
-Retain/no-change or deferring optimization does not complete the scientific task:
-continue useful work with the current method. Revisit improvement when a new
-observation, representation, workload or requirement changes the opportunity,
-not merely because another call or chat started. Batch understood operations
-and conditional followups through executable methods, reusing completed requests;
-spend reasoning on new residuals that affect a choice. Phase completion alone is
-not scientific objective completion. Keep task history in memory and the reusable
-improvement procedure in the skill.
+A side advisor can offer an independent idea while the main host continues
+useful work. Give it a narrow brief and private entry, launch it through the
+host's native subagent facility, and bind its handle. It returns an actionable
+finding when there is meaningful news; the main host owns adoption. Use
+[side advice](references/side-advisory.md) for the API and recovery details.
+Delegation is optional, not a scheduler or a step at every phase.
 
-[Improvement details](references/improvement-details.md) retains mechanism options
-and scientific boundaries. For an unclear limiting mechanism, the optional
-[action-learning adapter](../etalon-research-decision/references/action-learning.md)
-connects selected experience to normal feedback. Read [revision records](references/revision.md)
-for exact versions and use, [opportunity continuity](references/opportunity-continuity.md)
-for prior dispositions, or [mechanism revision](references/mechanism-revision.md)
-when the improvement procedure itself is unproductive. Load only the part needed.
+Read further only for the current problem:
+- [Improvement details](references/improvement-details.md): mechanism options.
+- [Action learning](../etalon-research-decision/references/action-learning.md): connect selected experience to ordinary feedback.
+- [Revision records](references/revision.md): exact versions and optional attribution.
+- [Opportunity continuity](references/opportunity-continuity.md): reuse prior dispositions.
+- [Mechanism revision](references/mechanism-revision.md): improve an unproductive improvement procedure.

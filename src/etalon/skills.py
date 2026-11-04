@@ -46,6 +46,26 @@ SNAPSHOT_MANIFEST = "etalon-bundle-manifest.json"
 DEPENDENCIES = "skill-dependencies.json"
 
 
+def canonical_slug(identifier: str) -> str:
+    """Resolve installed names and resource URIs without changing bundle identity."""
+    if not isinstance(identifier, str):
+        raise ValueError("skill identifier must be a string")
+    name = identifier.removeprefix("etalon://skills/")
+    if name in WORKFLOWS:
+        return name
+    for slug, host_name in WORKFLOWS.items():
+        if name == host_name:
+            return slug
+    raise KeyError(f"unknown skill {identifier!r}; use etalon_capabilities to discover installed skills")
+
+
+def skill_reference(identifier: str) -> dict:
+    """Small actionable address; discovery is not proof of host consumption."""
+    slug = canonical_slug(identifier)
+    return {"slug": slug, "name": WORKFLOWS[slug], "uri": f"etalon://skills/{slug}",
+            "read": {"tool": "etalon_skill_read", "arguments": {"slug": slug}}}
+
+
 def library_catalog() -> dict:
     """Optional discovery groups; they do not constrain selection or duplicate bundles."""
     memory = ["research-context", "research", "research-index", "research-decision"]
@@ -72,6 +92,7 @@ def redirected(path: Path) -> bool:
 
 
 def bundle_root(slug: str) -> Path:
+    slug = canonical_slug(slug)
     if slug not in WORKFLOWS:
         raise KeyError(f"no such workflow {slug!r}; known: {sorted(WORKFLOWS)}")
     package = Path(__file__).resolve().parent
@@ -92,6 +113,7 @@ def bundle_root(slug: str) -> Path:
 def snapshot(slug: str, *, bundle_ref: dict | None = None) -> tuple[dict, dict[str, bytes]]:
     """Read one bounded bundle; host exports use snapshot_selection for dependencies."""
     if bundle_ref is None:
+        slug = canonical_slug(slug)
         root = bundle_root(slug)
     else:
         if not isinstance(bundle_ref, dict) or set(bundle_ref) - {"root", "manifest_sha256"}:
@@ -178,6 +200,9 @@ def snapshot_selection(selection: list[dict]) -> tuple[list[dict], list[tuple[di
     selections remain exact, including when they are another skill's dependency.
     """
     selected = [dict(row) for row in selection]
+    for row in selected:
+        if row.get("bundle_ref") is None:
+            row["slug"] = canonical_slug(row["slug"])
     by_slug = {row["slug"]: row for row in selected}
     explicit = set(by_slug)
     if len(by_slug) != len(selected):
@@ -244,11 +269,22 @@ def _selection(selected: list[str] | None, known, label: str) -> list[str]:
     return list(selected)
 
 
+def select_skills(selected, label="skills"):
+    if selected is not None:
+        if not isinstance(selected, list):
+            raise ValueError("skills must be a list of identifiers or null")
+        try:
+            selected = [canonical_slug(name) for name in selected]
+        except KeyError as exc:
+            raise ValueError(str(exc)) from exc
+    return _selection(selected, WORKFLOWS, label)
+
+
 def catalog(*, detail: str = "full", skills: list[str] | None = None) -> dict:
     """Read selected bundles only. Defaults retain the complete legacy catalog."""
     if not isinstance(detail, str) or detail not in {"full", "summary"}:
         raise ValueError("detail must be full or summary")
-    selected = _selection(skills, WORKFLOWS, "skills")
+    selected = select_skills(skills)
     manifests = [snapshot(slug)[0] for slug in selected]
     role = ROLE_PATH.read_bytes()
     rows = manifests if detail == "full" else [
@@ -274,7 +310,8 @@ def read_member(slug: str, member: str = "SKILL.md", *, bundle_ref: dict | None 
     if member not in contents:
         raise KeyError(f"no member {member!r} in capability {slug!r}")
     data = contents[member]
-    return {"slug": slug, "member": member, "content": data.decode("utf-8"),
+    return {"slug": manifest["slug"], "name": manifest["name"],
+            "member": member, "content": data.decode("utf-8"),
             "sha256": sha256(data), "manifest_sha256": manifest["manifest_sha256"]}
 
 

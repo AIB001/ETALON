@@ -65,6 +65,7 @@ from __future__ import annotations
 
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass, field
+from hashlib import sha256
 from pathlib import Path
 from typing import Any
 
@@ -925,6 +926,7 @@ class PoseQualitySession:
         *,
         keep_poses: bool,
         progress: Callable[..., None] | None = None,
+        lineage: list[dict[str, Any]] | None = None,
     ) -> list[dict[str, Any]]:
         """Repair and judge one batch of ``docking_score/v1`` rows.
 
@@ -933,15 +935,45 @@ class PoseQualitySession:
         wants scores still wants the scores to be about structures that exist,
         so the geometry is read and judged either way and the column is nulled
         afterwards if they did not ask to keep it.
+
+        An optional sidecar captures identities before mutation and ranks before
+        filtering. It changes neither selection nor scores. The engine adapter
+        must supply score provenance: a written pose is not always the geometry
+        an engine scored (notably KarmaDock).
         """
 
         config = self._config
         report = self.report
+        records = None
+        if lineage is not None:
+            quality_id = config.digest()
+            records = [{
+                **{key: row[key] for key in ("parent_id", "engine_id", "receptor_id", "method_id")},
+                "raw_pose_rank": row["pose_rank"], "selected_pose_rank": None,
+                "raw_pose_sha256": pose_bytes_sha256(row.get("pose_molblock")),
+                "delivered_pose_sha256": None, "score_pose_sha256": None,
+                "score_basis": "unknown", "retained": False, "qc_state": "unknown",
+                "qc_failed_checks": [], "quality_id": quality_id,
+                "repair_state": "disabled" if not config.enabled else "unavailable" if config.relax else "not_requested",
+                "repair_displacement": None,
+            } for row in rows]
+
+        def finish(kept):
+            if records is not None:
+                retained = {id(row) for row in kept}
+                for row, record in zip(rows, records, strict=True):
+                    record["retained"] = id(row) in retained
+                    if record["retained"]:
+                        record["selected_pose_rank"] = row["pose_rank"]
+                        record["delivered_pose_sha256"] = pose_bytes_sha256(row.get("pose_molblock"))
+                lineage.extend(records)
+            return kept
+
         if not config.enabled:
             if not keep_poses:
                 for row in rows:
                     row["pose_molblock"] = None
-            return rows
+            return finish(rows)
 
         from rdkit import Chem
 
@@ -959,6 +991,8 @@ class PoseQualitySession:
             if molecule is None or molecule.GetNumConformers() == 0:
                 report.unparsable += 1
                 unparsable.add(position)
+                if records is not None:
+                    records[position].update(qc_state="fail", qc_failed_checks=["pose_parse"])
                 continue
             pending.append((position, molecule))
 
@@ -969,7 +1003,7 @@ class PoseQualitySession:
             if not keep_poses:
                 for row in rows:
                     row["pose_molblock"] = None
-            return rows
+            return finish(rows)
 
         report.considered += len(pending)
 
@@ -979,6 +1013,11 @@ class PoseQualitySession:
             field_ = self._receptor_field()
             for index, (_position, molecule) in enumerate(pending):
                 moved = relax_pose(molecule, receptor=field_, config=config)
+                if records is not None:
+                    records[_position].update(
+                        repair_state="failed" if moved is None else "completed",
+                        repair_displacement=moved,
+                    )
                 if moved is None:
                     report.relax_failed += 1
                 else:
@@ -998,6 +1037,9 @@ class PoseQualitySession:
             )
             for (position, _molecule), verdict in zip(pending, verdicts, strict=True):
                 failed = [name for name, ok in verdict.items() if not ok]
+                if records is not None:
+                    records[position].update(qc_state="fail" if failed else "pass" if verdict else "unknown",
+                                             qc_failed_checks=failed)
                 if failed:
                     for name in failed:
                         report.failures[name] = report.failures.get(name, 0) + 1
@@ -1023,7 +1065,7 @@ class PoseQualitySession:
                 row["pose_molblock"] = None
 
         if not config.discard_failing:
-            return rows
+            return finish(rows)
 
         # A pose that would not parse is discarded alongside one that failed a
         # check.  Both are structures nothing could vouch for, and the
@@ -1036,7 +1078,12 @@ class PoseQualitySession:
         report.discarded += len(rows) - len(kept)
         if len(kept) != len(rows):
             _renumber_poses(kept)
-        return kept
+        return finish(kept)
+
+
+def pose_bytes_sha256(molblock: str | None) -> str | None:
+    """Identity of emitted MolBlock bytes; no chemistry canonicalization."""
+    return sha256(molblock.encode("utf-8")).hexdigest() if molblock else None
 
 
 def apply_pose_quality(

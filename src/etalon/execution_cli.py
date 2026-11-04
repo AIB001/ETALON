@@ -17,6 +17,12 @@ def register(sub: Any) -> None:
     doctor.set_defaults(handler=handle)
     screen = sub.add_parser("screen", help="plan, submit and inspect a real bulk MolCascade screen")
     commands = screen.add_subparsers(dest="screen_command", required=True)
+    continuation = commands.add_parser("continue", help="reuse committed parents/conformers for a new branch; do not launch")
+    for name in ("workspace", "completed-run", "next-config", "output-dir"):
+        continuation.add_argument("--" + name, required=True)
+    continuation.add_argument("--through-stage", help="explicit committed prefix, including from a still-running source")
+    continuation.add_argument("--docking-backend")
+    continuation.set_defaults(handler=handle)
     for name in ("plan", "submit", "status", "export"):
         command = commands.add_parser(name)
         command.add_argument("--workspace", required=True)
@@ -50,7 +56,12 @@ def handle(arguments: argparse.Namespace) -> int:
             else:
                 from etalon.screening import plan_screen, screen_status, submit_screen
 
-                if arguments.screen_command == "export":
+                if arguments.screen_command == "continue":
+                    from etalon.screening_handoff import prepare_screen_continuation
+                    report = prepare_screen_continuation(arguments.workspace, arguments.completed_run,
+                        arguments.next_config, arguments.output_dir, through_stage=arguments.through_stage,
+                        docking_backend=arguments.docking_backend)
+                elif arguments.screen_command == "export":
                     from etalon.boundary.screen import Screen
 
                     if arguments.view == "research":

@@ -23,6 +23,7 @@ from molcascade.plugins.builtin.docking import (
 )
 from molcascade.plugins.builtin.docking.unidock import PipelinedUniDockPlugin
 from molcascade.plugins.builtin.docking.unidock import FineGrainedUniDockPlugin
+from molcascade.plugins.builtin.docking.unidock import LineageUniDockPlugin
 from molcascade.plugins.builtin.registered_geometry import RegisteredConformerPlugin
 from molcascade.plugins.builtin.docking.redock import RedockPlugin
 from molcascade.plugins.builtin.druglikeness import RDKitDrugLikenessPlugin
@@ -111,6 +112,7 @@ BUILTIN_STAGE_PLUGINS: tuple[StagePlugin, ...] = (
     UniDockPlugin(),
     PipelinedUniDockPlugin(),
     FineGrainedUniDockPlugin(),
+    LineageUniDockPlugin(),
     RegisteredConformerPlugin(),
     KarmaDockPlugin(),
     GninaPlugin(),

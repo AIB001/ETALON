@@ -21,6 +21,25 @@ def _seconds(end, start):
         return None
 
 
+def improvement_review(trigger, identity):
+    """A stable opportunity to learn from normal results, not an optimization gate.
+
+    The host can act on a useful new signal or simply continue the research.
+    No acknowledgement or separate review is required. Repeated status reads
+    carry the same key and do not create proposals or model calls.
+    """
+    from etalon.skills import skill_reference
+    key = hashlib.sha256(json.dumps([trigger, identity], sort_keys=True).encode()).hexdigest()
+    return {"trigger": trigger, "decision_key": key, "policy": "advisory",
+            "skill": skill_reference("skill-improvement"),
+            "agenda": ["retain_callable_methods", "improve_algorithm_or_parameters",
+                       "reuse_or_replace_computation", "improve_branch_or_workflow_choice"],
+            "record_via": "etalon_research_progress",
+            "cadence": "optional: act on useful new evidence or a concrete bottleneck; reuse an existing decision while its evidence and scope hold",
+            "review_required": False,
+            "execution_blocked": False}
+
+
 def execution_feedback(progress, *, run_id, stage_id, method_id, input_id, observed_at=None):
     """Read one producer snapshot without polling, writing, proposing, or routing.
 
@@ -77,8 +96,12 @@ def execution_feedback(progress, *, run_id, stage_id, method_id, input_id, obser
     # These are prompts for host judgment, not a routing decision or a policy.
     opportunities = []
     if signals:
+        from etalon.skills import skill_reference
         opportunities.append({'level': 'execution', 'signals': list(signals),
-                              'choices': ['inspect', 'adjust', 'retain']})
+                              'choices': ['inspect', 'adjust', 'retain'],
+                              'skill': skill_reference('execution-tuning'),
+                              'decision_key': key,
+                              'use': 'read once if not already available; apply to this observation or reuse a recorded decision; no forced optimization'})
     if progress.get('shard_counts') and progress['shard_counts'].get('total') is None:
         opportunities.append({'level': 'observability', 'signals': ['shard_total_unknown'],
                               'choices': ['inspect', 'retain']})

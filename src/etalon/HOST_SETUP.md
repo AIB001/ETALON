@@ -21,6 +21,21 @@ The target must be new. For an existing research project, export to a separate
 directory and deliberately integrate the generated files with its existing
 configuration. Export does not modify global settings or overwrite instructions.
 
+To add selected native Codex skills to an existing project:
+
+```bash
+python -m etalon.host skills-install --target /absolute/existing/project --skills research method-optimization skill-improvement
+```
+
+This copies those bundles and their required dependencies into `.agents/skills/`.
+Rerun the same command after source changes; an unchanged selection writes no
+skill files. The source bundles remain authoritative. The small
+`.agents/etalon-skills.json` inventory supports updates while preserving unrelated
+skills and refusing to replace local edits. Project instructions, MCP settings,
+research entries and running jobs remain intact. Installation verifies file
+contents; native discovery and use belong to the host. No global installation
+or MCP connection is created by this command.
+
 For a relocatable research adapter, use the intended environment's Python:
 
 ```bash

@@ -58,7 +58,9 @@ def test_all_resource_kinds_preserve_declarations_without_activation(tmp_path):
     assert all(r["applicability"] == "declared_only" for r in declared)
     bare = next(r for r in rows if r["origin_ref"] == ref)
     assert bare["parts"] == [] and bare["applicability"] == "unknown"
-    assert all(p["automatic_adoption"] is False and p["execution_permission"] == "not_granted" for p in pages)
+    assert all(p["automatic_adoption"] is False and p["execution_permission"] == "not_evaluated_by_reader" for p in pages)
+    assert all("host chooses reuse or adaptation" in p["applicability"] for p in pages)
+    assert all(r["execution_permission"] == "not_evaluated_by_reader" for r in rows)
     assert len({r["catalog_id"] for r in rows}) == len(rows)
     assert pages[-1]["coverage"]["discovery_complete"]
 

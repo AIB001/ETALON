@@ -1,4 +1,4 @@
-"""Read-only evidence access; validation and paging belong to the shared SDK."""
+"""Evidence access and explicit progress publication through the shared SDK."""
 from __future__ import annotations
 
 from typing import Annotated, Any, Literal
@@ -28,6 +28,81 @@ def _context_page(payload, max_bytes):
 
 
 def register(mcp: Any) -> None:
+    @mcp.tool()
+    @tool(Cost.CHEAP)
+    def etalon_research_advice(entry: str, action: Literal["prepare", "bind", "report", "collect", "decide"],
+                               topic: str, review_key: str, payload: dict | None = None) -> str:
+        """CHEAP. Recoverable side advice; the MAIN HOST launches its native subagent.
+
+        prepare payload={question,brief,execution_scope}; returns a private entry
+        and launch_required (true once). bind payload={handle: native sub handle}.
+        report on PRIVATE entry payload={outcome:suggestion|no_change,summary,
+        proposed_change?,conditions?,comparison?,costs?,evidence:[paths],counterevidence:[paths]}.
+        One final report per key; private drafts never merge. collect on MAIN
+        imports the final report once. decide payload={decision_id,outcome:
+        try|adopt|retain|defer|reject|no_change|rollback,reason,evaluation?,handles?}.
+        A try closes after normal feedback with another decision_id. Unchanged
+        keys reuse the handle/report/decision. New keys require material new
+        evidence/scope; not polls. Main continues while sub works. No automatic
+        launch, tool ACL, science execution, polling loop or benefit judgment.
+        """
+        from etalon.research.advice import advice
+        return ok(**advice(absolute_path(entry, label="entry"), action, topic, review_key, payload))
+
+    @mcp.tool()
+    @tool(Cost.CHEAP)
+    def etalon_research_progress(entry: str, patch: dict, branch_id: str | None = None,
+                                 publication_id: str | None = None, expected_record: str | None = None,
+                                 evidence: list[str] | None = None, counterevidence: list[str] | None = None,
+                                 resources: dict | None = None, activate: bool = True,
+                                 resource_feedback: dict | None = None) -> str:
+        """CHEAP. Save changed task facts, handles, results and RSI decisions in the existing entry.
+
+        Same operation as CLI research progress / SDK patch_progress. Omitted
+        fields and counterevidence remain. Evidence arguments append original
+        file paths. Relative evidence/counterevidence paths (including those in
+        resource_feedback) use the supplied entry/locator's directory, not the
+        server cwd or an internal handoff directory. Absolute paths and existing
+        pinned refs stay unchanged. resources merges named descriptions. A stable publication_id
+        makes retries idempotent. No calculation, method adoption or new task.
+        patch applies to the NOTE ROOT, not the context response's knowledge
+        envelope. For completion use patch={summary, status, next_action,
+        pending_handles, ...}. patch.knowledge is domain knowledge only; it does
+        not update the continuation summary. The response shows actual effects.
+        Use etalon_method_publish for a callable method with pinned source files.
+        For optional use feedback, pass patch={} and resource_feedback containing
+        resource_id, usage_id, resource_version, part_ids, conditions, outcome,
+        summary and optional cost/definitions/resource_entry. Outcomes describe
+        observed positive/negative/unknown/failed/no_change, not inferred benefit.
+        """
+        from etalon.research.notes import patch_progress, read_entry
+        entry = absolute_path(entry, label="entry")
+        if resource_feedback is not None:
+            if patch or resources is not None or publication_id is not None or expected_record is not None or not activate:
+                raise ValueError("resource_feedback uses its usage_id and ordinary progress publication; send other changes separately")
+            from etalon.research.resource_selection import record_resource_feedback
+            if not isinstance(resource_feedback, dict):
+                raise ValueError("resource_feedback must be an object")
+            feedback = dict(resource_feedback)
+            inner_branch = feedback.pop("branch_id", None)
+            if branch_id is not None and inner_branch is not None and branch_id != inner_branch:
+                raise ValueError("resource feedback branch differs from the selected branch")
+            for key, paths in (("evidence", evidence), ("counterevidence", counterevidence)):
+                feedback[key] = list(dict.fromkeys([*feedback.get(key, []), *(paths or [])]))
+            result = record_resource_feedback(entry, **feedback, branch_id=branch_id or inner_branch)
+        else:
+            result = patch_progress(entry, patch,
+                branch_id=branch_id, publication_id=publication_id, expected_record=expected_record,
+                evidence=evidence or (), counterevidence=counterevidence or (),
+                resources=resources, activate=activate)
+        current = read_entry(entry, branch_id=branch_id, verify_originals=False, expand_resources=False)["note"]
+        from etalon.active.schema import canonical
+        continuation = {k: (current[k] if isinstance(current[k], str) else canonical(current[k]))[:600]
+                        for k in ("summary", "status", "next_action") if k in current}
+        return ok(**result, patched_fields=sorted(patch),
+                  continuation=continuation, pending_handle_count=len(current.get("pending_handles", [])),
+                  continuation_source="current note root preview (600 characters per field); knowledge is separate")
+
     @mcp.tool()
     @tool(Cost.CHEAP)
     def etalon_research_fork_memory(entry: str, destination: str, memory_scope: str, question: str) -> str:
@@ -117,6 +192,8 @@ def register(mcp: Any) -> None:
         Includes source selection, counterevidence coverage and existing branch/pause
         state. Policy can narrow the published scope; it is not an authorization grant.
         Does not write memory, submit science, adopt a method or trigger RSI.
+        A read is not an execution grant; existing user authorization remains
+        applicable. Named other_pauses do not pause unrelated task branches.
         summary is a compact continuation card; node requires node_id and follows
         explicit dependencies; full preserves the original bounded graph selection.
         card explicitly selects the small continuation card. summary automatically
@@ -241,7 +318,7 @@ def register(mcp: Any) -> None:
             if view == "resources":
                 if branch_id is not None or conditions is not None or policy is not None:
                     raise EvidenceError("resources uses entry/read_context scope; branch/conditions/policy are not catalog selection")
-                if set(options) - {"source_ids", "kinds", "skill_refs", "scan_limit"}:
+                if set(options) - {"source_ids", "kinds", "skill_refs", "scan_limit", "query", "resource_ids", "families"}:
                     raise EvidenceError("unknown resources view option")
                 from etalon.research.resource_catalog import build_resource_catalog
                 # Default research inherits a pinned context's purpose; an explicit

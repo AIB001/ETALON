@@ -1,5 +1,12 @@
 # ETALON 持久 CADD 执行层
 
+自编方法的 `etalon_method_collect` 现在同时返回 `output_summaries`：即使大数组需要按需读取，
+作者结论、小型反馈和真实失败原因仍直接可见。失败结果保留退出码、缺失输出、最多读取 2 KiB
+的 stderr 尾部及完整日志引用，实际费用不丢失，不自动重试。原 `outputs` 小结果/大结果引用
+形式保持兼容，`etalon_action_result(view="summary")` 使用相同摘要。研究方法、复用与停止仍由
+宿主决定。改动与实际验证边界见
+[方法反馈补强](../../../docs/thin-harness/METHOD_FEEDBACK_20261102.md)。
+
 长任务等待优先复用宿主已有后台句柄及完成通知。缺少可复用通知时，可选
 `etalon_wait_register(declaration, workspace)`（SDK：`runtime.host_wait.register_wait`）
 保存既有 `etalon-host-wait/1` 声明及有界共享观测，不额外启动观察进程。同一工作区、同一完成条件

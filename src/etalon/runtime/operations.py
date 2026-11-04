@@ -18,7 +18,7 @@ from etalon.data.artifacts import file_hash, read_snapshot
 from etalon.runtime.schema import absolute, bounded_int, fields, references
 
 _OPERATIONS = {
-    "method.run": ({"method_id", "command", "files", "inputs"}, {"cwd", "outputs"}),
+    "method.run": ({"method_id", "command", "files", "inputs"}, {"cwd", "outputs", "input_files"}),
     "data.acquire": ({"request", "budget"}, {"allow_partial", "min_records"}),
     "data.prepare": ({"snapshot"}, {"id_field", "smiles_field", "identity_policy", "allow_partial", "min_records"}),
     "campaign.create": ({"spec", "endpoints", "executors"}, set()),
@@ -88,6 +88,16 @@ def input_hashes(value: Any) -> dict[str, str]:
             return {str(receptor): file_hash(receptor)}
         for key, item in value.items():
             if key in {"database", "workspace", "python"}:
+                continue
+            if (key == "input_files" and isinstance(item, dict)
+                    and {"method_id", "command", "files", "inputs"} <= value.keys()):
+                # Explicit task dependencies need not use path-shaped input names.
+                # They remain separate from the program's free-form inputs object.
+                for name in item.values():
+                    resource = absolute(name)
+                    if not resource.is_file():
+                        raise FileNotFoundError(resource)
+                    result[str(resource)] = file_hash(resource)
                 continue
             if key == "bundle_path" and isinstance(item, str):
                 from etalon.data.design import read_bundle

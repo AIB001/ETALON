@@ -131,15 +131,11 @@ def prepare_action(request: dict) -> dict:
     if "research" in request:
         spec["nodes"][0]["research"] = request["research"]
     planned = service.plan(spec)
-    import os
     return {"schema": "etalon-prepared-action/1", **planned, "request": request,
             "binding": binding, "preflight": preflight,
             "quote": preflight.get("quote", request["limits"]),
             "verification": {"validator": "etalon.runtime.operations.verify/1"},
-            "capabilities": {"durable_worker": os.name == "posix",
-                "unsupported_reason": None if os.name == "posix" else "detached workers require Linux /proc process identities",
-                "limits": "dispatch reservation; actual charges may exceed quotes and remain recorded",
-                "max_seconds": "worker cancellation request; unresolved child outcomes require reconciliation"},
+            "capabilities": service.capabilities(),
             "recovery": {"backend": "runtime", "operation": "workflow.reconcile", "automatic_retry": False}}
 
 
@@ -177,36 +173,99 @@ def submit_action(request: dict, *, workspace: str | Path, plan_id: str) -> dict
     return _action_handle(RuntimeStore(root).get(request["request_id"]))
 
 
-def read_action_result(handle: dict) -> dict:
-    """Compatibility view over existing receipts and authoritative scientific charges."""
+def _campaign_result_facts(campaign, *, include_cost_details):
+    """Read result facts once, without loading candidate features or planning models."""
+    import json
+    with campaign.connection() as db:
+        db.execute("BEGIN")
+        spec, _ = campaign._configuration(db)
+        facts = {"spec": spec, "actions": campaign._actions(db),
+                 "observations": campaign._observations(db),
+                 "resource_executions": {row["key"]: json.loads(row["body"]) for row in db.execute(
+                     "SELECT key,body FROM metadata WHERE key LIKE 'budget:execution:%' ORDER BY key")}}
+        costs = {}
+        if include_cost_details:
+            for row in db.execute("SELECT key,body FROM metadata WHERE key LIKE 'execution-cost:%'"):
+                value = json.loads(row["body"])
+                costs.setdefault(value["action_id"], []).append({"metadata_key": row["key"], **value})
+    return facts, costs
+
+
+def _output_summary(output):
+    """Preserve a compact decision and a direct locator for the unchanged body."""
+    body = output["result"]
+    preview = {k: v for k, v in output.items() if k != "result"}
+    preview["summary"] = {k: body[k] for k in
+                          ("status", "summary", "method_id", "new_admitted", "failure") if k in body}
+    preview["read"] = {"tool": "etalon_workflow_artifact", "kind": "result",
+                       **{k: output[k] for k in ("workspace", "job_id", "node_id")}}
+    if "feedback" in body:
+        if len(canonical(body["feedback"]).encode("utf-8")) <= 2048:
+            preview["summary"]["feedback"] = body["feedback"]
+        else:
+            preview["feedback_read"] = {**preview["read"], "member": "/feedback"}
+    return preview
+
+
+def _action_summary(result):
+    """Keep decision facts and locators; bulk payloads remain available on demand."""
+    from collections import Counter
+    observations = result["observations"]
+    result["view"] = "summary"
+    result["observation_summary"] = {"count": len(observations),
+        "admitted": sum(o["admission"] == "accepted" for o in observations),
+        "statuses": dict(Counter(o["result"]["status"] for o in observations))}
+    result["observations"] = []
+    campaign = [r for r in result["accounting_refs"] if r["kind"] == "campaign"]
+    compact = []
+    if campaign:
+        compact.append({"kind": "campaign", "database": campaign[0]["database"],
+            "action_count": len(campaign), "unit": campaign[0]["unit"],
+            "charged": sum(r["charged"] for r in campaign),
+            "reserved": sum(r["reserved"] for r in campaign),
+            "coverage": "campaign actions only; unmeasured overhead unknown", "overhead": None})
+    runtime = dict(result["accounting_refs"][-1])
+    runtime["derived_from"] = [{k: r[k] for k in ("kind", "database", "action_count")} for r in compact]
+    result["accounting_refs"] = [*compact, runtime]
+    result["execution_refs"] = [result["execution_refs"][0], *runtime["derived_from"]]
+    native = result["native_status"]
+    native["action_count"] = len(native["actions"])
+    native["actions"] = []
+    result["outputs"] = [_output_summary(output) for output in result["outputs"]]
+    return result
+
+
+def read_action_result(handle: dict, *, view: str = "full") -> dict:
+    """Read existing facts; summary omits bulk runtime payloads without changing work."""
+    if view not in {"full", "summary"}:
+        raise ValueError("action result view must be full or summary")
+    if view == "summary" and (not isinstance(handle, dict) or handle.get("schema") != "etalon-action-handle/1"):
+        raise ValueError("summary view is available for runtime action handles")
     if isinstance(handle, dict) and handle.get("schema") == "etalon-wait-handle/1":
         from etalon.runtime.host_wait import read_wait
         return read_wait(handle)
     if isinstance(handle, dict) and handle.get("schema") == "etalon-native-handle/1":
         from etalon.runtime.native import read_native_result
         return read_native_result(handle)
-    import json
     from etalon.active.schema import digest
     from etalon.runtime.schema import fields
     fields(handle, {"schema", "backend", "workspace", "request_id", "job_id", "plan_id", "node_id"}, {"state"})
     if handle["schema"] != "etalon-action-handle/1" or handle["backend"] != "runtime" or handle["node_id"] != "action":
         raise ValueError("unsupported action handle")
     runtime = RuntimeStore(absolute(handle["workspace"]))
-    job = runtime.get(handle["job_id"])
+    job = runtime.get(handle["job_id"], include_events=False)
     request = job["plan"]["spec"].get("action_request")
     if request is None or handle["request_id"] != request["request_id"] or handle["plan_id"] != job["plan_id"]:
         raise StateError("handle does not identify the recorded action")
     node = job["nodes"][0]
     receipts = runtime.receipts(job["id"], node["id"])
+    projected = service.execution_status(runtime, job, receipts_by_node={node["id"]: receipts})
     result = node["result"] or receipts.get("completed", {}).get("result")
     native = {"job": job["state"], "node": node["state"], "actions": [],
               "result": result.get("status", result.get("run", {}).get("status") if isinstance(result.get("run"), dict) else None) if result else None}
-    execution = {"queued": "pending", "starting": "pending", "running": "running", "succeeded": "completed",
-                 "failed": "failed", "blocked": "blocked", "cancelled": "cancelled",
-                 "cancel_requested": "running", "reconciliation_required": "unresolved",
-                 "awaiting_decision": "pending"}.get(job["state"], "unresolved")
-    if "completed" in receipts:
-        execution = "completed"
+    native.update({k: projected[k] for k in ("worker_alive", "heartbeat_age_seconds")})
+    native["attempt"] = projected["nodes"][node["id"]]["native_attempt"]
+    execution = projected["nodes"][node["id"]]["execution_state"]
     verification = {"state": "passed" if node["state"] == "verified" else
                     "failed" if node["state"] == "failed" and result is not None else "pending",
                     "validator": "etalon.runtime.operations.verify/1", "evidence": node["evidence"], "reason": node["error"]}
@@ -215,21 +274,19 @@ def read_action_result(handle: dict) -> dict:
     if request["operation"] in {"active.run", "active.evaluate"} and "active_start" in receipts:
         database = request["arguments"]["database"]
         campaign = CampaignStore(database, read_only=True)
-        state = campaign.snapshot()
+        state, costs = _campaign_result_facts(campaign, include_cost_details=view == "full")
         actions = operations._active_interval(state, receipts["active_start"],
                                                result.get("end_action_ids") if result else None)
         ids = {a["id"] for a in actions}
         unit = state["spec"].cost_unit
+        observed_by_action = {o["action_id"]: o for o in state["observations"]}
         for action in actions:
             ref = {"kind": "campaign", "database": str(campaign.path), "action_id": action["id"]}
             refs.append(ref)
             native["actions"].append({"action_id": action["id"], "status": action["status"]})
             pending = action["status"] in {"reserved", "running"}
-            observed = next((o for o in state["observations"] if o["action_id"] == action["id"]), None)
-            with campaign.connection() as db:
-                execution_costs = [{"metadata_key": row["key"], **json.loads(row["body"])}
-                    for row in db.execute("SELECT key,body FROM metadata WHERE key LIKE 'execution-cost:%'")
-                    if json.loads(row["body"])["action_id"] == action["id"]]
+            observed = observed_by_action.get(action["id"])
+            execution_costs = costs.get(action["id"], [])
             accounting.append({**ref, "execution_cost_refs": execution_costs,
                                "unit": unit, "charged": action["cost"],
                                "reserved": action["reserved_cost"] if pending else 0,
@@ -241,21 +298,26 @@ def read_action_result(handle: dict) -> dict:
                     "reference": {"database": str(campaign.path), "action_id": observation["action_id"]},
                     "admission": "accepted" if observation["admitted"] else "rejected"})
         if any(a["status"] in {"reserved", "running"} for a in actions):
-            execution = "running" if job["state"] == "running" else "unresolved"
+            execution = "running" if job["state"] == "running" and projected["worker_alive"] else "unresolved"
         elif observations and all(o["result"]["status"] in {"failed", "blocked"} for o in observations):
             execution = "failed" if any(o["result"]["status"] == "failed" for o in observations) else "blocked"
     accounting.append({"kind": "runtime", "workspace": str(runtime.workspace), "job_id": job["id"],
                        "costs": node["costs"], "derived_from": refs[1:],
                        "additive": not bool(refs[1:]), "coverage": "runtime declared resources; see per-unit basis"})
-    return {"schema": "etalon-action-result/1", "request_id": request["request_id"], "plan_id": job["plan_id"],
+    from etalon.economics.execution import improvement_review
+    review = improvement_review("action_result_ready", {"request_id": request["request_id"],
+        "plan_id": job["plan_id"], "result": digest(result)}) if result is not None and execution in {"completed", "failed"} else None
+    response = {"schema": "etalon-action-result/1", "request_id": request["request_id"], "plan_id": job["plan_id"],
+            "rsi_review": review,
             "execution_refs": refs, "execution_state": execution, "native_status": native,
             "outputs": [] if result is None else [{"kind": "runtime_result", "sha256": digest(result),
                         "workspace": str(runtime.workspace), "job_id": job["id"], "node_id": node["id"], "result": result}],
             "verification": verification, "observations": observations, "accounting_refs": accounting,
             "recovery": {"backend": "runtime", "workspace": str(runtime.workspace), "job_id": job["id"],
                          "operation": "workflow.reconcile", "automatic_retry": False,
-                         "required": execution == "unresolved"},
+                          "required": projected["needs_reconciliation"] or execution == "unresolved"},
             "method_use_refs": request["method_use_refs"]}
+    return _action_summary(response) if view == "summary" else response
 
 
 def read_events(log_ref: dict, *, after_sequence: int | dict = 0, limit: int = 100) -> dict:

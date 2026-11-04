@@ -683,15 +683,15 @@ class Screen:
         finished" for a batch at stage 27 was wrong twice in one night from exactly that read.
         """
 
-        return self._progress_result(run_id, self.state(run_id))
+        return self._progress_result(run_id, self.state(run_id), self.workspace)
 
     @staticmethod
     def read_progress(workspace: str | Path, run_id: str) -> dict[str, Any]:
         """Inspect one existing workspace; absence/corruption never starts or recovers a run."""
-        return Screen._progress_result(run_id, Screen.read_state(workspace, run_id))
+        return Screen._progress_result(run_id, Screen.read_state(workspace, run_id), workspace)
 
     @staticmethod
-    def _progress_result(run_id: str, result: ScreenResult | None) -> dict[str, Any]:
+    def _progress_result(run_id: str, result: ScreenResult | None, workspace=None) -> dict[str, Any]:
         if result is None:
             return {"run_id": run_id, "exists": False}
         running = next((stage.stage_id for stage in result.stages if stage.status == "RUNNING"), None)
@@ -717,6 +717,23 @@ class Screen:
         current = next((stage for stage in result.stages if stage.stage_id == running), None)
         feedback = execution_feedback(detail, run_id=run_id, stage_id=running,
             method_id=current.plugin, input_id=current.cache_key) if current else None
+        reuse = None
+        registered = False
+        for stage in result.stages:
+            if stage.status not in {"SUCCEEDED", "CACHED"} or not stage.artifact_id:
+                break
+            plugin = stage.plugin.split('@')[0]
+            registered = registered or plugin in {'chemistry.rdkit_standardize', 'source.registered_parents'}
+            if registered and workspace is not None and plugin in {'docking.rdkit_conformers', 'docking.registered_conformers'}:
+                reuse = {"tool": "etalon_screen_prepare_continuation", "arguments": {
+                    "workspace": str(Path(workspace).absolute()), "completed_run": run_id,
+                    "through_stage": stage.stage_id}, "caller_supplies": ["next_config", "output_dir"],
+                    "scope": "compatible parents and conformers only; new receptor docking/checks remain"}
+        from etalon.economics.execution import improvement_review
+        review = improvement_review("screen_result_ready", {
+            "run_id": run_id, "workspace": str(workspace), "status": result.status,
+            "artifacts": [s.artifact_id for s in result.stages],
+        }) if result.terminal else None
         return {
             "run_id": run_id,
             "exists": True,
@@ -727,6 +744,8 @@ class Screen:
             "current": running,
             "detail": detail,
             "execution_feedback": feedback,
+            "preparation_reuse": reuse,
+            "rsi_review": review,
             "terminal": result.terminal,
         }
 

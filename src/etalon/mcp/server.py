@@ -42,7 +42,8 @@ def build() -> Any:
     """Construct the server with every tool and resource registered."""
 
     server_class = require_mcp()
-    mcp = server_class("etalon")
+    guidance = ROLE_PATH.parent / "host-guides" / "mcp-entry.md"
+    mcp = server_class("etalon", instructions=guidance.read_text(encoding="utf-8"))
     register_tools(mcp)
 
     @mcp.resource("etalon://skills/molquarry")

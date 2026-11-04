@@ -179,7 +179,9 @@ def test_native_five_selector_combination_pages_without_dropping_counter_scope(c
     assert not first['coverage']['selected_body_complete']
     assert first['coverage']['counter_count'] == 10 and first['coverage']['support_count'] == 3
     assert set(first['followup']['select']['selectors']) == set(args['selectors']) - {r['pointer'] for r in first['selected']}
-    assert len(pages) <= 4
+    # Absolute Windows source paths can require one extra page at the same 4 KiB
+    # bound. The drain above verifies exact content, disjoint progress and bytes.
+    assert len(pages) <= 5
     for key in ('counterevidence', 'evidence', 'limits'):
         assert [delivered[f'/{key}/{i}'] for i in range(len(note[key]))] == note[key]
     assert {key:delivered['/conditions/'+key] for key in note['conditions']} == note['conditions']

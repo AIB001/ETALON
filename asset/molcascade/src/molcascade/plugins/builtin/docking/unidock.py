@@ -24,6 +24,7 @@ import math
 import json
 import tempfile
 import shutil
+from contextlib import ExitStack
 from dataclasses import replace
 from pathlib import Path
 from typing import Any, ClassVar, Literal
@@ -35,7 +36,7 @@ from pydantic import Field, field_validator
 from molcascade.chemistry.datasets import discover_contract_files, require_single_input
 from molcascade.chemistry.sharding import shard_stage
 from molcascade.config.canonical import canonical_sha256
-from molcascade.contracts import DOCKING_SCORE_V1, LIGAND_CONFORMER_V1, PARENT_V1
+from molcascade.contracts import DOCKING_SCORE_V1, LIGAND_CONFORMER_V1, PARENT_V1, POSE_LINEAGE_V1
 from molcascade.errors import PluginError
 from molcascade.parallel import ShardOutcome, ShardTask, iter_shard_batches
 from molcascade.parallel.progress import report_activity
@@ -73,6 +74,7 @@ from molcascade.plugins.manifest import (
 
 _PARENT_PATH = Path("datasets/parents/part-00000.parquet")
 _SCORE_PATH = Path("datasets/docking_scores/part-00000.parquet")
+_LINEAGE_PATH = Path("datasets/pose_lineage/part-00000.parquet")
 _ENGINE = "Uni-Dock"
 _ENGINE_ID = "unidock"
 # Bumped whenever a change here alters the numbers or the poses recorded, so the
@@ -422,9 +424,16 @@ def _run_shard(task: ShardTask, *, defer_quality: bool = False) -> ShardOutcome:
             score_count += len(rows)
             if rows:
                 score_writer.write_table(pa.Table.from_pylist(rows, schema=DOCKING_SCORE_V1.schema))
+    rows_out = {"primary": input_count, "scores": score_count}
+    if "lineage" in task.output_paths:
+        # The production checkpoint holds the unmodified engine rows. The CPU
+        # quality chunks populate this port from those rows before any repair.
+        pq.write_table(pa.Table.from_pylist([], schema=POSE_LINEAGE_V1.schema),
+                       task.output_paths["lineage"], compression="zstd")
+        rows_out["lineage"] = 0
     return ShardOutcome(
         rows_in=input_count,
-        rows_out={"primary": input_count, "scores": score_count},
+        rows_out=rows_out,
         metadata={
             "scored_pose_count": score_count,
             "missing_geometry_count": missing_geometry,
@@ -484,8 +493,11 @@ def _split_quality(task: ShardTask, produced: ShardTask):
         # relax its own partly repaired output a second time.
         raw = directory / 'raw.parquet'
         pq.write_table(poses, raw, compression='zstd')
+        outputs = {'scores': directory / 'scores.parquet'}
+        if 'lineage' in task.output_paths:
+            outputs['lineage'] = directory / 'lineage.parquet'
         yield replace(task, index=index, row_offset=offset, row_count=subset.num_rows,
-            input_files=(raw,), output_paths={'scores': directory / 'scores.parquet'},
+            input_files=(raw,), output_paths=outputs,
             device='cpu')
 
 
@@ -493,11 +505,23 @@ def _check_quality_chunk(task: ShardTask) -> ShardOutcome:
     config = UniDockConfig.model_validate(dict(task.config))
     session = PoseQualitySession(config.pose_quality, receptor_path=config.receptor_path)
     rows = pq.read_table(task.input_files[0]).to_pylist()
+    lineage = [] if 'lineage' in task.output_paths else None
     rows = session.apply(rows, keep_poses=config.keep_poses,
+        lineage=lineage,
         progress=lambda phase, **kw: report_activity(task, phase, **kw))
     pq.write_table(pa.Table.from_pylist(rows, schema=DOCKING_SCORE_V1.schema),
                    task.output_paths['scores'], compression='zstd')
-    return ShardOutcome(task.row_count, {'scores': len(rows)}, session.report.metadata())
+    rows_out = {'scores': len(rows)}
+    if lineage is not None:
+        # _dock_batch selects both score and decoded MolBlock by the same native
+        # pose index. The retained number is therefore about the pre-repair
+        # pose, even when QC keeps a different geometry or renumbers its rank.
+        for record in lineage:
+            record.update(score_pose_sha256=record['raw_pose_sha256'], score_basis='engine_raw_pose')
+        pq.write_table(pa.Table.from_pylist(lineage, schema=POSE_LINEAGE_V1.schema),
+                       task.output_paths['lineage'], compression='zstd')
+        rows_out['lineage'] = len(lineage)
+    return ShardOutcome(task.row_count, rows_out, session.report.metadata())
 
 
 def _join_quality(task: ShardTask, produced: ShardTask, chunks) -> ShardOutcome:
@@ -508,7 +532,11 @@ def _join_quality(task: ShardTask, produced: ShardTask, chunks) -> ShardOutcome:
         raise PluginError('produced docking batch changed', code='DOCKING_PRODUCTION_CHANGED')
     counters = {}
     count = 0
-    with pq.ParquetWriter(task.output_paths['scores'], DOCKING_SCORE_V1.schema, compression='zstd') as writer:
+    lineage_count = 0
+    with ExitStack() as stack:
+        writer = stack.enter_context(pq.ParquetWriter(task.output_paths['scores'], DOCKING_SCORE_V1.schema, compression='zstd'))
+        lineage_writer = stack.enter_context(pq.ParquetWriter(task.output_paths['lineage'],
+            POSE_LINEAGE_V1.schema, compression='zstd')) if 'lineage' in task.output_paths else None
         for chunk in chunks:
             root = next(iter(chunk.output_paths.values())).parent.parent
             outcome = _read_checkpoint(root, chunk.index, tuple(chunk.output_paths))
@@ -520,8 +548,15 @@ def _join_quality(task: ShardTask, produced: ShardTask, chunks) -> ShardOutcome:
                     counters[key] = counters.get(key, 0) + value
             for batch in pq.ParquetFile(chunk.output_paths['scores']).iter_batches():
                 writer.write_batch(batch)
+            if lineage_writer is not None:
+                lineage_count += outcome.rows_out['lineage']
+                for batch in pq.ParquetFile(chunk.output_paths['lineage']).iter_batches():
+                    lineage_writer.write_batch(batch)
     shutil.copyfile(produced.output_paths['primary'], task.output_paths['primary'])
-    return ShardOutcome(task.row_count, {'primary': task.row_count, 'scores': count},
+    rows_out = {'primary': task.row_count, 'scores': count}
+    if lineage_writer is not None:
+        rows_out['lineage'] = lineage_count
+    return ShardOutcome(task.row_count, rows_out,
         {**original.metadata, **counters, 'scored_pose_count': count})
 
 
@@ -550,6 +585,7 @@ class UniDockPlugin:
     config_model = UniDockConfig
     pipelined = False
     split_quality = False
+    pose_lineage = False
 
     def execute(self, request: StageRequest, context: StageContext) -> StageResponse:
         config = validated_config(request, UniDockConfig, engine=_ENGINE, hint=_EXECUTABLE_HINT)
@@ -579,6 +615,7 @@ class UniDockPlugin:
             output_paths={
                 "primary": _PARENT_PATH.as_posix(),
                 "scores": _SCORE_PATH.as_posix(),
+                **({"lineage": _LINEAGE_PATH.as_posix()} if self.pose_lineage else {}),
             },
             context=context,
             stage_id=request.stage_id,
@@ -607,6 +644,10 @@ class UniDockPlugin:
                         "receptor_id": receptor_id,
                     },
                 ),
+                **({"lineage": PendingOutput(POSE_LINEAGE_V1.id, result.file_paths["lineage"],
+                    {"row_count": result.rows_out.get("lineage", 0),
+                     "identity": "sha256 of exact UTF-8 MolBlock bytes before/after quality processing",
+                     "score_basis": "engine_raw_pose; unchanged by repair"})} if self.pose_lineage else {}),
             },
             metadata={
                 "input_count": result.rows_in,
@@ -644,4 +685,14 @@ class FineGrainedUniDockPlugin(PipelinedUniDockPlugin):
     split_quality = True
 
 
-__all__ = ["UniDockConfig", "UniDockPlugin", "PipelinedUniDockPlugin", "FineGrainedUniDockPlugin"]
+class LineageUniDockPlugin(FineGrainedUniDockPlugin):
+    """Opt-in sidecar; v0.4 scores, repair, filtering and defaults are unchanged."""
+    descriptor = UniDockPlugin.descriptor.model_copy(update={
+        'version': '0.5.0',
+        'outputs': (*UniDockPlugin.descriptor.outputs, POSE_LINEAGE_V1.id),
+        'output_ports': {**UniDockPlugin.descriptor.output_ports, 'lineage': POSE_LINEAGE_V1.id},
+    })
+    pose_lineage = True
+
+
+__all__ = ["UniDockConfig", "UniDockPlugin", "PipelinedUniDockPlugin", "FineGrainedUniDockPlugin", "LineageUniDockPlugin"]

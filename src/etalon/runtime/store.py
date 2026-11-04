@@ -124,7 +124,7 @@ class RuntimeStore:
             raise ValueError("runtime job directories cannot be symlinks")
         return root
 
-    def get(self, job: str) -> dict:
+    def get(self, job: str, *, include_events: bool = True) -> dict:
         identifier(job)
         with self.connection() as db:
             row = db.execute("SELECT * FROM jobs WHERE id=?", (job,)).fetchone()
@@ -140,8 +140,9 @@ class RuntimeStore:
                     node[key] = json.loads(node[key]) if node[key] else None
                 report["nodes"].append(node)
             report["sequence"] = db.execute("SELECT COALESCE(MAX(sequence),0) FROM events WHERE job=?", (job,)).fetchone()[0]
-            report["events"] = [{**dict(r), "body": json.loads(r["body"])} for r in db.execute(
+            report["events"] = ([{**dict(r), "body": json.loads(r["body"])} for r in db.execute(
                 "SELECT * FROM events WHERE job=? ORDER BY sequence DESC LIMIT 100", (job,))][::-1]
+                if include_events else [])
         report["resources"] = self.balance(report["plan"]["spec"]["limits"], report["nodes"])
         report["workspace"] = str(self.workspace)
         return report

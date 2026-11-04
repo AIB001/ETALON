@@ -57,6 +57,8 @@ def register(sub: Any) -> None:
         if name == "submit":
             command.add_argument("--workspace", type=Path, required=True)
             command.add_argument("--plan-id", required=True)
+        if name == "result":
+            command.add_argument("--view", choices=("full", "summary"), default="full")
         if name == "events":
             command.add_argument("--after-sequence", type=int, default=0)
             command.add_argument("--cursor", type=Path)
@@ -126,7 +128,7 @@ def _execute(args: argparse.Namespace) -> dict:
         if args.action_command == "submit":
             return submit_action(value, workspace=args.workspace.absolute(), plan_id=args.plan_id)
         if args.action_command == "result":
-            return read_action_result(value)
+            return read_action_result(value, view=args.view)
         return read_events(value, after_sequence=_read(args.cursor) if args.cursor else args.after_sequence,
                            limit=args.limit)
 

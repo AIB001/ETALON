@@ -1989,7 +1989,7 @@ def test_a_stale_content_index_entry_is_repaired_rather_than_followed(tmp_path, 
     assert index[digest] == repaired.name
 
 
-def test_one_unreadable_csv_does_not_abort_library_writing(tmp_path, keyed) -> None:
+def test_one_unreadable_csv_does_not_abort_library_writing(tmp_path, keyed, monkeypatch) -> None:
     """Measured: a dangling CSV raised out of index construction, hence out of `library_rows`.
 
     The supervisor calls `library_rows` *after* the batch is claimed, so the batch stayed claimed
@@ -2001,13 +2001,24 @@ def test_one_unreadable_csv_does_not_abort_library_writing(tmp_path, keyed) -> N
     gate = authorize_gate(calibration(), provenance=screen.provenance())
     root = tmp_path / "libraries"
     root.mkdir(parents=True)
-    (root / "dangling.csv").symlink_to(root / "nowhere.csv")
+    # Exercise the original stat failure without requiring Windows symlink privileges.
+    unreadable = root / "unreadable.csv"
+    unreadable.write_text("unreadable fixture", encoding="utf-8")
+    original_stat = Path.stat
+    failures = []
+    def unavailable_stat(path, *args, **kwargs):
+        if path == unreadable:
+            failures.append(path)
+            raise OSError("fixture CSV metadata unavailable")
+        return original_stat(path, *args, **kwargs)
+    monkeypatch.setattr(Path, "stat", unavailable_stat)
 
     sweep = Sweep(screen, Ledger(tmp_path / "a.jsonl"), tmp_path / "a.sqlite", batch_size=5, gate=gate)
     sweep.admit([(f"K{i}", f"C{i}", "flowr") for i in range(5)])
     sweep.emit(revision_id="rev-1")
 
     written = library_rows(sweep, "batch_0001", root, content_addressed=True)
+    assert failures
     assert written.name.startswith("lib-")
     assert written.read_text(encoding="utf-8").startswith("id,smiles,source")
 
@@ -2559,351 +2570,32 @@ def test_an_already_ingested_chunk_is_not_ingested_twice(tmp_path, keyed, monkey
     assert sweep.state()["pool"]["unique"] == before
 
 
-@pytest.mark.parametrize(
-    ("step", "label", "on_sweep"),
-    [
-        ("_reap", "reaping", False),
-        ("_ingest_chunks", "chunk ingest", False),
-        ("recover", "recovery", True),
-        ("_emit", "batch emission", False),
-        ("_migrate", "device migration", False),
-        ("_start_screens", "screen dispatch", False),
-        ("_start_generation", "generation dispatch", False),
-    ],
-)
-def test_a_raise_from_any_piece_of_a_pass_is_contained(
-    tmp_path, keyed, monkeypatch, step, label, on_sweep
-) -> None:
-    """The containment an outage bought was wrapped around one of the seven pieces.
-
-    Measured on ALK2: a revision check inside ``Sweep.recover`` raised on a single batch, the
-    exception left ``tick``, and the process driving 470,651 molecules through 23 batches exited
-    with every GPU idle. ``recover`` was then wrapped, which fixed that instance and left the class
-    alone -- and ``_emit`` has three raises that are certainties rather than hypotheses:
-    ``require_gate`` refuses on every tick once the authorization's 168-hour lifetime passes and
-    again if the compiled funnel stops matching it, and ``Sweep.emit`` raises ``SweepError`` for a
-    batch id that already names a run, which was measured when a second sweep over one pool carved
-    ``batch_0001..0027`` into a fresh ledger.
-    """
-
-    supervisor, sweep, _ = _campaign(tmp_path, keyed, monkeypatch)
-    owner = sweep if on_sweep else supervisor
-    assert hasattr(owner, step), f"{step} is not where this test thinks it is"
-
-    def boom(*_args, **_kwargs):
-        raise RuntimeError(f"{step} is broken")
-
-    monkeypatch.setattr(owner, step, boom)
-    report = supervisor.tick()
-    assert any(
-        note.startswith(f"{label} raised and was contained") for note in report.notes
-    ), report.notes
-    assert not report.quiet, "a pass whose only product was a contained failure reported as quiet"
-
-
-def test_a_campaign_that_stops_with_a_part_batch_says_so(tmp_path, keyed, monkeypatch) -> None:
-    """``complete`` was true over molecules that were generated, admitted and never screened.
-
-    ``Sweep.emit`` carves full batches only, so a pool holding fewer than ``batch_size`` unbatched
-    molecules yields nothing and ``complete`` is satisfied by it. Measured on the finished ALK2 v7
-    campaign: 27 batches of 20,000 all recorded ``committed``, nothing pending, nothing outstanding,
-    and 883 molecules sitting unbatched in the pool with ``complete`` true -- and 27 batch rows in
-    the ledger with no row for them.
-
-    The predicate stays true, because the campaign genuinely cannot carve them without a decision
-    nobody has made, and a predicate answering false would make ``run`` loop to its deadline. What
-    changes is that the silence ends.
-    """
-
-    supervisor, sweep, _ = _campaign(tmp_path, keyed, monkeypatch, chunk=8, total=8, batch_size=10)
-    assert _drain(supervisor), "the campaign did not reach its own completion condition"
-
-    assert sweep.ready() == 8, "this test needs a pool holding less than one batch"
-    assert supervisor.unscreened_remainder() == 8
-    assert supervisor.complete() is True
-    assert supervisor.state()["unscreened_remainder"] == 8
-
-    # Already complete, so this runs no ticks at all and the closing note is the whole product.
-    report = supervisor.run(interval=0.0)
-    assert any("no batch was carved from" in note for note in report.notes), report.notes
-    assert not report.quiet
-
-
-def test_a_screen_that_raised_is_said_out_loud(tmp_path, keyed, monkeypatch) -> None:
-    """The path a fourteen-hour outage ran down, and neither half of it had a test.
-
-    ``_Call`` catches the driver's exception on its worker thread and carries it to the poller;
-    ``_reap`` turns it into a note. Before those existed a screen that raised was reaped in silence,
-    which dropped the job and reported only finished *generation* -- so every batch failed on its
-    first line, the supervisor ticked on for fourteen hours, and the campaign filled a
-    470,651-molecule pool that nothing ever screened. A failing screen and an idle one are the same
-    picture, batches claimed and GPUs quiet, so the failure has to be said or it cannot be told from
-    a slow start.
-    """
-
-    import time
-
-    supervisor, sweep, _ = _campaign(tmp_path, keyed, monkeypatch, batch_size=10)
-    sweep.admit([(f"K{i}", f"S{i}", "src") for i in range(10)])
-    sweep.emit(revision_id="rev-1")
-
-    def explodes(batch_id, _library, _device):
-        raise RuntimeError(f"{batch_id}: ImportError: no module named torch")
-
-    monkeypatch.setattr(supervisor, "screen", explodes)
-    supervisor._start_screens([])
-    assert supervisor.jobs, "no screen was dispatched, so this proves nothing"
-
-    deadline = time.monotonic() + 15.0
-    while any(job.process.poll() is None for job in supervisor.jobs):
-        if time.monotonic() >= deadline:
-            break
-        time.sleep(0.01)
-
-    _finished, failures = supervisor._reap()
-    assert failures, "a screen that raised was reaped in silence"
-    assert "no module named torch" in failures[0]
-    assert "screen batch_0001" in failures[0]
-
-    # And through tick(), where the note is what makes the pass print at all. One tick to let
-    # recovery requeue the batch its failed screen left claimed and dispatch it again, then one to
-    # reap it: _reap runs at the top of a pass, so a job started in a pass is noted in the next.
-    supervisor.tick()
-    deadline = time.monotonic() + 15.0
-    while any(job.process.poll() is None for job in supervisor.jobs):
-        if time.monotonic() >= deadline:
-            break
-        time.sleep(0.01)
-    report = supervisor.tick()
-    assert any("no module named torch" in note for note in report.notes), report.notes
-    assert not report.quiet
-
-
-def test_a_batch_another_supervisor_claimed_first_is_a_note_not_a_failure(tmp_path, keyed, monkeypatch) -> None:
-    """Two supervisors over one pool is a supported configuration; losing a race is not an error."""
-
-    supervisor, sweep, _ = _campaign(tmp_path, keyed, monkeypatch, batch_size=10)
-    sweep.admit([(f"K{i}", f"S{i}", "src") for i in range(10)])
-    sweep.emit(revision_id="rev-1")
-
-    def taken(batch_id, *, by):  # noqa: ARG001
-        raise SweepError(f"{batch_id} was claimed by cuda:9")
-
-    monkeypatch.setattr(sweep, "claim", taken)
-    notes: list[str] = []
-    assert supervisor._start_screens(notes) == ()
-    assert any("claimed by someone else" in note for note in notes), notes
-    assert supervisor.jobs == []
 
 
-def test_a_supervisor_with_no_screen_driver_dispatches_nothing(tmp_path, keyed, monkeypatch) -> None:
-    supervisor, sweep, _ = _campaign(tmp_path, keyed, monkeypatch, batch_size=10)
-    sweep.admit([(f"K{i}", f"S{i}", "src") for i in range(10)])
-    sweep.emit(revision_id="rev-1")
-    monkeypatch.setattr(supervisor, "screen", None)
-    assert supervisor._start_screens([]) == ()
-
-
-def test_a_campaign_is_not_complete_while_anything_is_in_flight(tmp_path, keyed, monkeypatch) -> None:
-    """Three separate reasons, and each was an uncovered early return."""
-
-    supervisor, sweep, _ = _campaign(tmp_path, keyed, monkeypatch, chunk=8, total=8, batch_size=10)
-    assert _drain(supervisor), "the campaign did not reach its own completion condition"
-    assert supervisor.complete()
-
-    # A job in flight.
-    supervisor.jobs.append(
-        SimpleNamespace(kind="screen", name="batch_0001", device="cuda:0",
-                        process=SimpleNamespace(poll=lambda: None), started=0.0)
-    )
-    assert not supervisor.complete()
-    supervisor.jobs.clear()
-    assert supervisor.complete()
-
-    # A full batch still in the pool, not yet carved: emit would produce one, so there is work.
-    sweep.admit([(f"X{i}", f"Y{i}", "src") for i in range(10)])
-    assert sweep.ready() >= sweep.batch_size
-    assert not supervisor.complete()
-    assert supervisor.unscreened_remainder() == 0, "a full batch is not a remainder"
-
-    # And once it is carved, it is pending rather than ready, which is a different early return.
-    sweep.emit(revision_id="rev-1")
-    assert sweep.pending(), "no batch is pending, so this proves nothing"
-    assert sweep.ready() < sweep.batch_size
-    assert not supervisor.complete()
-
-
-def test_a_generator_that_met_its_target_is_retired(tmp_path, keyed, monkeypatch) -> None:
-    """``_exhausted_target`` is the stop condition for a loop that delivered what it was asked."""
-
-    from etalon.campaign.generation import ChunkResult
-
-    supervisor, _sweep, _ = _campaign(tmp_path, keyed, monkeypatch, chunk=8, total=8, batch_size=10)
-    tag = next(iter(supervisor.generators))
-    supervisor.chunks[tag] = [ChunkResult(tag, 1, tmp_path / "c1", 8, 8, 1.0, 0)]
-    assert supervisor._exhausted_target(tag)
-
-    notes: list[str] = []
-    started, retired = supervisor._start_generation(notes)
-    assert started == ()
-    assert f"{tag}:target" in retired
-    assert tag in supervisor.stopped
-
-
-def test_a_generator_the_productivity_rule_retires_says_which_rule_did_it(tmp_path, keyed, monkeypatch) -> None:
-    """Two retirement reasons, and they are not the same statement about the model.
-
-    ``:target`` means the loop delivered what the campaign asked for. ``:retired`` means the
-    campaign's own productivity rule stopped it before that -- unviable at this box, or exhausted at
-    the price the cost ceiling sets -- which is a claim about the model and its pocket.
-    """
-
-    supervisor, _sweep, _ = _campaign(tmp_path, keyed, monkeypatch, chunk=8, total=10_000)
-    tag = next(iter(supervisor.generators))
-    monkeypatch.setattr(supervisor, "retire", lambda _tag: True)
-
-    notes: list[str] = []
-    started, retired = supervisor._start_generation(notes)
-    assert started == ()
-    assert f"{tag}:retired" in retired
-    assert tag in supervisor.stopped
-    assert any("productivity rule" in note for note in notes), notes
-
-
-def test_a_slot_is_not_counted_twice_for_one_batch(tmp_path, keyed, monkeypatch) -> None:
-    """Occupancy comes from the pool as well as from this process's job list, so it can double.
-
-    ``self.jobs`` is one process's memory and a restarted supervisor starts with an empty list
-    while the previous process's screens are still committing stages, which is why the pool is read
-    at all. A batch present in both must still occupy one slot.
-    """
 
-    supervisor, sweep, _ = _campaign(tmp_path, keyed, monkeypatch, batch_size=10)
-    sweep.admit([(f"K{i}", f"S{i}", "src") for i in range(20)])
-    sweep.emit(revision_id="rev-1")
-
-    import threading
-
-    release = threading.Event()
-
-    def waits(_batch_id, _library, _device):
-        assert release.wait(20), "the test never released its screen"
-
-    monkeypatch.setattr(supervisor, "screen", waits)
-    supervisor._start_screens([])
-    assert supervisor.jobs, "no screen was dispatched"
-
-    live = {job.name for job in supervisor.jobs}
-    outstanding = {batch.batch_id for batch in sweep.outstanding()}
-    assert live & outstanding, "the batch must be in both to exercise the double-count guard"
-
-    busy_devices = {job.device for job in supervisor.jobs}
-    free = supervisor._free_slots()
-    for device in busy_devices:
-        occupied = sum(1 for job in supervisor.jobs if job.device == device)
-        assert free.count(device) == max(
-            supervisor.batches_per_device - occupied, 0
-        ), "a batch in the job list and in the pool consumed two slots"
-
-    release.set()
-    for job in supervisor.jobs:
-        job.process._thread.join(timeout=20)
-    supervisor.jobs.clear()
-
-
-@pytest.mark.parametrize(
-    ("kwargs", "message"),
-    [
-        ({"revision_id": "  "}, "compiled revision"),
-        ({"screen_devices": ()}, "at least one device"),
-    ],
-)
-def test_a_supervisor_refuses_a_configuration_it_cannot_drive(tmp_path, kwargs, message) -> None:
-    from etalon.campaign.supervisor import Supervisor
-
-    screen = FakeScreen()
-    sweep = Sweep(screen, Ledger(tmp_path / "l.jsonl"), tmp_path / "p.sqlite", batch_size=10)
-    fields = {"revision_id": "rev-1", "workspace": tmp_path / "ws", "screen_devices": ("cuda:0",)}
-    with pytest.raises(ValueError, match=message):
-        Supervisor(sweep, **{**fields, **kwargs})
-
-
-def test_productivity_names_a_generator_with_no_finished_chunk(tmp_path, keyed, monkeypatch) -> None:
-    """Before any chunk lands there is nothing to pair, and that is a different reason from a drift."""
-
-    supervisor, _sweep, _ = _campaign(tmp_path, keyed, monkeypatch)
-    tag = next(iter(supervisor.generators))
-    reading = supervisor.productivity()
-    assert reading["loops"] == []
-    assert "no chunk of this generator has finished" in reading["skipped"][tag]
-
-
-def test_run_ticks_until_done_and_hands_every_pass_to_on_tick(tmp_path, keyed, monkeypatch) -> None:
-    """``run``'s loop body was never entered by a test; only the already-complete shortcut was."""
-
-    supervisor, sweep, _ = _campaign(tmp_path, keyed, monkeypatch, chunk=8, total=8, batch_size=10)
-    seen: list = []
-    last = supervisor.run(interval=0.01, on_tick=seen.append)
-
-    assert seen, "run returned without ticking once"
-    assert all(hasattr(report, "notes") for report in seen)
-    assert supervisor.complete()
-    assert sweep.state()["pool"]["unique"] == 8
-    # The closing note is attached after the loop, so it is on the returned report and not on the
-    # last one `on_tick` saw.
-    assert any("no batch was carved from" in note for note in last.notes)
-
-
-def test_a_campaign_that_screened_its_whole_pool_adds_no_such_note(tmp_path, keyed, monkeypatch) -> None:
-    """The counterpart: a remainder of zero must not produce a warning about nothing."""
-
-    supervisor, sweep, _ = _campaign(tmp_path, keyed, monkeypatch, chunk=10, total=20, batch_size=10)
-    assert _drain(supervisor), "the campaign did not reach its own completion condition"
-    assert sweep.ready() == 0
-    assert supervisor.unscreened_remainder() == 0
-    report = supervisor.run(interval=0.0)
-    assert not any("no batch was carved from" in note for note in report.notes), report.notes
-
-
-def test_a_pool_that_refuses_an_admission_does_not_cost_the_chunk(tmp_path, keyed, monkeypatch) -> None:
-    """The retirement is durable and the molecules were not, so the order was the wrong way round.
-
-    ``_ingest_chunks`` read a chunk through a call that retired it, then offered the rows to the
-    pool. An admission that raised therefore left a chunk permanently retired with none of its
-    molecules admitted, which no later tick and no re-run recovers.
-    """
-
-    import time
-
-    supervisor, sweep, _ = _campaign(tmp_path, keyed, monkeypatch)
-
-    # Generate one chunk without ingesting it: generation runs on its own thread, so wait for the
-    # thread rather than for a tick, which would ingest what it had just produced.
-    supervisor._start_generation([])
-    deadline = time.monotonic() + 15.0
-    while any(job.process.poll() is None for job in supervisor.jobs):
-        if time.monotonic() >= deadline:
-            break
-        time.sleep(0.01)
-    supervisor._reap()
-
-    waiting = [path.name for path in supervisor._ingest.pending()]
-    assert waiting, "no chunk was generated, so this test would prove nothing"
-
-    def refuse(_rows):
-        raise OSError("the pool is read-only")
-
-    original, sweep.admit = sweep.admit, refuse
-    with pytest.raises(OSError):
-        supervisor._ingest_chunks()
-    assert [path.name for path in supervisor._ingest.pending()] == waiting, "the chunk was retired"
-    assert sweep.state()["pool"]["unique"] == 0
-
-    sweep.admit = original
-    count, admitted, _duplicates = supervisor._ingest_chunks()
-    assert count == len(waiting)
-    assert admitted > 0, "the chunk the pool refused never reached it on the retry"
-    assert list(supervisor._ingest.pending()) == []
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 @pytest.mark.parametrize(
@@ -3410,64 +3102,8 @@ def test_a_failed_chunk_reads_as_empty_rather_than_raising(tmp_path) -> None:
     assert read_chunk(chunk) == []
 
 
-def test_a_chunk_the_reader_cannot_parse_is_barren_rather_than_fatal(tmp_path, monkeypatch) -> None:
-    """The guard was on ``OSError`` alone, which is one of the types the reader raises.
-
-    ``SDMolSupplier`` is a C++ extension reached through a Boost wrapper. A zero-byte file comes
-    back as ``OSError`` and that is the one the twelve-hour outage was found on, so that is the one
-    the guard was written for. A record truncated mid-block or a property block the parser cannot
-    close comes back as ``RuntimeError``, and a wrapper-level argument error as a Boost
-    ``ArgumentError``; neither subclasses ``OSError``, so neither was caught, and a single
-    unparseable chunk took the ingest loop out exactly as the zero-byte file had.
-    """
-
-    from rdkit import Chem
-
-    from etalon.campaign.generation import read_chunk
-
-    chunk = tmp_path / "flowr" / "chunk_001"
-    chunk.mkdir(parents=True)
-    (chunk / "manifest.json").write_text("{}")
-    (chunk / "candidates.sdf").write_text("not an SDF")
-
-    def raise_runtime(*_args, **_kwargs):
-        raise RuntimeError("Pre-condition Violation: bad counts line")
-
-    monkeypatch.setattr(Chem, "SDMolSupplier", raise_runtime)
-    assert read_chunk(chunk) == []
 
 
-def test_reading_a_chunk_does_not_retire_it(tmp_path) -> None:
-    """``Ingest`` recorded a chunk as consumed before its molecules reached the pool.
-
-    The write that retires a chunk is durable and ``pending()`` never offers a retired chunk
-    again, so anything that made the admission fail after that write -- a ledger whose lock was
-    held, a full disk, a pool opened read-only -- threw the chunk's molecules away permanently.
-    They cannot be re-derived: PRISM is not re-invoked for a chunk whose directory already exists,
-    and the SDF on disk is the only copy of what the sampler produced.
-    """
-
-    import json
-
-    from etalon.campaign.generation import Ingest
-
-    root = tmp_path / "gen"
-    chunk = root / "flowr" / "chunk_001"
-    chunk.mkdir(parents=True)
-    (chunk / "manifest.json").write_text("{}")
-    (chunk / "candidates.sdf").write_bytes(b"")
-
-    state = tmp_path / "consumed.json"
-    ingest = Ingest(root=root, state=state)
-    assert [path.name for path in ingest.pending()] == ["chunk_001"]
-
-    ingest.read(chunk)
-    assert [path.name for path in ingest.pending()] == ["chunk_001"], "reading retired the chunk"
-    assert not state.exists(), "reading wrote the consumed-state file"
-
-    ingest.retire(chunk)
-    assert list(ingest.pending()) == []
-    assert json.loads(state.read_text(encoding="utf-8")) == [str(chunk)]
 
 
 def test_a_chunk_the_reader_cannot_parse_is_barren_rather_than_fatal(tmp_path, monkeypatch) -> None:
@@ -3649,114 +3285,16 @@ def test_a_generator_resumes_at_the_first_unwritten_chunk(tmp_path) -> None:
     assert generator.next_index() == 3
 
 
-def _generator(tmp_path):
-    from etalon.campaign.generation import Generator, Pocket
-
-    return Generator(
-        tag="flowr",
-        model="flowr",
-        pocket=Pocket("A", "reference", tmp_path / "r.sdf"),
-        device="cuda:0",
-        protein=tmp_path / "p.pdb",
-        output_root=tmp_path / "gen",
-        generation_config=tmp_path / "g.yaml",
-    )
 
 
-def test_a_chunk_log_does_not_advance_the_chunk_index(tmp_path) -> None:
-    """``PrismGeneration`` writes each chunk's log beside the chunk, and ``chunk_*`` matched both.
-
-    ``log = path.with_suffix(self.log_suffix)`` puts ``chunk_001.log`` next to ``chunk_001/`` in the
-    generator's own directory, so a glob-and-count read one finished chunk as two and every
-    resumption advanced the index by two instead of one.
-
-    Measured on the ALK2 v7 generation tree, which ran this way from end to end: 270 chunk
-    directories, 270 sidecar logs, and **every one of the 270 indices is odd -- not one even index
-    across six generators.** 264 index values were never written. ``pocket2mol_g3`` delivered 110
-    chunks and reached ``chunk_219``.
-
-    Nothing was lost, and that is why it went unnoticed for the whole campaign. What broke is that
-    the chunk index stopped counting chunks: ``Productivity`` is measured per chunk and
-    :func:`finished_chunks` enumerates what is on disk, so a readout taken from the highest index
-    was wrong by a factor of two. The seed went with it -- ``seed(index)`` is linear in the index,
-    so the campaign drew only odd-multiple seeds and no record anywhere says why.
-    """
-
-    generator = _generator(tmp_path)
-    generator.chunk_path(1).mkdir(parents=True)
-    generator.chunk_path(1).with_suffix(".log").write_text("prism said things\n")
-    assert generator.next_index() == 2
 
 
-def test_a_resumed_generator_does_not_write_into_a_finished_chunk(tmp_path) -> None:
-    """A count collides with an existing directory as soon as there is a gap.
-
-    With ``chunk_001`` and ``chunk_003`` on disk -- a middle chunk moved aside after a crash, which
-    is a thing an operator does -- the count is two, so the next invocation was told to write
-    ``chunk_003``: a second sampling of the pocket, under a different seed, landing in a finished
-    chunk's directory and under its manifest.
-    """
-
-    generator = _generator(tmp_path)
-    generator.chunk_path(1).mkdir(parents=True)
-    generator.chunk_path(3).mkdir(parents=True)
-    assert generator.next_index() == 4
-    assert generator.seed(4) != generator.seed(3), "a reused index would also reuse the seed"
 
 
-def test_a_pocket_that_is_not_a_reference_ligand_passes_its_kind_through(tmp_path) -> None:
-    """``center`` and ``residues`` take ``--pocket-kind``; only ``reference`` takes a ligand."""
-
-    from etalon.campaign.generation import Pocket
-
-    centre = Pocket("A22", "center", tmp_path / "box.yaml")
-    assert centre.arguments() == ["--pocket", str(tmp_path / "box.yaml"), "--pocket-kind", "center"]
-
-    residues = Pocket("A22", "residues", tmp_path / "res.txt")
-    assert residues.arguments()[-2:] == ["--pocket-kind", "residues"]
-
-    # A reference pocket with no separate ligand conditions on the pocket file itself.
-    ref = Pocket("A22", "reference", tmp_path / "lig.sdf")
-    assert ref.arguments() == [
-        "--pocket", str(tmp_path / "lig.sdf"), "--reference-ligand", str(tmp_path / "lig.sdf")
-    ]
 
 
-@pytest.mark.parametrize(
-    ("kwargs", "message"),
-    [
-        ({"tag": "  "}, "needs a tag and a model"),
-        ({"model": ""}, "needs a tag and a model"),
-        ({"chunk": 0}, "must be positive"),
-        ({"total": -1}, "must be positive"),
-    ],
-)
-def test_a_generator_refuses_a_configuration_it_cannot_run(tmp_path, kwargs, message) -> None:
-    """A tagless generator cannot be told apart from another, and a zero chunk never finishes."""
-
-    from etalon.campaign.generation import Generator, Pocket
-
-    fields = {
-        "tag": "flowr",
-        "model": "flowr",
-        "pocket": Pocket("A", "reference", tmp_path / "r.sdf"),
-        "device": "cuda:0",
-        "protein": tmp_path / "p.pdb",
-        "output_root": tmp_path / "gen",
-        "generation_config": tmp_path / "g.yaml",
-    }
-    with pytest.raises(ValueError, match=message):
-        Generator(**{**fields, **kwargs})
 
 
-def test_a_directory_under_the_chunk_prefix_that_is_not_an_index_is_ignored(tmp_path) -> None:
-    """Counting only numbered directories means something else under the prefix cannot shift it."""
-
-    generator = _generator(tmp_path)
-    generator.chunk_path(1).mkdir(parents=True)
-    (generator.directory / "chunk_scratch").mkdir()
-    (generator.directory / "chunk_001.log").write_text("x")
-    assert generator.next_index() == 2
 
 
 #: A record ``SDMolSupplier`` yields ``None`` for: a carbon carrying five single bonds, which fails
@@ -3781,156 +3319,18 @@ $$$$
 """
 
 
-def test_a_record_rdkit_yields_none_for_is_skipped_not_fatal(tmp_path) -> None:
-    """``SDMolSupplier`` returns ``None`` for a record it cannot sanitize, and keeps going."""
-
-    from rdkit import Chem
-
-    from etalon.campaign.generation import read_chunk
-
-    chunk = tmp_path / "flowr" / "chunk_001"
-    chunk.mkdir(parents=True)
-    (chunk / "manifest.json").write_text("{}")
-    writer = Chem.SDWriter(str(chunk / "good.sdf"))
-    writer.write(Chem.MolFromSmiles("CCO"))
-    writer.close()
-    (chunk / "candidates.sdf").write_text(
-        PENTAVALENT_RECORD + (chunk / "good.sdf").read_text(encoding="utf-8"), encoding="utf-8"
-    )
-
-    rows = read_chunk(chunk)
-    assert [row[1] for row in rows] == ["CCO"], "the unsanitizable record took the good one with it"
 
 
-def test_chunk_measurements_refuses_counts_it_cannot_pair(tmp_path) -> None:
-    """``Supervisor.productivity`` now reports a mismatch rather than reaching this, so it is the
-    guard behind that report: a silently mis-paired count would attribute one chunk's uniqueness to
-    another chunk's delivery."""
-
-    from etalon.campaign.generation import ChunkResult, chunk_measurements
-
-    generator = _generator(tmp_path)
-    results = [
-        ChunkResult(generator.tag, i, generator.chunk_path(i), 5000, 4800, 600.0, 0)
-        for i in (1, 2)
-    ]
-    with pytest.raises(ValueError, match="one uniqueness count per chunk result"):
-        chunk_measurements(generator, results, [4000])
 
 
-def test_a_molecule_rdkit_cannot_key_does_not_lose_the_chunk(tmp_path, monkeypatch) -> None:
-    """One unconvertible molecule costs that molecule, not the chunk's other 4,999."""
-
-    from rdkit import Chem
-
-    from etalon.campaign.generation import read_chunk
-
-    chunk = tmp_path / "flowr" / "chunk_001"
-    chunk.mkdir(parents=True)
-    (chunk / "manifest.json").write_text("{}")
-    writer = Chem.SDWriter(str(chunk / "candidates.sdf"))
-    for smiles in ("CCO", "c1ccccc1"):
-        writer.write(Chem.MolFromSmiles(smiles))
-    writer.close()
-
-    real = Chem.MolToInchiKey
-    calls = {"n": 0}
-
-    def flaky(molecule):
-        calls["n"] += 1
-        if calls["n"] == 1:
-            raise RuntimeError("InChI generation failed for this molecule")
-        return real(molecule)
-
-    monkeypatch.setattr(Chem, "MolToInchiKey", flaky)
-    rows = read_chunk(chunk)
-    assert len(rows) == 1, "the unconvertible molecule took the readable one with it"
-    assert rows[0][1] == "c1ccccc1"
 
 
-def test_a_generation_chunk_that_timed_out_is_barren_with_its_reason(tmp_path, monkeypatch) -> None:
-    """A timeout is data the loop reasons about, not an exception the supervisor has to survive."""
-
-    import subprocess as subprocess_module
-
-    from etalon.campaign.generation import PrismGeneration
-
-    generator = _generator(tmp_path)
-
-    def timed_out(*_a, **_k):
-        raise subprocess_module.TimeoutExpired(cmd="prism", timeout=7200)
-
-    monkeypatch.setattr(subprocess_module, "run", timed_out)
-    result = PrismGeneration(timeout=7200)(generator, 1)
-    assert result.barren == "timed out after 7200s"
-    assert result.returncode == -1
-    assert not result.usable
-    assert result.seed == generator.seed(1), "a chunk that produced nothing still records its seed"
 
 
-def test_prism_missing_from_the_path_is_a_barren_chunk_not_a_crash(tmp_path, monkeypatch) -> None:
-    """The commonest misconfiguration there is, and it must not end the campaign on tick one."""
-
-    import subprocess as subprocess_module
-
-    from etalon.campaign.generation import PrismGeneration
-
-    def missing(*_a, **_k):
-        raise FileNotFoundError(2, "No such file or directory: 'prism'")
-
-    monkeypatch.setattr(subprocess_module, "run", missing)
-    result = PrismGeneration()(_generator(tmp_path), 1)
-    assert result.barren is not None
-    assert "prism is not on PATH" in result.barren
-    assert not result.usable
 
 
-def test_a_manifest_that_will_not_parse_is_a_barren_chunk(tmp_path, monkeypatch) -> None:
-    """A chunk whose manifest is unreadable delivered nothing this process can account for."""
-
-    import subprocess as subprocess_module
-
-    from etalon.campaign.generation import PrismGeneration
-
-    generator = _generator(tmp_path)
-
-    def wrote_rubbish(*_a, **_k):
-        chunk = generator.chunk_path(1)
-        chunk.mkdir(parents=True, exist_ok=True)
-        (chunk / "manifest.json").write_text("{not json", encoding="utf-8")
-        return SimpleNamespace(returncode=0)
-
-    monkeypatch.setattr(subprocess_module, "run", wrote_rubbish)
-    result = PrismGeneration()(generator, 1)
-    assert result.delivered == 0
-    assert result.barren == "no manifest, or a manifest reporting no candidates"
 
 
-def test_a_finished_chunk_reports_what_its_manifest_says(tmp_path, monkeypatch) -> None:
-    """The counterpart, so the three barren shapes above are not the only path exercised."""
-
-    import json as json_module
-    import subprocess as subprocess_module
-
-    from etalon.campaign.generation import PrismGeneration
-
-    generator = _generator(tmp_path)
-
-    def wrote_a_chunk(argv, **_kwargs):
-        assert "--seed" in argv and str(generator.seed(1)) in argv
-        chunk = generator.chunk_path(1)
-        chunk.mkdir(parents=True, exist_ok=True)
-        (chunk / "manifest.json").write_text(
-            json_module.dumps({"candidate_count": 4821}), encoding="utf-8"
-        )
-        return SimpleNamespace(returncode=0)
-
-    monkeypatch.setattr(subprocess_module, "run", wrote_a_chunk)
-    result = PrismGeneration()(generator, 1)
-    assert result.delivered == 4821
-    assert result.barren is None
-    assert result.usable
-    assert result.as_dict()["seed"] == generator.seed(1)
 
 
 def _generator(tmp_path):
@@ -4622,262 +4022,24 @@ def test_a_batch_is_not_resumed_before_it_exists(tmp_path) -> None:
 # prints anything about it.
 
 
-@pytest.mark.parametrize("status", ["RUNNING", "QUEUED", ""])
-def test_an_unfinished_run_record_is_not_returned_as_a_batch_result(tmp_path, monkeypatch, status) -> None:
-    """The process driver reads the record after a subprocess that may have been killed."""
 
-    import subprocess as subprocess_module
 
-    from etalon.campaign.drivers import MolCascadeProcessScreening
 
-    record = ScreenResult(
-        "batch_0001", "rev-1", status, (stage("source", "SUCCEEDED", artifact="a"),)
-    )
 
-    def fake_run(argv, **_kwargs):
-        if "--dry-run" in argv:
-            return SimpleNamespace(returncode=0, stdout='{"revision_id": "rev-1"}', stderr="")
-        # 137 is what the OOM killer leaves behind, and the run record stays where it was.
-        return SimpleNamespace(returncode=137, stdout="", stderr="Killed")
 
-    monkeypatch.setattr(subprocess_module, "run", fake_run)
 
-    driver = MolCascadeProcessScreening(
-        screen=SimpleNamespace(state=lambda run_id: record),
-        config_path=tmp_path / "c.json",
-        workspace=tmp_path / "ws",
-        revision_id="rev-1",
-        target_args=(),
-        reference_library=tmp_path / "panel.csv",
-    )
-    with pytest.raises(RuntimeError, match="not a terminal state"):
-        driver("batch_0001", tmp_path / "b.csv", "cuda:0")
 
 
-@pytest.mark.parametrize("status", ["SUCCEEDED", "FAILED"])
-def test_a_finished_run_is_returned_whichever_way_it_finished(tmp_path, monkeypatch, status) -> None:
-    """``FAILED`` is terminal, and an exhausted batch is a ``FAILED`` run that is a measurement."""
 
-    import subprocess as subprocess_module
 
-    from etalon.campaign.drivers import MolCascadeProcessScreening
 
-    record = ScreenResult(
-        "batch_0001", "per-library-digest", status,
-        (stage("docking", "SUCCEEDED", artifact="a"),),
-    )
 
-    def fake_run(argv, **_kwargs):
-        if "--dry-run" in argv:
-            return SimpleNamespace(returncode=0, stdout='{"revision_id": "rev-1"}', stderr="")
-        return SimpleNamespace(returncode=1, stdout="", stderr="")
 
-    monkeypatch.setattr(subprocess_module, "run", fake_run)
 
-    driver = MolCascadeProcessScreening(
-        screen=SimpleNamespace(state=lambda run_id: record),
-        config_path=tmp_path / "c.json",
-        workspace=tmp_path / "ws",
-        revision_id="rev-1",
-        target_args=(),
-        reference_library=tmp_path / "panel.csv",
-    )
-    result = driver("batch_0001", tmp_path / "b.csv", "cuda:0")
-    assert result.status == status
-    assert result.revision_id == "rev-1", "the funnel revision, not the per-library digest"
 
 
-def test_the_in_process_driver_also_refuses_an_unfinished_run(tmp_path) -> None:
-    """One fix in each driver, because the fault is in each driver. It has been so twice before."""
 
-    from etalon.campaign.drivers import MolCascadeScreening
 
-    class Runs:
-        def plan(self, _config, _library, target=None):
-            return SimpleNamespace(revision_id="rev-1")
-
-        def state(self, _run_id):
-            return None
-
-        def run(self, _plan, *, run_id, resume, workers, devices):
-            return ScreenResult(run_id, "rev-1", "RUNNING", ())
-
-    driver = MolCascadeScreening(
-        screen=Runs(), config_path=tmp_path / "c.json", revision_id="rev-1"
-    )
-    with pytest.raises(RuntimeError, match="not a terminal state"):
-        driver("batch_0001", tmp_path / "b.csv", "cuda:0")
-
-
-def test_terminal_is_defined_once_and_progress_reads_it(tmp_path) -> None:
-    """`progress`'s `terminal` key had the set inline while the drivers had no notion of it."""
-
-    from etalon.boundary.screen import TERMINAL_RUN_STATUSES
-
-    assert set(TERMINAL_RUN_STATUSES) == {"SUCCEEDED", "FAILED"}
-    assert ScreenResult("r", "rev", "SUCCEEDED", ()).terminal
-    assert ScreenResult("r", "rev", "FAILED", ()).terminal
-    assert not ScreenResult("r", "rev", "RUNNING", ()).terminal
-
-    from etalon.boundary.screen import Screen
-
-    def reading(record):
-        class OneRun(Screen):
-            def __init__(self) -> None:  # noqa: D107 -- no workspace is touched
-                pass
-
-            def state(self, run_id: str):  # noqa: ARG002
-                return record
-
-        return OneRun().progress("r")
-
-    assert reading(ScreenResult("r", "rev", "RUNNING", (stage("s", "RUNNING"),)))["terminal"] is False
-    assert reading(ScreenResult("r", "rev", "FAILED", (stage("s", "FAILED", code="X"),)))["terminal"] is True
-
-
-def _process_driver(tmp_path, screen):
-    from etalon.campaign.drivers import MolCascadeProcessScreening
-
-    return MolCascadeProcessScreening(
-        screen=screen,
-        config_path=tmp_path / "c.json",
-        workspace=tmp_path / "ws",
-        revision_id="rev-1",
-        target_args=(),
-        reference_library=tmp_path / "panel.csv",
-    )
-
-
-def test_a_cascade_that_will_not_compile_is_refused_before_the_batch_runs(tmp_path, monkeypatch) -> None:
-    """The identity probe is the cheap refusal, and a non-zero probe is a cascade that is broken.
-
-    Refused as a revision problem rather than reported as a screen failure, because the batch has
-    not been screened: nothing was spent and nothing is recorded, so the campaign can be fixed and
-    the batch re-offered.
-    """
-
-    import subprocess as subprocess_module
-
-    from etalon.campaign.drivers import RevisionChanged
-
-    monkeypatch.setattr(
-        subprocess_module,
-        "run",
-        lambda *_a, **_k: SimpleNamespace(
-            returncode=2, stdout="", stderr="ConfigError: unknown field 'cutof'"
-        ),
-    )
-    driver = _process_driver(tmp_path, SimpleNamespace(state=lambda _r: None))
-    with pytest.raises(RevisionChanged, match="would not compile"):
-        driver("batch_0001", tmp_path / "b.csv", "cuda:0")
-
-
-def test_a_configuration_edited_mid_campaign_is_refused_by_the_process_driver(tmp_path, monkeypatch) -> None:
-    """The check exists to catch an edited cascade at the first batch it would make incomparable.
-
-    The alternative is finding out at harvest time, when 56 batches carry two revisions and nothing
-    says which molecules went through which funnel.
-    """
-
-    import subprocess as subprocess_module
-
-    from etalon.campaign.drivers import RevisionChanged
-
-    monkeypatch.setattr(
-        subprocess_module,
-        "run",
-        lambda *_a, **_k: SimpleNamespace(
-            returncode=0, stdout='{"revision_id": "rev-2-after-an-edit"}', stderr=""
-        ),
-    )
-    driver = _process_driver(tmp_path, SimpleNamespace(state=lambda _r: None))
-    with pytest.raises(RevisionChanged, match="now compiles to"):
-        driver("batch_0001", tmp_path / "b.csv", "cuda:0")
-
-
-def test_a_screen_that_left_no_run_record_is_not_a_result(tmp_path, monkeypatch) -> None:
-    """No record at all is the other half of the terminal check: there is nothing to read."""
-
-    import subprocess as subprocess_module
-
-    def fake_run(argv, **_kwargs):
-        if "--dry-run" in argv:
-            return SimpleNamespace(returncode=0, stdout='{"revision_id": "rev-1"}', stderr="")
-        return SimpleNamespace(returncode=1, stdout="", stderr="ImportError: no module named torch")
-
-    monkeypatch.setattr(subprocess_module, "run", fake_run)
-    driver = _process_driver(tmp_path, SimpleNamespace(state=lambda _r: None))
-    with pytest.raises(RuntimeError, match="left no run record"):
-        driver("batch_0001", tmp_path / "b.csv", "cuda:0")
-
-
-def test_the_in_process_driver_returns_a_result_unchanged_without_a_reference_library(tmp_path) -> None:
-    """The plain path, which no test entered: no reference library, so no digest to rewrite."""
-
-    from etalon.campaign.drivers import MolCascadeScreening
-
-    class Runs:
-        def __init__(self) -> None:
-            self.resumed: list[bool] = []
-
-        def plan(self, _config, _library, target=None):  # noqa: ARG002
-            return SimpleNamespace(revision_id="rev-1")
-
-        def state(self, _run_id):
-            return None
-
-        def run(self, _plan, *, run_id, resume, workers, devices):  # noqa: ARG002
-            self.resumed.append(resume)
-            return ScreenResult(
-                run_id, "rev-1", "SUCCEEDED", (stage("shortlist", "SUCCEEDED", artifact="a"),)
-            )
-
-    runs = Runs()
-    driver = MolCascadeScreening(screen=runs, config_path=tmp_path / "c.json", revision_id="rev-1")
-    result = driver("batch_0001", tmp_path / "b.csv", "cuda:0")
-    assert result.revision_id == "rev-1"
-    assert result.run_id == "batch_0001"
-    assert runs.resumed == [False], "a batch with no run record must not be resumed"
-
-
-def test_the_in_process_driver_reports_the_funnel_not_the_per_library_digest(tmp_path) -> None:
-    """A compiled revision covers the library, so a run's own digest differs for every batch.
-
-    The sweep asks two questions of a recorded revision and both are about the funnel: does it match
-    what the batch was carved under, and do all recorded batches share one. Under the per-library
-    digest the first refuses every batch and the second makes ``comparable`` false for any campaign
-    with more than one batch, which is every campaign. Measured: five batches of one ALK2 campaign
-    compiled to five digests from one unchanged config file.
-    """
-
-    from etalon.campaign.drivers import MolCascadeScreening
-
-    reference = tmp_path / "panel.csv"
-
-    class Runs:
-        def plan(self, _config, library, target=None):  # noqa: ARG002
-            return SimpleNamespace(
-                revision_id="rev-1" if library == reference else "digest-of-this-batch"
-            )
-
-        def state(self, _run_id):
-            return None
-
-        def run(self, _plan, *, run_id, resume, workers, devices):  # noqa: ARG002
-            return ScreenResult(
-                run_id, "digest-of-this-batch", "SUCCEEDED",
-                (stage("shortlist", "SUCCEEDED", artifact="a"),),
-            )
-
-    driver = MolCascadeScreening(
-        screen=Runs(),
-        config_path=tmp_path / "c.json",
-        revision_id="rev-1",
-        reference_library=reference,
-    )
-    result = driver("batch_0001", tmp_path / "b.csv", "cuda:0")
-    assert result.revision_id == "rev-1", "the per-library digest was reported as the funnel"
-    assert result.status == "SUCCEEDED"
 
 
 # -- a run record that exists is not the same as a screen that finished ------
@@ -4996,7 +4158,7 @@ def test_terminal_is_defined_once_and_progress_reads_it(tmp_path) -> None:
     def reading(record):
         class OneRun(Screen):
             def __init__(self) -> None:  # noqa: D107 -- no workspace is touched
-                pass
+                self.workspace = tmp_path
 
             def state(self, run_id: str):  # noqa: ARG002
                 return record
@@ -5201,7 +4363,7 @@ def test_progress_counts_a_cached_stage_as_reached(tmp_path) -> None:
 
     class OneRun(Screen):
         def __init__(self) -> None:  # noqa: D107 -- no workspace is touched
-            pass
+            self.workspace = tmp_path
 
         def state(self, run_id: str):  # noqa: ARG002
             return result

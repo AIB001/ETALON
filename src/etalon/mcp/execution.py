@@ -12,12 +12,15 @@ def register(mcp: Any) -> None:
     @tool(Cost.CHEAP)
     def etalon_screen_prepare_continuation(workspace: str, completed_run: str,
                                            next_config: str, output_dir: str,
-                                           docking_backend: str = "") -> str:
+                                           docking_backend: str = "", through_stage: str | None = None) -> str:
         """CHEAP. Prepare a typed parent/conformer handoff; never launch or stop a job.
 
         The requested cascade keeps its chosen docking backend by default. An
         optional explicit Uni-Dock version is a caller decision, not an automatic
         optimization. Incompatible preparation is reported for the host to decide.
+        through_stage explicitly selects a fully committed preparation prefix,
+        even while later stages run. Receptor branches can share that prefix;
+        omitting it retains the completed-run final-selection behavior.
         """
         from etalon.screening_handoff import prepare_screen_continuation
 
@@ -25,7 +28,7 @@ def register(mcp: Any) -> None:
             absolute_path(workspace, label="workspace"), completed_run,
             absolute_path(next_config, label="next_config"),
             absolute_path(output_dir, label="output_dir"),
-            docking_backend=docking_backend or None))
+            docking_backend=docking_backend or None, through_stage=through_stage))
 
     @mcp.tool()
     @tool(Cost.CHEAP)

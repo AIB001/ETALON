@@ -85,24 +85,8 @@ def make_task_profile(*, task_id, question, conditions, critical_conditions, ava
         conditions=conditions, critical_conditions=critical_conditions, available_stages=available_stages, **extra))
 
 
-def describe_resource(*, resource_id, kind, content_ref, summary, parts,
-                      support_refs=(), counter_refs=(), visibility="research"):
-    """Describe declared applicability; inferred conditions belong in review evidence.
-
-    Parts name exact skill members when kind=skill. dependencies use resource/part
-    keys, e.g. {resource_id: 'geometry', part_id: 'parser'}. No wildcard scope.
-    """
-    _text(resource_id); _text(summary)
-    if kind not in KINDS or visibility not in {"research", "evaluation_only"}:
-        raise EvidenceError("unknown resource kind or visibility")
-    if kind == "skill":
-        if set(content_ref) - {"slug", "manifest_sha256", "bundle_ref"} or not {"slug", "manifest_sha256"} <= set(content_ref):
-            raise EvidenceError("skill needs exact slug and manifest identity")
-        _text(content_ref["slug"])
-        if len(content_ref["manifest_sha256"]) != 64:
-            raise EvidenceError("skill needs a manifest hash")
-    else:
-        validate_ref(content_ref)
+def validate_resource_parts(parts):
+    """Validate the shared declaration contract, without publishing or reviewing."""
     if not isinstance(parts, list) or not 1 <= len(parts) <= 32:
         raise EvidenceError("resource requires 1..32 explicit parts")
     ids = set()
@@ -128,6 +112,28 @@ def describe_resource(*, resource_id, kind, content_ref, summary, parts,
             raise EvidenceError("dependencies must be explicit")
         for dep in part["dependencies"]:
             _key(dep)
+    return parts
+
+
+def describe_resource(*, resource_id, kind, content_ref, summary, parts,
+                      support_refs=(), counter_refs=(), visibility="research"):
+    """Describe declared applicability; inferred conditions belong in review evidence.
+
+    Parts name exact skill members when kind=skill. dependencies use resource/part
+    keys, e.g. {resource_id: 'geometry', part_id: 'parser'}. No wildcard scope.
+    """
+    _text(resource_id); _text(summary)
+    if kind not in KINDS or visibility not in {"research", "evaluation_only"}:
+        raise EvidenceError("unknown resource kind or visibility")
+    if kind == "skill":
+        if set(content_ref) - {"slug", "manifest_sha256", "bundle_ref"} or not {"slug", "manifest_sha256"} <= set(content_ref):
+            raise EvidenceError("skill needs exact slug and manifest identity")
+        _text(content_ref["slug"])
+        if len(content_ref["manifest_sha256"]) != 64:
+            raise EvidenceError("skill needs a manifest hash")
+    else:
+        validate_ref(content_ref)
+    validate_resource_parts(parts)
     refs = [[validate_ref(r) for r in values] for values in (support_refs, counter_refs)]
     return _seal(dict(schema=RESOURCE, resource_id=resource_id, kind=kind, content_ref=content_ref,
         summary=summary, parts=parts, support_refs=refs[0], counter_refs=refs[1], visibility=visibility))
@@ -261,6 +267,33 @@ def _index_check(index):
         ids.add(resource["resource_id"])
 
 
+def compare_part_conditions(profile, part):
+    """Compare declared dimensions only; omitted meanings and stages stay unknown.
+
+    Shared by optional catalog queries and the explicit workset workflow. This
+    does not require target equality: a portable part can mark it irrelevant.
+    """
+    checks = {}
+    conditions = part.get("conditions") or {}
+    irrelevant = part.get("irrelevant", [])
+    keys = set(profile.get("critical_conditions", [])) | set(part.get("requires", [])) | set(conditions)
+    for key in sorted(keys):
+        actual, expected = profile.get("conditions", {}).get(key), conditions.get(key)
+        checks[key] = ("not_applicable" if key in irrelevant else
+            "unknown" if actual is None or expected is None else "match" if actual == expected else "conflict")
+    stage, available = part.get("available_at"), profile.get("available_stages")
+    checks["available_at"] = ("unknown" if stage is None or available is None else
+        "match" if stage in available else "conflict")
+    wanted, declared = profile.get("definitions", {}), part.get("definitions", {})
+    for key in sorted(set(wanted) | set(declared)):
+        name = "definition:" + key
+        actual, expected = wanted.get(key), declared.get(key)
+        checks[name] = ("not_applicable" if name in irrelevant else
+            "unknown" if actual is None or expected is None else
+            "match" if actual == expected else "conflict")
+    return checks
+
+
 def prepare_adaptation_context(profile, index):
     """Mechanical condition checks, not scientific applicability inference."""
     _check(profile, PROFILE); _index_check(index)
@@ -269,23 +302,7 @@ def prepare_adaptation_context(profile, index):
     candidates = []
     for resource in index["resources"]:
         for part in resource["parts"]:
-            checks = {}
-            keys = set(profile["critical_conditions"]) | set(part["requires"]) | set(part["conditions"])
-            for key in sorted(keys):
-                actual, expected = profile["conditions"].get(key), part["conditions"].get(key)
-                checks[key] = ("not_applicable" if key in part["irrelevant"] else
-                    "unknown" if actual is None or expected is None else "match" if actual == expected else "conflict")
-            checks["available_at"] = "match" if part["available_at"] in profile["available_stages"] else "conflict"
-            # A matching dataset/task name never establishes matching meanings.
-            # Portable parts may explicitly mark definition:<name> irrelevant;
-            # old descriptors with no declaration remain unknown, not portable.
-            wanted, declared = profile.get("definitions", {}), part.get("definitions", {})
-            for key in sorted(set(wanted) | set(declared)):
-                name = "definition:" + key
-                actual, expected = wanted.get(key), declared.get(key)
-                checks[name] = ("not_applicable" if name in part["irrelevant"] else
-                    "unknown" if actual is None or expected is None else
-                    "match" if actual == expected else "conflict")
+            checks = compare_part_conditions(profile, part)
             status = "conflict" if "conflict" in checks.values() else "unknown" if "unknown" in checks.values() else "match"
             candidates.append(dict(resource_id=resource["resource_id"], part_id=part["part_id"],
                 applicability=status, checks=checks))

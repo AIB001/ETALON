@@ -5,7 +5,8 @@ import json
 from pathlib import Path
 
 
-def prepare_screen_continuation(workspace, completed_run, next_config, output_dir, *, docking_backend=None):
+def prepare_screen_continuation(workspace, completed_run, next_config, output_dir, *,
+                                docking_backend=None, through_stage=None):
     from etalon.boundary.infra import load
     load('molcascade')
     import pyarrow.parquet as pq
@@ -21,11 +22,19 @@ def prepare_screen_continuation(workspace, completed_run, next_config, output_di
     if Path(completed_run).name != completed_run or completed_run in {'.','..'}:
         raise ValueError('completed_run must be one run identifier')
     state = json.loads((workspace/'runs'/f'{completed_run}.json').read_text())
-    if state['status'] != 'SUCCEEDED':
+    if through_stage is None and state['status'] != 'SUCCEEDED':
         raise ValueError('upstream run has not succeeded; keep its existing handle and wait')
+    stages = state['stages']
+    if through_stage is not None:
+        matches = [i for i,s in enumerate(stages) if s['stage_id'] == through_stage]
+        if len(matches) != 1:
+            raise ValueError('through_stage must identify one committed stage')
+        stages = stages[:matches[0]+1]
+        if any(s['status'] not in {'SUCCEEDED','CACHED'} or not s.get('output_ref') for s in stages):
+            raise ValueError('requested preparation prefix is not completely committed')
     store = LocalArtifactStore(workspace, create=False)
     def artifact(prefixes):
-        matches = [s for s in state['stages'] if s['plugin_key'].split('@')[0] in prefixes
+        matches = [s for s in stages if s['plugin_key'].split('@')[0] in prefixes
                    and s['status'] in {'SUCCEEDED','CACHED'} and s.get('output_ref')]
         if not matches:
             raise ValueError(f'completed run has no compatible stage for {prefixes}')
@@ -34,7 +43,8 @@ def prepare_screen_continuation(workspace, completed_run, next_config, output_di
     geometry = artifact({'docking.rdkit_conformers','docking.registered_conformers'})
     registered = store.verify(registration)
     prepared = store.verify(geometry)
-    final = store.verify(state['output_ref']['artifact_id'])
+    selection_ref = stages[-1]['output_ref'] if through_stage is not None else state['output_ref']
+    final = store.verify(selection_ref['artifact_id'])
     outputs = [o for o in final.outputs if o.contract_id=='parent/v1']
     if len(outputs) != 1:
         raise ValueError('completed result must expose one typed parent selection')
@@ -91,6 +101,7 @@ def prepare_screen_continuation(workspace, completed_run, next_config, output_di
     target=output_dir/'cascade.json'
     write_once(target,(json.dumps(config,indent=2)+'\n').encode())
     return {'config':str(target),'library':str(workspace),'completed_run':completed_run,
+        'through_stage':through_stage,'selection_artifact':final.artifact_id,
         'selected_parent_count':len(ids),'registration_artifact':registration,
         'geometry_artifact':geometry,'docking_backend_override':docking_backend,'status':'prepared_not_started',
         'note':'new docking poses still require their configured checks; current jobs untouched'}

@@ -142,8 +142,8 @@ def install(target, *, research_entry, host="codex", hook_transport="mcp_tool", 
         if selected_skills is None:
             selected_skills = old.get("selected_skills")
         else:
-            previous = adapter.skills._selection(old.get("selected_skills"), adapter.skills.WORKFLOWS, "selected_skills")
-            selected = adapter.skills._selection(selected_skills, adapter.skills.WORKFLOWS, "selected_skills")
+            previous = adapter.skills.select_skills(old.get("selected_skills"), "selected_skills")
+            selected = adapter.skills.select_skills(selected_skills, "selected_skills")
             if not set(previous) <= set(selected):
                 raise ValueError("install cannot remove selected skills; export a new adapter version")
         workset = None

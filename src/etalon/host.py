@@ -127,7 +127,7 @@ def _payload(host: str, research_hooks: dict | None = None, task_workset: dict |
         raise ValueError("choose task_workset or selected_skills, not both")
     if task_workset is None:
         selection = [{"slug": slug} for slug in
-                     skills._selection(selected_skills, skills.WORKFLOWS, "selected_skills")]
+                     skills.select_skills(selected_skills, "selected_skills")]
     else:
         from etalon.research.meta_context import selected_skill_members
         task_workspace = None
@@ -417,6 +417,12 @@ def install(target, *, research_entry, host="codex", hook_transport="mcp_tool", 
                 selected_skills=selected_skills)
 
 
+def install_skills(target, *, selected_skills):
+    """Sync only selected native Codex skills into an existing project."""
+    from etalon.host_skills import install as sync
+    return sync(target, selected_skills=selected_skills)
+
+
 def doctor(target):
     """Inspect portable runtime bindings without claiming host trust or delivery."""
     from etalon.host_install import doctor as inspect
@@ -447,6 +453,10 @@ def main() -> int:
     setup.add_argument("--hook-transport", choices=("command", "mcp_tool"), default="mcp_tool")
     setup.add_argument("--skills", nargs="*", default=None,
                        help="selected skills plus required dependencies; rebind preserves the saved selection")
+    native = sub.add_parser("skills-install", help="sync selected Codex skills; preserve project instructions and MCP settings")
+    native.add_argument("--target", type=Path, required=True)
+    native.add_argument("--skills", nargs="+", required=True,
+                        help="explicit skill slugs plus their declared dependencies")
     diagnose = sub.add_parser("doctor", help="check bindings; native trust/delivery remain separate")
     diagnose.add_argument("--target", type=Path, required=True)
     check = sub.add_parser("verify", help="check an export for changed, missing or added files")
@@ -462,6 +472,8 @@ def main() -> int:
         elif args.command == "install":
             report = install(args.target, host=args.host, research_entry=args.research_entry,
                              hook_transport=args.hook_transport, selected_skills=args.skills)
+        elif args.command == "skills-install":
+            report = install_skills(args.target, selected_skills=args.skills)
         elif args.command == "doctor":
             report = doctor(args.target)
         else:

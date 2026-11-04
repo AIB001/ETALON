@@ -20,6 +20,13 @@ unchanged. Missing telemetry calls for a bounded system sample, not perpetual po
 Use a native background notification/handle for the next observation and successor;
 do not wait for the whole million-row stage to finish before noticing serial work.
 
+The skill's installed name is `etalon-execution-tuning`; its MCP slug is
+`execution-tuning`. Both select the same version through `etalon_skill_read`.
+When the feedback supplies a decision_key, retain that key with the hypothesis,
+chosen adjustment or no-change, complete-cost comparison and pending handle.
+This makes the next chat reuse the decision, without treating the hint as an
+automatic proposal, required optimization, or permission to interrupt work.
+
 Preserve typed intermediate artifacts at stage handoffs. For registered parents,
 use `source.registered_parents` with `artifact_id`, optional `selection_path` and
 `selection_sha256` (CSV/TSV/Parquet `parent_id`), and `standardize: null` in a cascade.
@@ -32,7 +39,7 @@ by incoming parent ID and verifies the complete parent rows and method/toolkit
 identity. Missing outcomes or method differences require an explicit new decision;
 stored `EMBED_FAILED`/`MINIMIZE_FAILED` outcomes are retained, not silently retried.
 
-At a completed cascade boundary, use
+At a completed cascade boundary, or an explicitly selected committed prefix, use
 [prepare_screen_continuation.py](scripts/prepare_screen_continuation.py) with
 `--workspace`, `--completed-run`, `--next-config`, `--output-dir`, or call
 `etalon_screen_prepare_continuation`. It prepares the existing cascade interfaces

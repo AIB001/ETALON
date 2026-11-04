@@ -42,6 +42,18 @@ required environment and ready argv when they affect execution; keep full runtim
 manifests behind a pin. Placeholders that require another source search are not
 a runnable handoff. Link the completed result separately so continuation can read
 it without calling the method again.
+
+For an executable saved as a resource, the optional MCP `etalon_method_call`
+combines resolve, submit and handle recording. Pass `entry`, its resource
+`pointer`, the action `workspace`, and an `invocation` with a stable `request_id`
+and resource `limits`; add input overrides as needed. It returns an
+`invocation_path`. Later `etalon_method_collect(invocation_path)` reads the same
+execution and records its outputs/costs; retrying collection never starts a new
+calculation. The SDK equivalents are `saved_methods.call_saved_method` and
+`saved_methods.collect_saved_method`. Direct resolve/prepare/submit remain useful
+when the host wants to arrange the steps itself. Automatic records hold execution
+facts, leaving scientific interpretation and the next action to the host.
+
 For numeric analysis, use `notes.open_original` in one Python batch: it verifies
 the file and caches selected NPZ members for repeated array access. Feed arrays
 to the calculation and return differences, decisions and exceptions; leave full

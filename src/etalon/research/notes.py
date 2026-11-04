@@ -15,6 +15,8 @@ from etalon.runtime.files import file_identity, _save, _read, _consumer_lock
 from .journal import ResearchJournal
 from .schema import Artifact
 from .selection import MISSING, byte_size, children, pointer as _pointer, resolve
+from .note_resources import (ResourceCollection, expand_resources as _expand_resources,
+                             merge_resources, store_resources)
 
 SCHEMA = "etalon-research-note/1"
 ENTRY = "etalon-note-entry/1"
@@ -41,6 +43,8 @@ def _children(value, pointer):
 
 def _descriptor(pointer, value):
     row = {"pointer": pointer, "kind": type(value).__name__}
+    if isinstance(value, ResourceCollection):
+        return {"pointer": pointer, "kind": "dict", "items": len(value)}
     if isinstance(value, (list, dict)):
         row["items"] = len(value)
     title = next((value[k] for k in ("title", "name", "key", "question", "rule", "statement", "lesson")
@@ -108,7 +112,7 @@ def _selective_note(response, note, *, view, selectors, offset, limit, max_bytes
     response["coverage"] = {"knowledge": "partial", "note_identity": "verified",
         "originals": "verified" if response["originals_verified"] is not None else "not_read",
         "support_count": len(note.get("evidence", [])), "counter_count": len(note.get("counterevidence", [])),
-        "scope": "explicit fields/items in this pinned note; no relevance ranking or archive coverage"}
+        "scope": "selected fields of this pinned note"}
     response["followup"] = {"entry": "details", "sdk": "etalon.research.notes.read_entry",
         "select": _read_recipe("selected", selectors=["/question", "/summary"]),
         "counterevidence": _read_recipe("selected", selectors=["/counterevidence"])
@@ -234,10 +238,17 @@ def _selective_note(response, note, *, view, selectors, offset, limit, max_bytes
             row = {"pointer": pointer}
             response["selected"].append(row)
             if isinstance(value, (dict, list)):
-                children = _children(value, pointer)
-                row.update(kind=type(value).__name__, offset=offset, total_items=len(children), items=[])
+                if isinstance(value, ResourceCollection):
+                    total = len(value)
+                    selected_children = value.page(pointer, offset, limit)
+                else:
+                    children = _children(value, pointer)
+                    total = len(children)
+                    selected_children = children[offset:offset + limit]
+                row.update(kind="dict" if isinstance(value, ResourceCollection) else type(value).__name__,
+                           offset=offset, total_items=total, items=[])
                 collection_page(row)
-                for child, body in children[offset:offset + limit]:
+                for child, body in selected_children:
                     row["items"].append({"pointer": child, "value": body})
                     collection_page(row)
                     if not fits() and not fits_on_fresh_page(row, row["items"][-1]):
@@ -274,7 +285,7 @@ def _brief_note(response, note, *, max_bytes, response_envelope=None):
     response.update(view="brief", knowledge={})
     keys = ("question", "summary", "conditions", "status", "state", "outcome", "limits",
         "invalid_when", "reconsider_when", "residuals", "lesson", "knowledge", "decision",
-        "next_action", "completed_refs", "completed", "wait_for", "capability_id", "method_choices", "result_read", "scientific_result", "feedback", "shared_entry")
+        "next_action", "completed_refs", "completed", "wait_for", "capability_id", "method_choices", "result_read", "scientific_result", "feedback", "shared_entry", "advisories", "advice_request", "advice_report", "advice_feedback")
     pending = [k for k in keys if k in note]
     response["coverage"] = {"knowledge": "partial", "note_identity": "verified",
         "originals": "verified" if response["originals_verified"] is not None else "not_read",
@@ -319,7 +330,7 @@ def _brief_note(response, note, *, max_bytes, response_envelope=None):
                 pending.append(key)
                 update()
 
-    deferred = {"knowledge", "scientific_result", "result_read", "method_choices", "feedback"}
+    deferred = {"knowledge", "scientific_result", "result_read", "method_choices", "feedback", "advisories", "advice_request", "advice_report", "advice_feedback"}
     offer([key for key in pending if key not in deferred])
     for key, page in response["references"].items():
         for index, ref in enumerate(note[key]):
@@ -344,10 +355,25 @@ def original(path):
     return {"path": str(path), "identity": file_identity(path)}
 
 
+def entry_evidence_paths(entry, paths):
+    """Resolve new evidence file arguments beside the caller's entry/locator.
+
+    Do not follow a locator here: CURRENT.json's directory is the caller's
+    workspace, even when its journal lives in a nested handoff directory.
+    This helper does not visit note/resource dictionaries or existing pins.
+    """
+    base = Path(entry).absolute().parent
+    paths = list(paths)
+    if any(not isinstance(path, (str, Path)) for path in paths):
+        raise ValueError("evidence/counterevidence arguments require file paths, not original references")
+    return [path if Path(path).is_absolute() else str(base / path) for path in paths]
+
+
 def _original_selection(entry, pointer, branch_id):
     # Read only the immutable note, never every cited support/counter original.
     value = entry_value(entry)
-    result = read_entry(value, branch_id=branch_id, verify_originals=False)
+    result = read_entry(value, branch_id=branch_id, verify_originals=False, expand_resources=False)
+    result["note"] = _expand_resources(entry_journal(value), result["note"], lazy=True)
     pin = {k: value[k] for k in ("schema", "database", "task_id", "workspace", "source_id",
                                  "definitions", "definitions_digest", "memory_scope") if k in value}
     result["details"] = {**pin, "branch_id": result["branch_id"], "record_id": result["record_id"]}
@@ -403,9 +429,41 @@ def resolve_method(entry, pointer, *, branch_id=None, max_bytes=16384):
     return output
 
 
+def original_refs(note):
+    """Known original references, including executable resource dependencies."""
+    yield from note.get("evidence", [])
+    yield from note.get("counterevidence", [])
+    for resource in note.get("resources", {}).values():
+        if isinstance(resource, dict) and resource.get("kind") == "method":
+            for ref in [resource.get("source"), *resource.get("sources", [])]:
+                if isinstance(ref, dict) and {"path", "identity"} <= ref.keys():
+                    yield ref
+        if isinstance(resource, dict) and resource.get("form") == "resource-feedback":
+            # Feedback receipts are explicit evidence holders. Do not scan
+            # arbitrary descriptor data or duplicate receipts into every note.
+            receipts = [resource.get("last_receipt")]
+            cases = resource.get("cases", {})
+            if isinstance(cases, dict):
+                for case in cases.values():
+                    if isinstance(case, dict):
+                        outcomes = case.get("latest_outcomes", {})
+                        if isinstance(outcomes, dict):
+                            receipts.extend(outcomes.values())
+                        elif isinstance(outcomes, list):
+                            receipts.extend(outcomes)
+            for receipt in receipts:
+                if isinstance(receipt, dict):
+                    for role in ("evidence", "counterevidence"):
+                        for ref in receipt.get(role, []):
+                            if isinstance(ref, dict) and {"path", "identity"} <= ref.keys():
+                                yield ref
+
+
 def _verify(note, resolver=None):
     # Different annotations of the same source do not require another full read.
     seen = set()
+    # Catalog methods may include large weights. Verify their files when selected
+    # for invocation or exported, not on every unrelated progress publication.
     for ref in [*note.get("evidence", []), *note.get("counterevidence", [])]:
         path = str(Path(ref["path"]).resolve()) if resolver is None else ref["path"]
         key = (id(resolver), path, canonical(ref["identity"]))
@@ -474,18 +532,23 @@ def record_note(journal, note, directory, *, source_kind="existing_real_artifact
     _verify(note, journal.resolver)
     supersedes = tuple(note.get("supersedes", []))
     for rid in supersedes:
-        old = read_note(journal, rid, verify_originals=False)["note"]
+        old = read_note(journal, rid, verify_originals=False, expand_resources=False)["note"]
         if (old["task_id"], old["branch_id"], old.get("memory_scope", SHARED_SCOPE)) != (
                 note["task_id"], note["branch_id"], scope):
             raise ValueError("a note may supersede only its own task branch")
+    note = store_resources(journal, note, directory)
+    parents = (*supersedes, *([note["resources_ref"]["record_id"]] if "resources_ref" in note else []))
     path = Path(directory).absolute() / (digest(note) + ".json")
     _save(path, note)
     bindings = {k: note[k] for k in ("schema", "task_id", "branch_id", "capability_id", "publication_id", "memory_scope") if k in note}
+    bindings["note_lookup"] = {"conditions": note.get("conditions", {}),
+                               "definitions": note.get("definitions", {}),
+                               "supersedes": list(supersedes)}
     return journal.record(Artifact(str(path), **file_identity(path), source_kind=source_kind,
-                                   role="diagnostic", bindings=bindings, parents=supersedes))
+                                   role="diagnostic", bindings=bindings, parents=parents))
 
 
-def read_note(journal, record_id, *, verify_originals=True):
+def read_note(journal, record_id, *, verify_originals=True, expand_resources=True):
     record = journal.get(record_id)
     if record.get("bindings", {}).get("schema") != SCHEMA or record.get("role") != "diagnostic":
         raise ValueError("explicit diagnostic research note required")
@@ -494,12 +557,14 @@ def read_note(journal, record_id, *, verify_originals=True):
     if note.get("schema") != SCHEMA:
         raise ValueError("research note schema differs from its record")
     count = _verify(note, journal.resolver) if verify_originals else None
+    if expand_resources:
+        note = _expand_resources(journal, note)
     return {"record_id": record_id, "note": note, "originals_verified": count}
 
 
 def publish_note(entry, journal, record_id, *, activate=True):
     """Advance a branch in a stable project entry, preserving other branch heads."""
-    current = read_note(journal, record_id)
+    current = read_note(journal, record_id, expand_resources=False)
     note = current["note"]
     value = {"schema": ENTRY, "database": str(journal.store.path.absolute()),
              "record_id": record_id, "task_id": note["task_id"], "branch_id": note["branch_id"]}
@@ -553,14 +618,22 @@ def save_progress(journal, entry, note, *, directory=None, activate=True, public
 
 
 def patch_progress(entry, patch, *, branch_id=None, expected_record=None,
-                   publication_id=None, evidence=(), counterevidence=(), activate=True):
+                   publication_id=None, evidence=(), counterevidence=(), activate=True,
+                   resources=None):
     """Publish changed fields through the same entry used by CLI and producers.
 
     Omitted fields (including contrary evidence) remain. A replay is rebuilt
     against its original publication, not a newer host interpretation. File
     arguments append originals without callers reading or copying old arrays.
+    Relative evidence/counterevidence file arguments use the supplied entry or
+    locator's parent directory, before any locator is followed. Absolute paths
+    and existing original refs inside patch/resources are not rebased.
     This function publishes data; it does not choose or execute an action.
+    resources merges named descriptors into the existing catalog, preserving
+    unrelated entries; patch.resources retains its explicit replacement meaning.
     """
+    evidence = entry_evidence_paths(entry, evidence)
+    counterevidence = entry_evidence_paths(entry, counterevidence)
     entry = Path(entry).absolute()
     locator = _read(entry)
     if isinstance(locator, dict) and set(locator) == {"entry"}:
@@ -588,9 +661,16 @@ def patch_progress(entry, patch, *, branch_id=None, expected_record=None,
         if len(rows) > 1:
             raise ValueError("publication identity has conflicting records")
         if rows:
-            prior = read_note(journal, rows[0][0].removeprefix("research:"), verify_originals=False)["note"]
-    base = prior or read_note(journal, heads[branch], verify_originals=False)["note"]
+            prior = read_note(journal, rows[0][0].removeprefix("research:"), verify_originals=False,
+                              expand_resources=False)["note"]
+    base = prior or read_note(journal, heads[branch], verify_originals=False, expand_resources=False)["note"]
     note = {**base, **patch}
+    if resources is not None:
+        if (not isinstance(resources, dict) or "resources" in patch
+                or any(not isinstance(k, str) or not k or not isinstance(v, dict)
+                       for k, v in resources.items())):
+            raise ValueError("resources must be named descriptions; do not also replace patch.resources")
+        note = merge_resources(entry_journal(value, read_only=False), note, resources, entry.parent / "memory")
     note.pop("publication_id", None)
     note["supersedes"] = base.get("supersedes", []) if prior else [heads[branch]]
     if expected_record is not None:
@@ -616,6 +696,7 @@ def _save_progress(journal, entry, note, *, directory, activate, publication_id)
     entry = Path(entry).absolute()
     body = json.loads(canonical(note))
     body.pop("publication_id", None)
+    body = store_resources(journal, body, directory or entry.parent / "memory")
     content = lambda n: {k: v for k, v in n.items() if k not in {"schema", "supersedes"}}
     if publication_id is not None:
         body["publication_id"] = publication_id
@@ -629,7 +710,7 @@ def _save_progress(journal, entry, note, *, directory, activate, publication_id)
             if len(prior) != 1:
                 raise ValueError("publication identity has conflicting records")
             rid = prior[0][0].removeprefix("research:")
-            old = read_note(journal, rid)["note"]
+            old = read_note(journal, rid, expand_resources=False)["note"]
             if content(old) != content(body):
                 raise ValueError("publication identity reused for different content")
             current = entry_value(entry) if entry.exists() else None
@@ -650,7 +731,7 @@ def _save_progress(journal, entry, note, *, directory, activate, publication_id)
             raise ValueError("progress must use the existing project journal and task")
         head = current.get("branches", {current["branch_id"]: current["record_id"]}).get(body["branch_id"])
         if head is not None:
-            old = read_note(journal, head, verify_originals=False)["note"]
+            old = read_note(journal, head, verify_originals=False, expand_resources=False)["note"]
             if content(old) == content(body):
                 _verify(old, journal.resolver)
                 if activate and current["record_id"] != head:
@@ -674,6 +755,16 @@ def entry_value(entry):
             target = base / target
         value = _read(target)
         base = target.absolute().parent
+    if isinstance(value, dict):
+        value = dict(value)
+        for key in ("workspace", "database"):
+            if isinstance(value.get(key), Path):
+                value[key] = str(value[key])
+        if isinstance(value.get("task_workset"), dict):
+            workset = dict(value["task_workset"])
+            if isinstance(workset.get("workspace"), Path):
+                workset["workspace"] = str(workset["workspace"])
+            value["task_workset"] = workset
     value = json.loads(canonical(value))
     for holder in (value, value.get("task_workset", {})):
         if isinstance(holder, dict) and "workspace" in holder:
@@ -708,7 +799,7 @@ def _same_journal(value, journal):
 
 
 def read_entry(entry, *, verify_originals=None, conditions=None, definitions=None, branch_id=None, view="full",
-               selectors=None, offset=0, limit=20, max_bytes=16384, response_envelope=None):
+               selectors=None, offset=0, limit=20, max_bytes=16384, response_envelope=None, expand_resources=True):
     """Knowledge first when requested; full preserves the original checked reader.
 
     Knowledge bodies are always identity-checked. Their cited originals are read
@@ -716,6 +807,8 @@ def read_entry(entry, *, verify_originals=None, conditions=None, definitions=Non
     index gives continuation bodies and a paged key/title inventory. selected
     batches literal JSON Pointers; offset/limit page each selected collection.
     Follow details to pin the note, and returned next_read arguments to continue.
+    expand_resources=False returns stored resource references for index helpers;
+    ordinary full reads preserve inline resources and bounded reads load on demand.
     """
     if view not in {"full", "knowledge", "brief", "index", "selected"}:
         raise ValueError("note view must be full, knowledge, brief, index or selected")
@@ -741,7 +834,9 @@ def read_entry(entry, *, verify_originals=None, conditions=None, definitions=Non
     selected = branch_id or value["branch_id"]
     if selected not in heads:
         raise ValueError("requested branch is absent from the project entry")
-    result = read_note(journal, heads[selected], verify_originals=verify_originals)
+    result = read_note(journal, heads[selected], verify_originals=verify_originals, expand_resources=False)
+    if expand_resources:
+        result["note"] = _expand_resources(journal, result["note"], lazy=view != "full")
     note = result["note"]
     if "definitions_digest" in value:
         if digest(note.get("definitions", {})) != value["definitions_digest"]:
@@ -771,7 +866,8 @@ def read_entry(entry, *, verify_originals=None, conditions=None, definitions=Non
             "source_watermarks": [{"source_id": value["database"], "status": "complete",
                                    "record_id": heads[selected]}],
             "source_issues": [], "publications": {"status": "complete", "operations": []},
-            "execution_permission": "not_granted"}
+            "execution_permission": "not_evaluated_by_reader",
+            "authorization_scope": "Reader leaves authority unchanged; user instructions and task-scoped pauses apply."}
     if "definitions" in note:
         response["definitions"] = note["definitions"]
     if "task_workset" in value:
@@ -843,12 +939,29 @@ def read_current(entry, *, recipe=None, conditions=None, definitions=None, branc
     return response
 
 
+def _note_match(declared, saved_definitions, conditions, definitions):
+    missing = sorted(set(conditions) - set(declared))
+    mismatch = sorted(k for k, v in declared.items() if conditions.get(k) != v)
+    checked = None
+    if definitions is not None:
+        from .meta_context import compare_definitions
+        checked = compare_definitions(definitions, saved_definitions)
+    related = bool(missing or mismatch or checked and (checked["missing"] or checked["mismatched"]))
+    return related, missing, mismatch, checked
+
+
 def find_notes(journal, *, task_id, conditions, definitions=None, capability_id=None, limit=20, offset=0, verify_originals=True,
-               memory_scope=SHARED_SCOPE):
-    """Exact scoped retrieval, including negative notes and applicability gaps."""
+                memory_scope=SHARED_SCOPE, current_only=False, expand_resources=True):
+    """Match lightweight declarations before paging; retain contrary notes.
+
+    New notes carry lookup metadata in the same journal. Legacy notes are read
+    without expanding resources or originals to determine their placement.
+    current_only folds explicit supersedes; historical notes remain available.
+    Matching is a discovery order, never permission or scientific suitability.
+    """
     if not isinstance(conditions, dict) or not 1 <= limit <= 50 or offset < 0:
         raise ValueError("bounded page and explicit query conditions required")
-    sql = "SELECT key FROM metadata WHERE json_extract(body,'$.bindings.schema')=? AND json_extract(body,'$.bindings.task_id')=?"
+    sql = "SELECT key,body FROM metadata WHERE json_extract(body,'$.bindings.schema')=? AND json_extract(body,'$.bindings.task_id')=?"
     if not isinstance(memory_scope, str) or not memory_scope.strip():
         raise ValueError("select one explicit memory_scope")
     sql += " AND COALESCE(json_extract(body,'$.bindings.memory_scope'),'shared')=?"
@@ -857,42 +970,57 @@ def find_notes(journal, *, task_id, conditions, definitions=None, capability_id=
         sql += " AND json_extract(body,'$.bindings.capability_id')=?"
         params.append(capability_id)
     with journal.store.connection() as db:
-        ids = [r[0].removeprefix('research:') for r in db.execute(
-            sql + " ORDER BY key LIMIT ? OFFSET ?", [*params, limit + 1, offset])]
+        candidates = db.execute(sql + " ORDER BY key", params).fetchall()
+    ranked, superseded = [], set()
+    for candidate in candidates:
+        rid = candidate["key"].removeprefix("research:")
+        binding = json.loads(candidate["body"]).get("bindings", {})
+        lookup = binding.get("note_lookup")
+        if lookup is None:
+            legacy = read_note(journal, rid, verify_originals=False, expand_resources=False)["note"]
+            lookup = {"conditions": legacy.get("conditions", {}), "definitions": legacy.get("definitions", {}),
+                      "supersedes": legacy.get("supersedes", [])}
+        superseded.update(lookup["supersedes"])
+        match = _note_match(lookup["conditions"], lookup["definitions"], conditions, definitions)
+        ranked.append((match[0], rid, match))
+    ranked.sort(key=lambda row: (row[0], row[1]))
+    if current_only:
+        ranked = [row for row in ranked if row[1] not in superseded]
     matches, related = [], []
-    for rid in ids[:limit]:
-        row = read_note(journal, rid, verify_originals=verify_originals)
-        declared = row["note"].get("conditions", {})
-        missing = sorted(set(conditions) - set(declared))
-        mismatch = sorted(k for k, v in declared.items() if conditions.get(k) != v)
-        definition_check = None
-        if definitions is not None:
-            from .meta_context import compare_definitions
-            definition_check = compare_definitions(definitions, row["note"].get("definitions", {}))
-        if missing or mismatch or (definition_check and (definition_check["missing"] or definition_check["mismatched"])):
+    for _, rid, expected in ranked[offset:offset + limit]:
+        row = read_note(journal, rid, verify_originals=verify_originals, expand_resources=expand_resources)
+        match = _note_match(row["note"].get("conditions", {}), row["note"].get("definitions", {}), conditions, definitions)
+        if match != expected:
+            raise ValueError("note lookup differs from its original conditions or definitions")
+        is_related, missing, mismatch, definition_check = match
+        if is_related:
             related.append({**row, "unknown_conditions": missing, "unmatched_conditions": mismatch,
                 **({"definitions": definition_check} if definition_check is not None else {})})
         else:
             matches.append(row)
     return {"matches": matches, "related": related,
             "memory_scope": memory_scope,
-            "next_offset": offset + limit if len(ids) > limit else None,
+            "next_offset": offset + limit if offset + limit < len(ranked) else None,
+            "ordering": "matching_conditions_first", "current_only": current_only,
+            "coverage": {"matches": sum(not row[0] for row in ranked), "related": sum(row[0] for row in ranked)},
             "selection": "host_decides; inspect supersedes and counterevidence"}
 
 
-def fork_memory(entry, destination, *, memory_scope, question):
+def fork_memory(entry, destination, *, memory_scope, question, inherit_execution=True):
     """Start independent working memory in the same journal, sharing originals.
 
     No transcript, main hypotheses or skills are copied. This is retrieval and
     writing isolation, not a filesystem ACL. Explicit original reads stay possible.
     Bind this new entry to the advisor's own host session/hook installation.
+    Side advice uses inherit_execution=False: main authority, budget and live
+    computation handles stay with their owner. Explicit delegation is separate.
     """
     if not isinstance(memory_scope, str) or not memory_scope.strip() or memory_scope == SHARED_SCOPE:
         raise ValueError("choose a named private memory_scope")
     source = entry_value(entry)
     if source.get("memory_scope", SHARED_SCOPE) != SHARED_SCOPE:
         raise ValueError("fork from a shared research entry")
-    current = read_entry(source, verify_originals=False)
+    current = read_entry(source, verify_originals=False, expand_resources=False)
     parent = current["note"]
     note = {"task_id": parent["task_id"], "branch_id": "working",
         "memory_scope": memory_scope, "question": question,
@@ -902,12 +1030,15 @@ def fork_memory(entry, destination, *, memory_scope, question):
         "shared_basis": {"record_id": current["record_id"], "branch_id": parent["branch_id"]},
         "knowledge": {}, "evidence": [], "counterevidence": [],
         "next_action": "Read relevant shared results; propose only useful changes. No automatic main-memory merge."}
-    for key in ("constraints", "authorization", "other_pauses", "budget", "pending_handles", "definitions"):
+    inherited = ("constraints", "other_pauses", "definitions")
+    if inherit_execution:
+        inherited += ("authorization", "budget", "pending_handles")
+    for key in inherited:
         if key in parent:
             note[key] = parent[key]
     target = Path(destination).absolute()
     if target.exists():
-        existing = read_entry(target, verify_originals=False)
+        existing = read_entry(target, verify_originals=False, expand_resources=False)
         if (existing["note"].get("memory_scope") != memory_scope
                 or existing["task_id"] != parent["task_id"]
                 or existing["note"].get("shared_entry") != note["shared_entry"]):

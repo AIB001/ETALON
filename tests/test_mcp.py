@@ -578,8 +578,9 @@ def test_every_workflow_document_resolves_and_is_a_skill() -> None:
 def test_an_unknown_workflow_slug_is_refused() -> None:
     from etalon.mcp.server import _skill_path
 
-    with pytest.raises(KeyError, match="no such workflow"):
+    with pytest.raises(KeyError, match="unknown skill") as error:
         _skill_path("no-such-regime")
+    assert "etalon_capabilities" in str(error.value)
 
 
 def test_the_campaign_document_offers_other_methods_without_a_required_route() -> None:

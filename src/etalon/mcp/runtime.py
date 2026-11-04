@@ -46,7 +46,7 @@ def register(mcp: Any) -> None:
 
     @mcp.tool()
     @threaded_tool(Cost.FREE)
-    def etalon_action_result(handle: dict[str, Any]) -> str:
+    def etalon_action_result(handle: dict[str, Any], view: str = "full") -> str:
         """FREE. Read execution, verification, admission and accounting as separate existing facts.
 
         Also accepts a fixed PRISM handle from execution_recovery.bind_native_handle;
@@ -55,10 +55,12 @@ def register(mcp: Any) -> None:
         Pass the complete handle object returned by etalon_action_submit unchanged. A campaign
         action ID or an offline etalon_active_replay result is not a runtime action handle.
         Inspect replay outcomes through campaign status and campaign events instead.
+        For runtime handles, view=summary keeps status, counts, costs and artifact
+        locators compact; use full or etalon_workflow_artifact for selected detail.
         """
         from etalon.runtime.api import read_action_result
 
-        return ok(result=read_action_result(handle))
+        return ok(result=read_action_result(handle, view=view))
 
     @mcp.tool()
     @threaded_tool(Cost.FREE)
@@ -84,9 +86,10 @@ def register(mcp: Any) -> None:
         selects ready nodes; fixed service validators establish completion from real artifacts.
         """
         from etalon.runtime.operations import describe
+        from etalon.runtime.service import capabilities
 
         return ok(operations=describe(), workflow_schema="etalon-workflow/1",
-                  controller_modes=["ordered", "advisor", "external"])
+                  controller_modes=["ordered", "advisor", "external"], execution=capabilities())
 
     @mcp.tool()
     @threaded_tool(Cost.CHEAP)

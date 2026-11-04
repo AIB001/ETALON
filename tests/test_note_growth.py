@@ -152,7 +152,8 @@ def test_long_controls_definitions_and_branches_keep_exact_navigation(case, tmp_
     assert page["controls"]["state"] == "paused"
     assert page["coverage"]["controls_complete"] is False
     assert "/constraints" in page["coverage"]["omitted_controls"]
-    assert page["execution_permission"] == "not_granted"
+    assert page["execution_permission"] == "not_evaluated_by_reader"
+    assert page["authorization_scope"] == "Reader leaves authority unchanged; user instructions and task-scoped pauses apply."
     assert page["branch_navigation"]["total_items"] == 18
     assert page["branch_navigation"]["entry"] == str(entry)
     assert len(page["branches"]) == 1
@@ -220,7 +221,8 @@ def test_optional_completion_and_wait_fields_are_bounded_current_facts(case, tmp
         page = read_entry(entry, view=view, max_bytes=4096)
         for key in ("completed_refs", "completed", "wait_for"):
             assert page["controls"][key] == note[key]
-        assert page["execution_permission"] == "not_granted"
+        assert page["execution_permission"] == "not_evaluated_by_reader"
+        assert page["authorization_scope"] == "Reader leaves authority unchanged; user instructions and task-scoped pauses apply."
 
 
 def test_lifecycle_capsule_preserves_bounded_branch_navigation(case, tmp_path):

@@ -482,6 +482,44 @@ DOCKING_SCORE_V1 = DataContract(
 )
 
 
+POSE_LINEAGE_V1 = DataContract(
+    id="pose_lineage/v1",
+    schema=_schema(
+        "pose_lineage/v1",
+        [
+            pa.field("parent_id", pa.string(), nullable=False),
+            pa.field("engine_id", pa.string(), nullable=False),
+            pa.field("receptor_id", pa.string(), nullable=False),
+            pa.field("method_id", pa.string(), nullable=False),
+            pa.field("raw_pose_rank", pa.int32(), nullable=False),
+            pa.field("selected_pose_rank", pa.int32(), nullable=True),
+            pa.field("raw_pose_sha256", pa.string(), nullable=True),
+            pa.field("delivered_pose_sha256", pa.string(), nullable=True),
+            pa.field("score_pose_sha256", pa.string(), nullable=True),
+            pa.field("score_basis", pa.string(), nullable=False),
+            pa.field("retained", pa.bool_(), nullable=False),
+            pa.field("qc_state", pa.string(), nullable=False),
+            pa.field("qc_failed_checks", pa.list_(pa.string()), nullable=False),
+            pa.field("repair_state", pa.string(), nullable=False),
+            pa.field("repair_displacement", pa.float64(), nullable=True),
+            pa.field("quality_id", pa.string(), nullable=False),
+        ],
+    ),
+    primary_key=("parent_id", "engine_id", "receptor_id", "method_id", "raw_pose_rank"),
+    enums={
+        "score_basis": ("engine_raw_pose", "unknown"),
+        "qc_state": ("pass", "fail", "unknown"),
+        "repair_state": ("disabled", "not_requested", "unavailable", "completed", "failed"),
+    },
+    invariants={
+        "pose_identity": "pose SHA256 values hash the exact UTF-8 MolBlock bytes, not a canonical geometry",
+        "rank_identity": "raw_pose_rank precedes quality filtering; selected_pose_rank joins retained docking_score/v1 rows",
+        "score_identity": "score_pose_sha256 identifies the pose the engine scored; repair does not rescore it",
+        "qc_scope": "QC describes the checked geometry, not binding strength; absent checks remain unknown",
+    },
+)
+
+
 DERIVED_METRIC_V1 = DataContract(
     id="derived_metric/v1",
     schema=_schema(
@@ -769,6 +807,7 @@ BUILTIN_CONTRACTS = (
     SYNTHESIS_SEARCH_V1,
     LIGAND_CONFORMER_V1,
     DOCKING_SCORE_V1,
+    POSE_LINEAGE_V1,
     DERIVED_METRIC_V1,
     SCAFFOLD_ASSIGNMENT_V1,
     CLUSTER_ASSIGNMENT_V1,
@@ -784,6 +823,7 @@ __all__ = [
     "DECISION_V1",
     "DERIVED_METRIC_V1",
     "DOCKING_SCORE_V1",
+    "POSE_LINEAGE_V1",
     "DRUG_LIKENESS_V1",
     "FINGERPRINT_V1",
     "LIGAND_CONFORMER_V1",

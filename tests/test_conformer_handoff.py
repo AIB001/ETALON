@@ -122,3 +122,46 @@ def test_handoff_keeps_backend_unless_caller_selects_a_version(tmp_path):
         'next_config': str(template), 'output_dir': str(tmp_path/'mcp')}))
     assert (tmp_path/'mcp'/'cascade.json').is_file(), result
     assert json.loads((tmp_path/'mcp'/'cascade.json').read_text())['finalize']['steps'][1]['backend'] == 'docking.unidock@0.2.0'
+
+
+def test_receptor_branches_share_committed_prefix_while_source_continues(tmp_path, monkeypatch):
+    from etalon.screening_handoff import prepare_screen_continuation
+    workspace, _, state = original(tmp_path)
+    state_path = workspace/'runs/original.json'
+    pending = json.loads(state_path.read_text())
+    pending['status'] = 'RUNNING'
+    pending['stages'].append({'stage_id':'dock-a','plugin_key':'docking.unidock@0.4.0',
+                             'status':'RUNNING','output_ref':None})
+    from molcascade.runtime.runner import RunState, canonical_json_bytes
+    state_path.write_bytes(canonical_json_bytes(RunState.model_validate_json(json.dumps(pending))))
+    frozen_state = state_path.read_bytes()
+    progress = Screen.read_progress(workspace, 'original')
+    assert progress['preparation_reuse']['arguments']['through_stage'] == 'conformers'
+    assert progress['rsi_review'] is None
+    import molcascade.plugins.builtin.docking.ligand_prep as prep
+    monkeypatch.setattr(prep, '_conformer_rows', lambda **kw: pytest.fail('must reuse geometry'))
+    expected = Screen(workspace).read(state.output_ref.artifact_id, contract_id='ligand_conformer/v1')
+    for name in ('receptor-b', 'receptor-c'):
+        template = tmp_path/f'{name}.json'
+        template.write_text(json.dumps({'kind':'cascade','name':name,'standardize':{'settings':{}},
+            'finalize':{'steps':[{'id':'conformers','backend':'docking.rdkit_conformers@0.1.0','settings':{}}]}}))
+        handoff = prepare_screen_continuation(workspace, 'original', template, tmp_path/name,
+                                              through_stage='conformers')
+        screen = Screen(tmp_path/(name+'-results'))
+        run = screen.run(screen.plan(handoff['config'], handoff['library']), run_id=name, workers=1, devices=('cpu',))
+        assert run.status == 'SUCCEEDED', run
+        rows = screen.read(run.stages[-1].artifact_id, contract_id='ligand_conformer/v1')
+        assert rows == expected
+        assert [s.stage_id for s in run.stages] == ['registered','conformers']
+        finished = screen.progress(name)
+        assert finished['rsi_review']['trigger'] == 'screen_result_ready'
+        assert not finished['rsi_review']['execution_blocked']
+        assert state_path.read_bytes() == frozen_state
+    with pytest.raises(ValueError, match='not completely committed'):
+        prepare_screen_continuation(workspace, 'original', template, tmp_path/'uncommitted', through_stage='dock-a')
+    assert not (tmp_path/'uncommitted').exists()
+    config = json.loads(template.read_text())
+    config['finalize']['steps'][0]['settings']['seed'] = 987
+    template.write_text(json.dumps(config))
+    with pytest.raises(ValueError, match='preparation method differs'):
+        prepare_screen_continuation(workspace, 'original', template, tmp_path/'changed', through_stage='conformers')

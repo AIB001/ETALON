@@ -13,7 +13,7 @@ from etalon.active.schema import canonical, digest
 from etalon.active.store import CampaignStore
 from .evidence_refs import EvidenceError, EvidenceWorkspace, load_workspace, validate_ref
 from .journal import ResearchJournal
-from .notes import SCHEMA, entry_journal, entry_value, read_entry, read_note
+from .notes import SCHEMA, entry_journal, entry_value, original_refs, read_entry, read_note
 
 
 def _values(value):
@@ -117,9 +117,11 @@ def plan_note_handoff(origin, resolved_selector, requested, selector, inventory,
         originals, resources, snapshot_refs, linked_refs = list(maps), [], [], []
         available_sources = {sid} | ({s["source_id"] for s in bound.manifest["sources"]} if bound else set())
         for note in notes.values():
-            for ref in [*note.get("evidence", []), *note.get("counterevidence", [])]:
+            for ref in original_refs(note):
                 path = journal.resolver.resolve(ref["path"], **ref["identity"]) if journal.resolver else _plain(ref["path"])
-                originals.append((sid, ref["path"], path, ref["identity"]))
+                item = (sid, ref["path"], path, ref["identity"])
+                if item not in originals:
+                    originals.append(item)
             for ref in _values(note):
                 if not isinstance(ref, dict):
                     continue

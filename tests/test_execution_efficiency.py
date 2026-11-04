@@ -27,6 +27,30 @@ def test_reused_rows_not_credited_as_new_throughput_and_age_is_visible():
     assert again['observation_key'] == report['observation_key']
 
 
+def test_feedback_has_readable_exact_skill_and_stable_decision_identity():
+    from etalon.skills import read_member
+    report = feedback(sample())
+    opportunity = report['improvement_opportunities'][0]
+    reference = opportunity['skill']
+    assert read_member(reference['name']) == read_member(reference['read']['arguments']['slug'])
+    assert reference['read']['tool'] == 'etalon_skill_read'
+    assert opportunity['decision_key'] == report['observation_key']
+    newer = feedback({**sample(), 'rows_completed': 99, 'updated_at':'2026-10-28T00:00:09+00:00'})
+    assert newer['improvement_opportunities'][0]['decision_key'] == opportunity['decision_key']
+    normal = feedback({**sample(), 'effective_workers':8})
+    assert normal['improvement_opportunities'] == []
+
+
+def test_success_is_also_an_opportunity_for_learning_not_only_failure():
+    from etalon.economics.execution import improvement_review
+    result = improvement_review('stage_complete', {'stage':'a','artifact':'new'})
+    assert 'reuse_or_replace_computation' in result['agenda']
+    assert 'retain_callable_methods' in result['agenda']
+    assert result['skill']['slug'] == 'skill-improvement'
+    assert result['decision_key'] == improvement_review('stage_complete', {'artifact':'new','stage':'a'})['decision_key']
+    assert result['decision_key'] != improvement_review('stage_complete', {'artifact':'changed','stage':'a'})['decision_key']
+
+
 def test_merge_small_workload_and_missing_telemetry_are_distinct():
     merge = feedback({**sample(), 'phase': 'global_merge'})
     assert merge['signals'] == [] and merge['estimated_remaining_map_seconds'] is None

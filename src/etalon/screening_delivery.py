@@ -9,6 +9,7 @@ from collections import Counter
 from contextlib import closing
 import csv
 import gzip
+from hashlib import sha256
 import json
 import math
 from pathlib import Path
@@ -87,6 +88,30 @@ def _sdf(stream, block, parent, **tags):
     return True
 
 
+def _pose_tags(row, lineage=None):
+    """Explain the delivered row without guessing provenance for old artifacts."""
+    block = row.get("pose_molblock")
+    source_hash = sha256(block.encode("utf-8")).hexdigest() if block else None
+    tags = {"pose_rank": row["pose_rank"], "pose_rank_meaning": "rank in delivered score rows",
+            "pose_lineage": "unavailable", "qc_state": "unknown", "score_basis": "unknown",
+            "source_molblock_sha256": source_hash,
+            "pose_hash_scope": "source MolBlock bytes before SDF title and metadata export"}
+    if lineage is None:
+        return tags
+    if (any(row[key] != lineage[key] for key in ("parent_id", "engine_id", "receptor_id", "method_id"))
+            or not lineage["retained"] or row["pose_rank"] != lineage["selected_pose_rank"]
+            or source_hash != lineage["delivered_pose_sha256"]):
+        # Still export the score/pose, but do not attach another geometry's QC.
+        return {**tags, "pose_lineage": "identity_mismatch"}
+    tags.update({key: lineage[key] for key in (
+        "raw_pose_rank", "selected_pose_rank", "raw_pose_sha256", "delivered_pose_sha256",
+        "score_pose_sha256", "score_basis", "qc_state", "repair_state", "repair_displacement", "quality_id")})
+    tags.update(pose_lineage="matched", qc_failed_checks=json.dumps(lineage["qc_failed_checks"]))
+    if lineage["score_basis"] == "engine_raw_pose":
+        tags["score_recomputed_after_repair"] = False
+    return tags
+
+
 def export_screen_delivery(workspace, run_id, output, *, locations=None, rmsd_threshold=2.0):
     """Serialize materialization; a partial export can resume without science."""
     target = Path(output).absolute()
@@ -119,13 +144,16 @@ def _export_screen_delivery(workspace, run_id, output, *, locations=None, rmsd_t
         directory = store.artifact_directory(stage.artifact_id, verify=True)
         stages.append((stage, store.get_manifest(stage.artifact_id), directory))
     root = Path(output).absolute()
-    key = digest({"version": 4, "run": run_id, "revision": state.revision_id,
+    request = {"run": run_id, "revision": state.revision_id,
                   "artifacts": [(s.stage_id, s.artifact_id) for s, _, _ in stages],
-                  "status": state.status, "threshold": rmsd_threshold, "locations": locations or {}})
+                  "status": state.status, "threshold": rmsd_threshold, "locations": locations or {}}
+    key = digest({"version": 5, **request})
     receipt = root / "delivery.json"
     if receipt.exists():
         prior = json.loads(receipt.read_text(encoding="utf-8"))
-        if prior["request_key"] != key:
+        # Completed v4 exports remain valid immutable readbacks. New exports
+        # carry lineage; an old completed directory is never silently rewritten.
+        if prior["request_key"] not in (key, digest({"version": 4, **request})):
             raise ValueError("delivery changed; select a new output directory")
         for name, pin in prior["files"].items():
             if file_identity(root / name) != pin:
@@ -188,6 +216,8 @@ def _export_screen_delivery(workspace, run_id, output, *, locations=None, rmsd_t
             db.execute("CREATE TABLE molecules (id TEXT PRIMARY KEY, smiles TEXT)")
             db.execute("CREATE TABLE sources (id TEXT PRIMARY KEY, candidate TEXT, metadata TEXT)")
             db.execute("CREATE TABLE origins (source TEXT, parent TEXT, PRIMARY KEY(source,parent))")
+            db.execute("CREATE TABLE pose_lineage (parent TEXT, engine TEXT, receptor TEXT, method TEXT, "
+                       "rank INTEGER, record TEXT, PRIMARY KEY(parent,engine,receptor,method,rank))")
             candidates = [(count(ps), ps) for _, m, d in stages if (ps := paths(m, d, "parent/v1"))]
             parent_files = max(candidates, key=lambda item: item[0])[1] if candidates else []
             for b in batches(parent_files, ["parent_id", "parent_smiles"]):
@@ -255,12 +285,32 @@ def _export_screen_delivery(workspace, run_id, output, *, locations=None, rmsd_t
                     if relative not in receptors:
                         shutil.copyfile(receptor, root / relative)
                         receptors[relative] = {"source": config["receptor_path"], **identity}
+                lineage_files = paths(manifest, directory, "pose_lineage/v1")
+                db.execute("DELETE FROM pose_lineage")
+                if lineage_files:
+                    with gzip.open(root / f"poses/{prefix}-lineage.csv.gz", "wt", encoding="utf-8", newline="") as out:
+                        writer = csv.DictWriter(out, fieldnames=pq.ParquetFile(lineage_files[0]).schema_arrow.names)
+                        writer.writeheader()
+                        for b in batches(lineage_files):
+                            for r in b.to_pylist():
+                                writer.writerow({**r, "qc_failed_checks": json.dumps(r["qc_failed_checks"])})
+                                counts["raw_pose_qc:" + r["qc_state"]] += 1
+                                counts["raw_pose_discarded"] += not r["retained"]
+                                if r["retained"] and r["selected_pose_rank"] == 0:
+                                    db.execute("INSERT INTO pose_lineage VALUES (?,?,?,?,?,?)", (
+                                        r["parent_id"], r["engine_id"], r["receptor_id"], r["method_id"],
+                                        r["selected_pose_rank"], json.dumps(r)))
                 with (root / f"poses/{prefix}-dock.sdf").open("w", encoding="utf-8", newline="\n") as dock:
                     for b in batches(paths(manifest, directory, "docking_score/v1")):
                         for r in b.to_pylist():
                             if r["pose_rank"] == 0:
+                                match = db.execute("SELECT record FROM pose_lineage WHERE "
+                                    "parent=? AND engine=? AND receptor=? AND method=? AND rank=?", (
+                                        r["parent_id"], r["engine_id"], r["receptor_id"], r["method_id"], r["pose_rank"])).fetchone()
+                                tags = _pose_tags(r, json.loads(match[0]) if match else None)
+                                counts["delivered_pose_lineage:" + tags["pose_lineage"]] += 1
                                 counts["dock_top1"] += _sdf(dock, r.get("pose_molblock"), r["parent_id"],
-                                    receptor_id=r["receptor_id"], method_id=r["method_id"], score=r["score"], role="dock")
+                                    receptor_id=r["receptor_id"], method_id=r["method_id"], score=r["score"], role="dock", **tags)
                 with (root / f"poses/{prefix}-redock.sdf").open("w", encoding="utf-8", newline="\n") as redock, \
                      (root / f"poses/{prefix}-rmsd.csv").open("w", encoding="utf-8", newline="") as report:
                     writer = csv.DictWriter(report, fieldnames=["parent_id", "value", "status", "assessment", "threshold", "comparison"])
@@ -291,6 +341,7 @@ def _export_screen_delivery(workspace, run_id, output, *, locations=None, rmsd_t
                     plugin=stage.plugin, counts=dict(counts), parent_output=parent_output,
                     parent_input=parent_input, net_parent_removal=parent_input-parent_output if parent_input is not None and parent_output is not None else None,
                     inherited_decision_refs=inherited_refs,
+                    pose_lineage_refs=[str(p) for p in lineage_files],
                     input_bindings=manifest.metadata.get("input_bindings", {}),
                     recorded_gate={k: config[k] for k in ("minimum", "maximum", "maximum_exclusive", "on_unscorable", "target_count", "max_per_scaffold", "seed") if k in config},
                     count_scope="inherited_registration_records" if stage.plugin.startswith("source.registered") else "stage_assessment_rows; sibling criteria are not additive attrition"))
@@ -298,7 +349,7 @@ def _export_screen_delivery(workspace, run_id, output, *, locations=None, rmsd_t
         revision_id=state.revision_id, stages=summary, receptors=receptors,
         source_coverage={"raw_datasets": len(raw_files), "unresolved_origins": origin_gaps},
         rmsd=dict(threshold=rmsd_threshold, operator="<", meaning="dock/redock prediction consistency; not crystal accuracy", original_gates_changed=False),
-        pose_scope="all available top-one poses at each committed stage; no new conformers generated",
+        pose_scope="rank-zero delivered rows at each committed stage; original rank and score-pose identity require lineage; no new conformers generated",
         files={p.relative_to(root).as_posix(): file_identity(p) for p in root.rglob("*") if p.is_file()},
         scientific_calls=0, reused=False)
     _save(receipt, result)

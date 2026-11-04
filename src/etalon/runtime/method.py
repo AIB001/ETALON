@@ -18,6 +18,28 @@ from etalon.runtime.schema import absolute, fields, text
 RESULT = "etalon-method-result/1"
 
 
+def _failure_details(receipt, error):
+    """Expose the retained error without making the host fetch an entire log."""
+    finished = receipt["finished"]
+    details = {"kind": "process_exit" if finished["returncode"] else
+               "missing_output" if finished["missing_outputs"] else "invalid_result",
+               "returncode": finished["returncode"], "missing_outputs": finished["missing_outputs"],
+               "reason": error}
+    pin = receipt["archives"].get("stderr")
+    if pin is not None:
+        details["stderr"] = dict(pin)
+        try:
+            with Path(pin["path"]).open("rb") as stream:
+                stream.seek(max(0, pin["bytes"] - 2048))
+                tail = stream.read(2048)
+            details.update(stderr_tail=tail.decode("utf-8", errors="replace"),
+                           stderr_truncated=pin["bytes"] > len(tail))
+        except OSError as exc:
+            # A log-read failure is distinct from the completed program's failure.
+            details["stderr_read_error"] = str(exc)
+    return details
+
+
 def validate(parameters):
     text(parameters["method_id"], "method_id")
     command = parameters["command"]
@@ -31,6 +53,12 @@ def validate(parameters):
     if not isinstance(files, list) or not files:
         raise ValueError("declare the method's source/model files")
     for path in files:
+        absolute(path)
+    input_files = parameters.get("input_files", {})
+    if not isinstance(input_files, dict):
+        raise ValueError("method input_files must map logical names to absolute file paths")
+    for name, path in input_files.items():
+        text(name, "input file name")
         absolute(path)
     if "cwd" in parameters:
         absolute(parameters["cwd"])
@@ -76,7 +104,7 @@ def read_result(parameters, directory):
             error = str(exc)
     else:
         error = "native method failed or omitted a declared output"
-    return {"method_id": parameters["method_id"],
+    result = {"method_id": parameters["method_id"],
             "status": "completed" if error is None else "failed",
             "summary": body["summary"] if error is None else error,
             "outputs": body["outputs"] if error is None else {},
@@ -85,6 +113,9 @@ def read_result(parameters, directory):
             "receipt_identity": file_identity(attempt / "receipt.json"),
             "wall_second": receipt["finished"]["worker_wall_second"],
             "scientific_admission": "not_inferred"}
+    if error is not None:
+        result["failure"] = _failure_details(receipt, error)
+    return result
 
 
 def execute(parameters, ctx):

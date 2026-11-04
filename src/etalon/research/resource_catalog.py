@@ -32,16 +32,22 @@ TYPED_KINDS = {
 }
 
 
-def _note_catalog(entry, *, kinds, skill_refs, purpose, limit, cursor, max_bytes, source_ids):
+def _note_catalog(entry, *, kinds, skill_refs, purpose, limit, cursor, max_bytes, source_ids,
+                  query=None, resource_ids=None, scan_limit=50, families=None):
     """Page current notes and their explicit resources; no second resource store."""
-    from .notes import read_entry
+    from .notes import read_entry, entry_journal
+    from .note_resources import resource_page, resource_families, resource_row, feedback_case_page
+    from .resource_selection import feedback_read_link, feedback_for_query
     from .selection import pointer
     selected = _selection(kinds if kinds is not None else sorted(KINDS), "kinds", allowed=KINDS)
     if purpose not in {None, "research"} or source_ids is not None:
         raise EvidenceError("note catalog uses its project journal in research scope")
     skill_rows = _skill_inventory(skill_refs, None)
     branches = sorted(entry.get("branches", {entry["branch_id"]: entry["record_id"]}))
-    stamp = digest({"entry": entry, "kinds": selected, "skills": skill_rows, "layout": 2})
+    stamp = digest({"entry": entry, "kinds": selected, "skills": skill_rows, "layout": 5,
+                    "query": query, "resource_ids": resource_ids, "families": families})
+    journal = entry_journal(entry)
+    names = None if resource_ids is None else sorted(set(resource_ids) | {"feedback:" + n for n in resource_ids})
     offset, member = 0, 0
     if cursor is not None:
         try:
@@ -56,38 +62,58 @@ def _note_catalog(entry, *, kinds, skill_refs, purpose, limit, cursor, max_bytes
             if isinstance(exc, EvidenceError):
                 raise
             raise EvidenceError("invalid project catalog cursor") from None
-    rows = []
+    rows, scanned, navigation, navigation_omitted = [], 0, [], 0
     def render():
         more = offset < len(branches) + len(skill_rows)
         return dict(schema=SCHEMA, items=rows,
             next_cursor=base64.urlsafe_b64encode(canonical({"stamp": stamp, "offset": offset, "member": member}).encode()).decode() if more else None,
             coverage={"scope": "current_project_heads_and_selected_skills", "discovery_complete": not more,
                 "status": "partial" if more else "complete", "originals": "not_read",
-                "outside_scope": "historical notes remain available through find_notes and exact references"},
+                "scanned_resources_this_page": scanned, "scan_limit": scan_limit,
+                "resource_ids": resource_ids, "families": families,
+                "outside_scope": "unselected families/names/kinds and historical notes; broad discovery and find_notes remain available"},
             memory_scope=entry.get("memory_scope", "shared"),
-            warnings=[], automatic_adoption=False, execution_permission="not_granted")
-    cached_branch, context = None, None
-    while offset < len(branches) + len(skill_rows) and len(rows) < limit:
+            family_navigation=navigation, family_navigation_omitted=navigation_omitted,
+            warnings=[], automatic_adoption=False, execution_permission="not_evaluated_by_reader")
+    cached_branch, context, page = None, None, None
+    while offset < len(branches) + len(skill_rows) and len(rows) < limit and scanned < scan_limit:
         if offset < len(branches):
             if cached_branch != offset:
-                context = read_entry(entry, branch_id=branches[offset], view="full", verify_originals=False)
+                context = read_entry(entry, branch_id=branches[offset], view="full",
+                                     verify_originals=False, expand_resources=False)
                 cached_branch = offset
+                page = None
             note = context["note"]
-            resources = note.get("resources", {})
-            if not isinstance(resources, dict):
-                raise EvidenceError("note resources must be a name to descriptor mapping")
-            names = sorted(resources)
             details = {k: entry[k] for k in ("schema", "database", "task_id", "workspace", "source_id", "memory_scope", "definitions", "definitions_digest") if k in entry}
             details.update(branch_id=context["branch_id"], record_id=context["record_id"])
+            if len(canonical(details.get("definitions", {})).encode()) > max_bytes // 8:
+                details.pop("definitions", None)
+                details["definitions_digest"] = digest(note.get("definitions", {}))
             if member == 0:
+                if families is None and resource_ids is None:
+                    grouped = resource_families(journal, note)
+                    navigation.append({"content_ref": details, "families": grouped["families"][:12],
+                        "unclassified": grouped["unclassified"],
+                        "other_family_count": max(0, len(grouped["families"]) - 12),
+                        "more": "continue the broad catalog for other family labels"})
+                    if len(canonical(navigation).encode()) > max_bytes // 4:
+                        navigation.pop()
+                        navigation_omitted += 1
                 row = dict(kind="experience", resource_id=context["record_id"], branch_id=context["branch_id"],
                     summary=note["summary"][:600], conditions=note.get("conditions", {}), outcome=note.get("outcome"),
                     content_ref=details, applicability="host_selects",
                     coverage={"originals": "not_read", "support_count": len(note.get("evidence", [])),
                               "counter_count": len(note.get("counterevidence", []))})
-            elif member <= len(names):
-                name = names[member - 1]
-                resource = resources[name]
+            else:
+                if page is None or not page["start"] <= member - 1 < page["start"] + len(page["items"]):
+                    page = resource_page(journal, note, offset=member - 1,
+                                         limit=min(scan_limit, 64), names=names, families=families)
+                    page["start"] = member - 1
+                if member - 1 >= page["total_items"]:
+                    offset, member = offset + 1, 0
+                    continue
+                resource = page["items"][member - 1 - page["start"]]
+                name = resource["name"]
                 if not isinstance(resource, dict) or resource.get("kind") not in KINDS:
                     raise EvidenceError("resource needs an existing catalog kind")
                 selector = pointer("/resources", name)
@@ -97,20 +123,77 @@ def _note_catalog(entry, *, kinds, skill_refs, purpose, limit, cursor, max_bytes
                     content_ref=details, pointer=selector, applicability="host_selects",
                     next_read={"entry": details, "view": "selected", "selectors": [selector]},
                     links=resource.get("links", []), verification="descriptor_only; resolve source before execution")
-            else:
-                offset, member = offset + 1, 0
-                continue
+                row.update({k: resource[k] for k in ("parts", "definitions", "family", "status", "subject",
+                    "feedback", "feedback_summary", "support_refs", "counter_refs", "requires", "irrelevant", "available_at") if k in resource})
+                row["resource_version"] = resource["descriptor_digest"]
+                row["note_counterevidence"] = {"count": len(note.get("counterevidence", [])),
+                    "content_ref": details, "pointer": "/counterevidence"}
+                if resource["kind"] == "method":
+                    try:
+                        feedback_row = resource_row(journal, note, "feedback:" + name)
+                    except ValueError as exc:
+                        if str(exc) != "note resource is absent: feedback:" + name:
+                            raise
+                    else:
+                        row["related_feedback"] = {
+                            "summary": str(feedback_row.get("summary", ""))[:300],
+                            "next_read": feedback_read_link(details, name, query=query,
+                                resource_version=resource["descriptor_digest"])}
+                if resource.get("form") == "resource-feedback":
+                    subject_id = resource.get("subject", {}).get("resource_id")
+                    if subject_id:
+                        row["feedback_read"] = feedback_read_link(details, subject_id, query=query)
+                if resource["kind"] == "method" and resource.get("operation", resource.get("execution", {}).get("operation")) == "method.run":
+                    row["resolve"] = {"tool": "etalon_method_resolve",
+                                      "arguments": {"entry": details, "pointer": selector}}
+                    if query is not None:
+                        row["resolve"]["arguments"]["query"] = query
             if "definitions" in note:
-                row["definitions"] = note["definitions"]
+                row.setdefault("definitions" if member == 0 else "context_definitions", note["definitions"])
         else:
             row = skill_rows[offset - len(branches)]
         old_offset, old_member = offset, member
-        if offset < len(branches) and member < len(names):
-            member += 1
+        if offset < len(branches):
+            if member == 0 and page is None:
+                page = resource_page(journal, note, limit=1, names=names, families=families)
+                page["start"] = 0
+            if member >= page["total_items"]:
+                offset, member = offset + 1, 0
+            else:
+                member += 1
         else:
             offset, member = offset + 1, 0
-        if row["kind"] in selected:
-            rows.append(row)
+        scanned += 1
+        if (row["kind"] in selected and _matches_resource(row, resource_ids)
+                and _matches_family(row, families)):
+            if old_offset < len(branches) and row.get("form") == "resource-feedback" and query is not None:
+                # Feedback has case-local conditions. Its aggregate descriptor
+                # deliberately has none; treating that as an unknown whole
+                # resource hides known relevant positive and negative cases.
+                case_page = feedback_case_page(journal, note, row["resource_id"], limit=20)
+                view = feedback_for_query({"cases": case_page["cases"]}, query)
+                counts = view["status_counts"]
+                complete = case_page["next_offset"] is None
+                status = next((key for key, count in counts.items()
+                               if count and count == view["case_count"]), "mixed") if complete else "partial"
+                row["selection"] = {"status": status, "disposition": "reference",
+                    "basis": "conditional_feedback_cases", "status_counts": counts,
+                    "outcome_counts_by_status": view["outcome_counts_by_status"],
+                    "coverage": {"case_count": case_page["total_items"],
+                        "evaluated_cases": view["case_count"], "complete": complete,
+                        "counts_scope": "first_case_page"}, "scientific_suitability": "not_inferred"}
+            projected = _selection_row(row, query)
+            # Match complete definitions first. The transport keeps an exact
+            # pointer/digest instead of repeating a large map in every row.
+            if "content_ref" in projected:
+                for field in ("definitions", "context_definitions"):
+                    if field in projected and len(canonical(projected[field]).encode()) > max_bytes // 8:
+                        value = projected.pop(field)
+                        path = (pointer(projected["pointer"], "definitions")
+                                if field == "definitions" and "pointer" in projected else "/definitions")
+                        projected[field + "_binding"] = {"digest": digest(value), "body_omitted": True,
+                            "next_read": {"entry": projected["content_ref"], "view": "selected", "selectors": [path]}}
+            rows.append(projected)
             if len(canonical(render()).encode()) > max_bytes - 32:
                 rows.pop()
                 offset, member = old_offset, old_member
@@ -118,6 +201,27 @@ def _note_catalog(entry, *, kinds, skill_refs, purpose, limit, cursor, max_bytes
                     raise EvidenceError("one resource exceeds delivery budget; use its exact knowledge entry")
                 break
     return render()
+
+
+def _matches_resource(row, resource_ids):
+    """Explicit names select their feedback too; no scientific relevance inferred."""
+    if resource_ids is None:
+        return True
+    return (row.get("resource_id") in resource_ids or
+            row.get("subject", {}).get("resource_id") in resource_ids or
+            any(row.get("resource_id") == "feedback:" + name for name in resource_ids))
+
+
+def _matches_family(row, families):
+    family = row.get("family")
+    return families is None or bool(set(family if isinstance(family, list) else [family]) & set(families))
+
+
+def _selection_row(row, query):
+    if query is None or row.get("selection", {}).get("basis") == "conditional_feedback_cases":
+        return row
+    from .resource_selection import resource_applicability
+    return {**row, "selection": resource_applicability(row.get("descriptor") or row, query)}
 
 
 def _bounded(value, lower, upper, name):
@@ -174,7 +278,7 @@ def _skill_inventory(refs, ws):
             provenance={"discovery": "explicit_skill_selection", "manifest": manifest},
             verification={"record": "not_applicable", "artifact": "verified", "descriptor": "not_declared"},
             availability="available", applicability="unknown", missing=["declared_applicability"],
-            execution_permission="not_granted"))
+            execution_permission="not_evaluated_by_reader"))
     return sorted(rows, key=lambda r: r["catalog_id"])
 
 
@@ -192,7 +296,7 @@ def _base_row(item, body):
                         "source_kind", "verification_basis", "status", "outcome", "epistemic_status") if k in body}},
         verification={"record": "verified", "artifact": "not_checked", "descriptor": "not_declared"},
         availability="available", applicability="unknown", missing=["declared_resource_parts"],
-        execution_permission="not_granted")
+        execution_permission="not_evaluated_by_reader")
 
 
 def _descriptor_row(ws, descriptor, origin_ref, purpose, discovery):
@@ -212,7 +316,7 @@ def _descriptor_row(ws, descriptor, origin_ref, purpose, discovery):
                     "activation": "not_inferred_from_inventory"},
         verification={"record": "verified", "artifact": "verified_where_referenced",
                       "descriptor": "verified", "support_and_counter_refs": "verified"},
-        availability="available", applicability="declared_only", missing=[], execution_permission="not_granted")
+        availability="available", applicability="declared_only", missing=[], execution_permission="not_evaluated_by_reader")
 
 
 def _rows_for_record(ws, item, purpose):
@@ -324,7 +428,8 @@ def _decode_cursor(cursor, stamp):
 @bounded_read
 def build_resource_catalog(workspace=None, *, entry=None, read_context=None,
                            source_ids=None, kinds=None, skill_refs=(), purpose=None,
-                           limit=20, cursor=None, scan_limit=50, max_bytes=65536):
+                           limit=20, cursor=None, scan_limit=50, max_bytes=65536,
+                           query=None, resource_ids=None, families=None):
     """Inventory a published scope, with bounded output and continued discovery.
 
     Supply exactly one workspace/entry/read_context. ``source_ids=None`` selects
@@ -335,17 +440,28 @@ def build_resource_catalog(workspace=None, *, entry=None, read_context=None,
     A non-null next_cursor must be followed even when items is empty (a kind
     filter or scan bound can produce an empty partial page). Descriptor rows are
     mechanically verified declarations, never proof of applicability or use.
+    Optional query annotates declared part compatibility, without filtering out
+    conflicts/unknowns or activating anything. resource_ids selects exact names
+    and their feedback; omitted names are outside this explicit lookup scope.
     """
     from .entry import READ_CONTEXT, resolve_entry, resolve_read_workspace
     _bounded(limit, 1, 50, "limit")
     _bounded(scan_limit, 1, 200, "scan_limit")
     _bounded(max_bytes, 4096, MAX_RESPONSE_BYTES, "max_bytes")
+    if query is not None:
+        from .resource_selection import normalize_query
+        query = normalize_query(query)
+    if resource_ids is not None:
+        resource_ids = _selection(resource_ids, "resource_ids")
+    if families is not None:
+        families = _selection(families, "families")
     if entry is not None and workspace is None and read_context is None:
         from .notes import ENTRY, entry_value
         candidate = entry_value(entry)
         if candidate.get("schema") == ENTRY:
             return _note_catalog(candidate, kinds=kinds, skill_refs=skill_refs, purpose=purpose,
-                limit=limit, cursor=cursor, max_bytes=max_bytes, source_ids=source_ids)
+                limit=limit, cursor=cursor, max_bytes=max_bytes, source_ids=source_ids,
+                query=query, resource_ids=resource_ids, scan_limit=scan_limit, families=families)
     # Validate pinned contexts before inspecting their fields, and enforce the
     # exactly-one selector rule before any optional entry metadata is consulted.
     ws = load_workspace(resolve_read_workspace(workspace, entry=entry, read_context=read_context))
@@ -366,7 +482,8 @@ def build_resource_catalog(workspace=None, *, entry=None, read_context=None,
     skill_rows = _skill_inventory(skill_refs, ws)
     stamp = digest({"workspace": ws.manifest, "base": str(ws.base), "source_ids": selected,
                     "kinds": selected_kinds, "purpose": purpose,
-                    "skills": [r["content_ref"] for r in skill_rows]})
+                    "skills": [r["content_ref"] for r in skill_rows],
+                    "query": query, "resource_ids": resource_ids, "families": families})
     state = _decode_cursor(cursor, stamp)
     if state["skill_index"] > len(skill_rows):
         raise EvidenceError("catalog cursor skill is outside the selected library")
@@ -381,6 +498,7 @@ def build_resource_catalog(workspace=None, *, entry=None, read_context=None,
         return dict(schema=SCHEMA, items=rows, next_cursor=next_cursor,
             coverage={"scope": "explicit_published_workspace_and_selected_skill_bundles", "global_search": False,
                 "source_ids": selected, "kinds": selected_kinds, "purpose": purpose,
+                "resource_ids": resource_ids, "families": families,
                 "sources": coverage, "discovery_complete": complete,
                 "status": "partial" if not complete or continuation["prior_gap_count"] or warnings or
                     any(c["status"] != "complete" for c in coverage) else "complete",
@@ -389,8 +507,8 @@ def build_resource_catalog(workspace=None, *, entry=None, read_context=None,
                 "byte_bound_reached": byte_bound, "gaps": gaps,
                 "gap_observations_prior_pages": state["prior_gap_count"],
                 "outside_scope": "other workspaces, unselected installed skills and unpublished material"},
-            warnings=warnings, automatic_adoption=False, execution_permission="not_granted",
-            applicability="declared conditions only; host review required; no scientific applicability inferred")
+            warnings=warnings, automatic_adoption=False, execution_permission="not_evaluated_by_reader",
+            applicability="declared conditions; host chooses reuse or adaptation; scientific suitability is not inferred")
 
     def fits():
         return len(canonical(render()).encode("utf-8")) <= max_bytes
@@ -416,7 +534,9 @@ def build_resource_catalog(workspace=None, *, entry=None, read_context=None,
                              "reason": str(exc) if isinstance(exc, EvidenceError) else type(exc).__name__}]
             hidden += excluded
             gaps.extend(failures)
-            candidates = [r for r in candidates if r["kind"] in selected_kinds]
+            candidates = [_selection_row(r, query) for r in candidates
+                          if r["kind"] in selected_kinds and _matches_resource(r, resource_ids)
+                          and _matches_family(r, families)]
             candidate_stamp = digest(candidates)
             if state["candidate_stamp"] is not None and state["candidate_stamp"] != candidate_stamp:
                 raise StaleCursorError("catalog descriptor verification changed; restart discovery")
@@ -455,8 +575,9 @@ def build_resource_catalog(workspace=None, *, entry=None, read_context=None,
     while state["phase"] == "skills" and state["skill_index"] < len(skill_rows) and len(rows) < limit:
         row = skill_rows[state["skill_index"]]
         state["skill_index"] += 1
-        if row["kind"] in selected_kinds:
-            rows.append(row)
+        if (row["kind"] in selected_kinds and _matches_resource(row, resource_ids)
+                and _matches_family(row, families)):
+            rows.append(_selection_row(row, query))
             if not fits():
                 rows.pop()
                 state["skill_index"] -= 1

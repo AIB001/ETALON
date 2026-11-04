@@ -10,6 +10,13 @@ from pathlib import Path
 def register(sub):
     research = sub.add_parser("research", help="read current knowledge or save research progress")
     commands = research.add_subparsers(dest="research_command", required=True)
+    advisory = commands.add_parser("advice", help="host-owned side advice over the existing entries")
+    advisory.add_argument("--entry", type=Path, required=True)
+    advisory.add_argument("--action", choices=("prepare", "bind", "report", "collect", "decide"), required=True)
+    advisory.add_argument("--topic", required=True)
+    advisory.add_argument("--review-key", required=True)
+    advisory.add_argument("--payload", type=Path, help="compact JSON for the selected action")
+    advisory.set_defaults(handler=handle)
     fork = commands.add_parser("fork-memory", help="create independent working memory sharing original results")
     fork.add_argument("--entry", type=Path, required=True)
     fork.add_argument("--destination", type=Path, required=True)
@@ -19,10 +26,23 @@ def register(sub):
     resources = commands.add_parser("resources", help="page methods, skills and conditional knowledge in a published entry")
     resources.add_argument("--entry", type=Path, required=True)
     resources.add_argument("--kind", action="append")
+    resources.add_argument("--query", type=Path, help="JSON task conditions and optional critical_conditions, definitions, available_stages")
+    resources.add_argument("--resource-id", action="append", help="select exact resource and associated feedback; repeat as needed")
+    resources.add_argument("--family", action="append", help="scope discovery to declared operation families; unclassified resources remain outside this view")
     resources.add_argument("--cursor")
     resources.add_argument("--limit", type=int, default=20)
     resources.add_argument("--max-bytes", type=int, default=16384)
     resources.set_defaults(handler=handle)
+    feedback = commands.add_parser("feedback", help="read conditional use feedback from a fixed note")
+    feedback.add_argument("--entry", type=Path, required=True)
+    feedback.add_argument("--resource-id", required=True)
+    feedback.add_argument("--query", type=Path, help="JSON task conditions")
+    feedback.add_argument("--branch")
+    feedback.add_argument("--resource-version")
+    feedback.add_argument("--offset", type=int, default=0)
+    feedback.add_argument("--limit", type=int, default=20)
+    feedback.add_argument("--max-bytes", type=int, default=8192)
+    feedback.set_defaults(handler=handle)
     current = commands.add_parser("current", help="bounded current brief; honor the entry read recipe")
     detail = commands.add_parser("detail", help="read exact fields from a pinned note")
     for command in (current, detail):
@@ -44,12 +64,13 @@ def register(sub):
     body = progress.add_mutually_exclusive_group(required=True)
     body.add_argument("--patch", type=Path, help="JSON fields to replace; omitted fields remain unchanged")
     body.add_argument("--note", type=Path, help="complete note JSON, including task and branch")
+    body.add_argument("--resource-feedback", type=Path, help="JSON exact resource/version/parts, usage_id, conditions, outcome, summary and measured cost")
     progress.add_argument("--branch", help="existing branch to patch; defaults to the current branch")
     progress.add_argument("--expected-record", help="reject changes to a different parent record")
     progress.add_argument("--publication-id", help="stable producer publication identity for replay")
     for role in ("evidence", "counterevidence"):
         progress.add_argument("--" + role, type=Path, action="append", default=[],
-                             help="append an original file using existing identity checks; repeat as needed")
+                             help="append an original file; relative paths use the supplied entry/locator directory, not cwd; repeat as needed")
     progress.add_argument("--background", action="store_true", help="keep the current active branch")
     progress.set_defaults(handler=handle)
     work = commands.add_parser("work", help="read current executable work and feedback; never execute it")
@@ -57,6 +78,16 @@ def register(sub):
     work.add_argument("--branch")
     work.set_defaults(handler=handle)
     method = commands.add_parser("method", help="describe an explicit method and resolve its source pin; never execute")
+    method.add_argument("--invocation", type=Path, help="JSON request_id/limits/inputs; return an action request without running it")
+    method.add_argument("--query", type=Path, help="optional JSON task conditions for advisory applicability")
+    method_save = commands.add_parser("method-save", help="publish one callable method in the existing entry catalog")
+    method_save.add_argument("--entry", type=Path, required=True)
+    method_save.add_argument("--resource-id", required=True)
+    method_save.add_argument("--descriptor", type=Path, required=True,
+                             help="JSON arguments/summary/conditions and optional evidence/counterevidence paths")
+    method_save.add_argument("--branch")
+    method_save.add_argument("--publication-id")
+    method_save.set_defaults(handler=handle)
     saved = commands.add_parser("original", help="inspect one saved result or read explicit JSON/NPZ slices")
     for command in (method, saved):
         command.add_argument("--entry", type=Path, required=True)
@@ -109,12 +140,23 @@ def _read(args):
 
 
 def _progress(args):
-    from .notes import entry_journal, entry_value, original, patch_progress, save_progress
+    from .notes import entry_evidence_paths, entry_journal, entry_value, original, patch_progress, save_progress
 
     entry = _entry_path(args.entry)
+    if args.resource_feedback:
+        if args.expected_record or args.publication_id or args.background:
+            raise ValueError("resource feedback uses its usage_id and normal publication; send other changes separately")
+        from .resource_selection import record_resource_feedback
+        payload = _object(args.resource_feedback)
+        inner_branch = payload.pop("branch_id", None)
+        if args.branch and inner_branch and args.branch != inner_branch:
+            raise ValueError("resource feedback branch differs from --branch")
+        for key in ("evidence", "counterevidence"):
+            payload[key] = [*payload.get(key, []), *getattr(args, key)]
+        return record_resource_feedback(args.entry, **payload, branch_id=args.branch or inner_branch)
     payload = _object(args.patch or args.note)
     if args.patch:
-        return patch_progress(entry, payload, branch_id=args.branch,
+        return patch_progress(args.entry, payload, branch_id=args.branch,
             expected_record=args.expected_record, publication_id=args.publication_id,
             evidence=args.evidence, counterevidence=args.counterevidence,
             activate=not args.background)
@@ -125,7 +167,7 @@ def _progress(args):
     heads = value.get("branches", {value["branch_id"]: value["record_id"]})
     note = payload
     for role in ("evidence", "counterevidence"):
-        for path in getattr(args, role):
+        for path in entry_evidence_paths(args.entry, getattr(args, role)):
             ref = original(path)
             refs = note.setdefault(role, [])
             if ref not in refs:
@@ -158,16 +200,33 @@ def _runtime():
 
 def handle(args: argparse.Namespace) -> int:
     try:
-        if args.research_command == "fork-memory":
+        if args.research_command == "advice":
+            from .advice import advice
+            result = advice(args.entry, args.action, args.topic, args.review_key,
+                            _object(args.payload) if args.payload else None)
+        elif args.research_command == "fork-memory":
             from .notes import fork_memory
             result = fork_memory(args.entry, args.destination, memory_scope=args.scope, question=args.question)
         elif args.research_command == "resources":
             from .resource_catalog import build_resource_catalog
             result = build_resource_catalog(entry=args.entry, kinds=args.kind, cursor=args.cursor,
+                limit=args.limit, max_bytes=args.max_bytes, resource_ids=args.resource_id,
+                query=_object(args.query) if args.query else None, families=args.family)
+        elif args.research_command == "feedback":
+            from .resource_selection import read_resource_feedback
+            result = read_resource_feedback(args.entry, args.resource_id,
+                query=_object(args.query) if args.query else None, branch_id=args.branch,
+                resource_version=args.resource_version, offset=args.offset,
                 limit=args.limit, max_bytes=args.max_bytes)
         elif args.research_command == "method":
-            from .notes import resolve_method
-            result = resolve_method(args.entry, args.pointer, branch_id=args.branch, max_bytes=args.max_bytes)
+            from .saved_methods import resolve_saved_method
+            result = resolve_saved_method(args.entry, args.pointer, branch_id=args.branch,
+                invocation=_object(args.invocation) if args.invocation else None, max_bytes=args.max_bytes,
+                query=_object(args.query) if args.query else None)
+        elif args.research_command == "method-save":
+            from .saved_methods import publish_method
+            result = publish_method(args.entry, args.resource_id, **_object(args.descriptor),
+                branch_id=args.branch, publication_id=args.publication_id)
         elif args.research_command == "original":
             from .notes import read_original
             if args.selector and args.bytes:

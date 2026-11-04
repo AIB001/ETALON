@@ -7,6 +7,25 @@ import shutil
 
 import pytest
 
+
+def test_skill_names_slugs_and_uris_share_canonical_version(tmp_path):
+    from etalon import skills
+    baseline = skills.read_member('sweep')
+    for name in ('etalon-screening-sweep', 'etalon://skills/sweep', 'etalon://skills/etalon-screening-sweep'):
+        assert skills.read_member(name) == baseline
+        assert skills.catalog(skills=[name])['skills'][0]['manifest_sha256'] == baseline['manifest_sha256']
+    selected, snapshots = skills.snapshot_selection([{'slug':'etalon-screening-sweep'}])
+    assert selected[0]['slug'] == 'sweep'
+    assert snapshots[0][0]['manifest_sha256'] == baseline['manifest_sha256']
+    with pytest.raises(ValueError, match='ambiguous'):
+        skills.snapshot_selection([{'slug':'sweep'}, {'slug':'etalon-screening-sweep'}])
+    from etalon.host import export, verify
+    target = tmp_path/'host'
+    export(target, host='claude', selected_skills=['etalon-screening-sweep'])
+    assert (target/'.claude/skills/etalon-screening-sweep/SKILL.md').is_file()
+    verified = verify(target)
+    assert verified['export_matches_manifest'] and verified['matches_current_source']
+
 from etalon import host, skills
 
 ROOT = Path(__file__).resolve().parents[1]
