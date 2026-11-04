@@ -927,9 +927,15 @@ def test_a_missing_gate_is_a_refusal_not_a_transient_filesystem_error(tmp_path) 
     assert error["retryable"] is False, "a missing gate was reported as worth calling again"
     # `etalon_sweep_emit` catches this itself, so the hint is the emit-specific one rather than
     # the boundary's generic refusal text. Both say the same thing about retrying.
-    assert "Compare revision_id against the gate" in error["hint"]
+    assert "stands between a calibration and a campaign" in error["hint"]
     assert "etalon_authorize_gates" in error["hint"]
     assert "ETALON_AUTHORITY_KEY" in error["hint"]
+    # And it must name the revision that can actually match. The hint used to say only
+    # "compare revision_id against the gate's", which sent a caller holding a batch revision
+    # to re-screen the panel -- a remedy that cannot work, because a batch library compiles to
+    # a revision of its own no matter how often the panel is re-run.
+    assert "gate_revision_id" in error["hint"]
+    assert "reference_library" in error["hint"]
     # The token's own numbers, so the caller can tell which of the three causes fired.
     assert error["context"]["requested_revision_id"] == "rev-1"
     assert error["context"]["gate_revision_id"] is None

@@ -254,3 +254,52 @@ def test_an_exhausted_run_is_a_measurement_not_a_failed_job(
     if state == "succeeded":
         assert job["error"] is None
     assert "result.outcome is the three-way answer" in job["outcome_semantics"]
+
+
+def test_a_gate_revision_is_obtainable_for_a_batch_whose_own_revision_cannot_match(tmp_path):
+    """The refusal that made MCP screening impossible, pinned as a test.
+
+    A compiled revision covers the library as well as the funnel, so a batch library always
+    compiles to a revision of its own. ``authorize_gate`` mints the token against the
+    *calibration panel's* revision, and ``Sweep.emit`` compares the two -- which no batch
+    could ever satisfy from the MCP surface, because nothing there could compile the funnel
+    against the panel's library. The SDK had ``MolCascadeScreening.reference_library`` for
+    exactly this; ``plan_screen`` now answers the same question.
+
+    What this does not establish: that the gate is scientifically right. It establishes only
+    that the comparison the gate performs is now answerable without dropping into Python.
+    """
+
+    config = tmp_path / "cascade.json"
+    config.write_text(json.dumps(compose("cpu-smoke", [{"id": "properties", "title": "Measured properties",
+        "criteria": [component("properties", "features.rdkit_properties@0.1.0")]}])), encoding="utf-8")
+    panel = tmp_path / "panel.csv"
+    panel.write_text("id,smiles\nimatinib_like,CCO\n", encoding="utf-8")
+    batch = tmp_path / "batch_0001.csv"
+    batch.write_text("id,smiles\nb1,CCN\nb2,c1ccccc1\n", encoding="utf-8")
+    workspace = tmp_path / "workspace"
+
+    plain = plan_screen(config, batch, workspace)
+    assert "gate_revision_id" not in plain
+
+    bound = plan_screen(config, batch, workspace, reference_library=panel)
+    panel_plan = plan_screen(config, panel, workspace)
+
+    # The whole point: the batch's own revision is NOT the one the gate was minted for.
+    assert bound["plan"]["revision_id"] != bound["gate_revision_id"]
+    assert bound["gate_revision_id"] == panel_plan["plan"]["revision_id"]
+    assert bound["gate_reference_library"] == str(panel.absolute())
+
+    # The reference library is not an input to this run, so it must not move plan_id --
+    # otherwise a plan made with it could not be submitted by a caller that omits it.
+    assert bound["plan_id"] == plain["plan_id"]
+    assert bound["request"] == plain["request"]
+    assert "reference" not in json.dumps(bound["request"])
+
+    # An edited funnel still has to be caught, or the check would be decoration.
+    edited = tmp_path / "edited.json"
+    edited.write_text(json.dumps(compose("cpu-smoke", [{"id": "properties", "title": "Measured properties",
+        "criteria": [component("properties", "features.rdkit_properties@0.1.0",
+                               settings={"include_sa_score": True})]}])), encoding="utf-8")
+    assert plan_screen(edited, batch, workspace, reference_library=panel)["gate_revision_id"] != \
+        bound["gate_revision_id"]

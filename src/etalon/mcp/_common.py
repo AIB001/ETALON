@@ -300,8 +300,11 @@ def _refusal(error: BaseException) -> str | None:
             "This is a refusal, not a transient failure: a gate authorization is missing, expired "
             "or minted for a different funnel revision, and calling again will refuse again. "
             "Screen a known-active panel through this cascade, call etalon_calibrate_gates to see "
-            "what the gates do to it, then etalon_authorize_gates. A token also does not survive "
-            "an MCP server restart unless ETALON_AUTHORITY_KEY is set."
+            "what the gates do to it, then etalon_authorize_gates. If a revision mismatch is the "
+            "cause, re-screening the panel will not fix it on its own: pass gate_revision_id from "
+            "etalon_screen_plan with reference_library set to the panel's library, since a batch "
+            "library compiles to a revision of its own. A token also does not survive an MCP "
+            "server restart unless ETALON_AUTHORITY_KEY is set."
         )
     if isinstance(error, SweepError):
         return (

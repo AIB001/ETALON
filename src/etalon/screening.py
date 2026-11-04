@@ -40,7 +40,8 @@ def _run_id(value: str) -> str:
 
 
 def _prepare(config: str | Path, library: str | Path | None, workspace: str | Path,
-             *, allow_copyleft: bool = False, delivery: dict | None = None) -> tuple[dict[str, Any], Screen, Any]:
+             *, allow_copyleft: bool = False, delivery: dict | None = None,
+             reference_library: str | Path | None = None) -> tuple[dict[str, Any], Screen, Any]:
     if type(allow_copyleft) is not bool:
         raise ValueError("allow_copyleft must be a boolean")
     config_path = Path(config).expanduser().absolute()
@@ -65,13 +66,34 @@ def _prepare(config: str | Path, library: str | Path | None, workspace: str | Pa
     report = {"plan_id": _identity(request), "plan": plan.as_dict(), "request": request,
               "cost": "not estimated or reserved; determined by the supplied cascade and library",
               "scope": "bulk screening only; no automatic MD/affinity feedback or active-campaign budget"}
+    if reference_library is not None:
+        # A compiled revision covers the library as well as the funnel, so a batch's own
+        # revision can never equal the one a calibration panel produced -- measured, five
+        # batches of one campaign compiled to five revisions from one unchanged config.
+        # ``Sweep.emit`` is asking "is the funnel still the one the gate certified?", which
+        # is answerable only against a fixed reference library, normally the panel's.
+        #
+        # Deliberately absent from ``request``: the reference library is not an input to this
+        # run, and folding it in would change ``plan_id`` and break submit idempotency for
+        # plans made without it.
+        reference_path = Path(reference_library).expanduser().absolute()
+        report["gate_revision_id"] = screen.plan(config_path, reference_path).revision_id
+        report["gate_reference_library"] = str(reference_path)
     return report, screen, plan
 
 
 def plan_screen(config: str | Path, library: str | Path | None, workspace: str | Path,
-                *, allow_copyleft: bool = False, delivery: dict | None = None) -> dict[str, Any]:
-    """Compile and check dependencies without executing any screening stage."""
-    return _prepare(config, library, workspace, allow_copyleft=allow_copyleft, delivery=delivery)[0]
+                *, allow_copyleft: bool = False, delivery: dict | None = None,
+                reference_library: str | Path | None = None) -> dict[str, Any]:
+    """Compile and check dependencies without executing any screening stage.
+
+    ``reference_library`` adds ``gate_revision_id``: the same configuration compiled against
+    a fixed library instead of this run's. That is the revision a gate authorization is
+    minted for, so it is the one ``Sweep.emit`` must be given; ``revision_id`` stays the
+    identity of this actual screen. ``plan_id`` is unaffected either way.
+    """
+    return _prepare(config, library, workspace, allow_copyleft=allow_copyleft, delivery=delivery,
+                    reference_library=reference_library)[0]
 
 
 @contextmanager

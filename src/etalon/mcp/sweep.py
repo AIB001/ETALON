@@ -252,8 +252,11 @@ def register(mcp: Any) -> None:
         committed to a configuration.
 
         Args:
-            revision_id: The compiled funnel these batches will be screened with, from
-                ``etalon_screen_plan``. Must match the gate authorization's.
+            revision_id: The funnel the gate was certified for: ``gate_revision_id`` from
+                ``etalon_screen_plan`` called with ``reference_library`` set to the
+                calibration panel's library. NOT the batch's own ``revision_id`` -- a
+                revision covers the library too, so a batch library always compiles to a
+                different one and the gate check below would refuse every batch.
             gate_json: The ``gate`` object from ``etalon_authorize_gates``.
             flush: Also carve a short final batch from the remainder. End of campaign only. A short
                 batch is not a smaller sample of the same thing -- end-to-end survival is a fraction
@@ -277,11 +280,15 @@ def register(mcp: Any) -> None:
                 str(error),
                 hint=(
                     "This is the refusal that stands between a calibration and a campaign's worth "
-                    "of GPU time. Compare revision_id against the gate's: if they differ, the "
-                    "cascade changed after it was calibrated and the batches would not be "
-                    "comparable. If they match, the token has expired or its signature does not "
-                    "verify -- re-screen the panel and call etalon_authorize_gates again. A token "
-                    "does not survive an MCP server restart unless ETALON_AUTHORITY_KEY is set."
+                    "of GPU time. First check WHICH revision you passed: it must be "
+                    "gate_revision_id from etalon_screen_plan with reference_library set to the "
+                    "calibration panel's library, because a batch library compiles to its own "
+                    "revision and re-screening the panel will not make that one match. If you did "
+                    "pass gate_revision_id and it still differs, the cascade itself changed after "
+                    "it was calibrated and the batches would not be comparable. If the revisions "
+                    "match, the token has expired or its signature does not verify -- re-screen "
+                    "the panel and call etalon_authorize_gates again. A token does not survive an "
+                    "MCP server restart unless ETALON_AUTHORITY_KEY is set."
                 ),
                 retryable=False,
                 requested_revision_id=revision_id,

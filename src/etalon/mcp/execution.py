@@ -78,7 +78,8 @@ def register(mcp: Any) -> None:
     @mcp.tool()
     @tool(Cost.CHEAP)
     def etalon_screen_plan(config_path: str, workspace: str, library_path: str = "",
-                           allow_copyleft: bool = False, delivery: dict | None = None) -> str:
+                           allow_copyleft: bool = False, delivery: dict | None = None,
+                           reference_library: str = "") -> str:
         """CHEAP. Compile a real MolCascade screen; return the input-bound plan_id.
 
         Checks required backends/assets and hashes input files, without running stages.
@@ -87,12 +88,22 @@ def register(mcp: Any) -> None:
         Optional delivery={} requests gate/SMILES/pose outputs after execution.
         Set require_redock=true and rmsd_threshold=2.0 there for that requested
         final protocol; incomplete redock configuration is diagnosed before submit.
+
+        Args:
+            reference_library: Also compile this configuration against a FIXED library and
+                return the result as ``gate_revision_id``. A revision covers the library as
+                well as the funnel, so this batch's ``revision_id`` can never equal the one
+                ``etalon_authorize_gates`` minted a token for. Pass the calibration panel's
+                library here and give ``gate_revision_id`` to ``etalon_sweep_emit``.
+                ``plan_id`` and ``revision_id`` are unchanged by this argument.
         """
         from etalon.screening import plan_screen
 
         return ok(**plan_screen(absolute_path(config_path, label="config_path"),
                   absolute_path(library_path, label="library_path") if library_path else None,
-                  absolute_path(workspace, label="workspace"), allow_copyleft=allow_copyleft, delivery=delivery))
+                  absolute_path(workspace, label="workspace"), allow_copyleft=allow_copyleft, delivery=delivery,
+                  reference_library=absolute_path(reference_library, label="reference_library")
+                  if reference_library else None))
 
     @mcp.tool()
     @tool(Cost.SPENDS)
