@@ -109,11 +109,11 @@ def _reference_set(refs):
     return [unique[key] for key in sorted(unique)]
 
 
-def _original_set(paths, name):
-    from .notes import original
+def _original_set(paths, name, *, entry):
+    from .notes import entry_evidence_paths, original
     if not isinstance(paths, (list, tuple)) or any(not isinstance(path, (str, Path)) for path in paths):
         raise ValueError(name + " must be a list of file paths")
-    return _reference_set([original(path) for path in paths])
+    return _reference_set([original(path) for path in entry_evidence_paths(entry, paths)])
 
 
 def _feedback_description(previous, receipt):
@@ -151,7 +151,7 @@ def record_resource_feedback(entry, resource_id, *, usage_id, resource_version, 
     usage_id names one observation: replay is a no-op even after later progress.
     Outcomes are producer declarations, not an independent method evaluation.
     """
-    from .notes import entry_value, entry_evidence_paths
+    from .notes import entry_value
 
     for name, value in (("resource_id", resource_id), ("usage_id", usage_id), ("summary", summary)):
         if not isinstance(value, str) or not value.strip() or len(value) > (2048 if name == "summary" else 160):
@@ -166,8 +166,8 @@ def record_resource_feedback(entry, resource_id, *, usage_id, resource_version, 
     receipt = {"usage_id": usage_id, "subject": {"resource_id": resource_id,
         "version": resource_version, "parts": sorted(part_ids)}, "conditions": query["conditions"],
         "definitions": query["definitions"], "outcome": outcome, "summary": summary,
-        "evidence": _original_set(entry_evidence_paths(entry, evidence), "evidence"),
-        "counterevidence": _original_set(entry_evidence_paths(entry, counterevidence), "counterevidence"), "cost": _cost(cost)}
+        "evidence": _original_set(evidence, "evidence", entry=entry),
+        "counterevidence": _original_set(counterevidence, "counterevidence", entry=entry), "cost": _cost(cost)}
     if resource_entry is not None:
         source_pin = entry_value(resource_entry)
         receipt["resource_entry"] = {k: source_pin[k] for k in

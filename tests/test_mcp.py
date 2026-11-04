@@ -1106,8 +1106,11 @@ def test_every_tool_a_description_names_is_a_tool_that_exists() -> None:
     unresolved: list[str] = []
     bare: list[str] = []
     functions = _tools()
+    from inspect import signature
+
     for name in sorted(registered):
         description = functions[name].__doc__ or ""
+        parameters = signature(functions[name]).parameters
         for cited in re.findall(r"etalon_[a-z_]+", description):
             # A trailing underscore is a namespace glob in prose -- "every etalon_sweep_* call" --
             # with the star eaten by the pattern, not a tool anybody can call.
@@ -1116,7 +1119,8 @@ def test_every_tool_a_description_names_is_a_tool_that_exists() -> None:
             if cited not in registered:
                 unresolved.append(f"{name} cites {cited}, which is not registered")
         for word in re.findall(r"(?<![\w_])([a-z]+(?:_[a-z]+)+)(?![\w_])", description):
-            if word in tails and f"etalon_{word}" in registered:
+            # A documented argument can share a tool's unprefixed name.
+            if word in tails and f"etalon_{word}" in registered and word not in parameters:
                 bare.append(f"{name} cites {word}, which registers as etalon_{word}")
 
     assert not unresolved, "\n".join(unresolved)
