@@ -999,3 +999,13 @@ most likely to be wrong is not the part that needs a GPU to exercise.
 ## Research memory architecture design
 
 [Four-graph memory and bounded S/U improvement design](docs/thin-harness/memory-four-graphs/README.md) adds an explorable architecture overview, per-step memory reads and writes, and new-chat continuation to the existing Skills/SDK map. Existing interfaces and proposed additions are explicitly distinguished; this is a design snapshot, not a new implementation or scientific acceptance.
+
+
+## License
+
+ETALON is released under the [Apache License 2.0](LICENSE).
+
+The trees under `asset/` are pinned, byte-for-byte copies of their source repositories and are not
+edited in place (`tools/verify_assets.py` reports any edit), so a licence an asset declares for itself
+still applies to that asset: PRISM currently states MIT in its own README, and the third-party code
+under `asset/molcascade/vendor/` keeps its upstream licence files.

@@ -10,6 +10,7 @@ build-backend = "hatchling.build"
 name = "etalon"
 version = "0.1.0"
 description = "Evidence-governed active learning across composable CADD protocols"
+license = "Apache-2.0"
 requires-python = ">=3.11"
 # Deliberately empty. ETALON's boundary layer shells out to GROMACS and reads MolCascade
 # and PRISM as vendored assets with their own environments; declaring those here would
