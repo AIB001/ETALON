@@ -73,6 +73,11 @@ def prepare_executor(kind: str, configuration: dict, endpoint: dict) -> dict:
                                "version": infra.version}})
         contract = _endpoint(endpoint, protocol, {"quantity": "mmpbsa", "units": "kcal/mol",
             "direction": "minimize", "requires_handoff": True, "queryable": True, "max_replicates": 1})
+    elif kind == "prism_mmpbsa_replicated":
+        normalized, inputs, protocol = _replicated_mmpbsa_configuration(configuration)
+        contract = _endpoint(endpoint, protocol, {"quantity": "mmpbsa", "units": "kcal/mol",
+            "direction": "minimize", "requires_handoff": True, "queryable": True,
+            "max_replicates": len(normalized["seeds"])})
     elif kind == "prism_bridge_v1":
         normalized, inputs = _bridge_configuration(configuration)
         template = normalized["request_template"]
@@ -80,10 +85,88 @@ def prepare_executor(kind: str, configuration: dict, endpoint: dict) -> dict:
             "id": template["endpoint_id"], "quantity": "mean_residue_contacts", "units": "count",
             "direction": "maximize", "requires_handoff": True, "queryable": True})
     else:
-        raise ValueError("executor kind must be molcascade, prism or prism_bridge_v1")
+        raise ValueError("executor kind must be molcascade, prism, prism_mmpbsa_replicated "
+                         "or prism_bridge_v1")
     body = {"schema": SCHEMA, "kind": kind, "configuration": normalized,
             "endpoint": contract.as_dict(), "inputs": inputs}
     return {**body, "executor_id": digest(body)}
+
+
+def _replicated_mmpbsa_configuration(configuration: dict) -> tuple[dict, dict, str]:
+    """Freeze an independent-replica MM-PBSA protocol, including who computes the energy.
+
+    Three things separate this from ``kind="prism"``, and each was a gap rather than a
+    preference:
+
+    **Replicas are seeded and the seeds are recorded.** ``Simulate.seed`` covers the build --
+    ion placement -- and not the velocity generation, and the production mdp carried
+    ``gen_seed = -1``. So replicas did differ, randomly, and no record said how: the spread
+    across three trajectories could not be told apart from one trajectory read three times.
+    A seed per replica is the evidence for the word "independent", so it is required here and
+    ``max_replicates`` is exactly how many were declared.
+
+    **The energy's author is explicit.** ``gmx_MMPBSA`` writes
+    ``FINAL_RESULTS_MMPBSA.dat``; nothing in this project ran it, and
+    ``read_binding_energy`` reads whichever file is present. That is why
+    ``STALE_MMPBSA_RESULT`` exists in the fault taxonomy -- a previous system's energy left
+    in the directory reads as this build's affinity. ``mmpbsa_command`` is therefore
+    optional and absent by default: without it this executor only *reads*, exactly as
+    before, and with it the command becomes part of the protocol identity so a campaign
+    cannot half-change how its affinities were produced.
+
+    **Nothing here dispatches.** Registration freezes inputs; see the dispatcher, which
+    refuses this kind rather than letting it fall through to the single-run legacy stage.
+    """
+
+    fields(configuration, {"receptor_path", "python", "production_ns", "seeds"},
+           {"timeout_per_molecule", "mmpbsa_command", "mmpbsa_subdir"})
+    receptor, interpreter = absolute(configuration["receptor_path"]), absolute(configuration["python"])
+    duration = configuration["production_ns"]
+    timeout = configuration.get("timeout_per_molecule", 86_400)
+    for name, value in (("production_ns", duration), ("timeout_per_molecule", timeout)):
+        finite(value, name, minimum=0)
+        if value <= 0:
+            raise ValueError(f"{name} must be positive")
+
+    seeds = configuration["seeds"]
+    if (not isinstance(seeds, list) or not seeds
+            or any(type(seed) is not int or not 0 <= seed <= 2147483647 for seed in seeds)):
+        raise ValueError("seeds must be a nonempty list of integers in [0, 2147483647]")
+    if len(set(seeds)) != len(seeds):
+        # Two replicas under one seed are one trajectory computed twice. Admitting that as a
+        # spread would report a reproducibility this protocol never measured.
+        raise ValueError("replica seeds must be distinct; a repeated seed is a retry, not a replica")
+
+    command = configuration.get("mmpbsa_command")
+    if command is not None:
+        if (not isinstance(command, list) or not command
+                or any(not isinstance(part, str) or not part.strip() for part in command)):
+            raise ValueError("mmpbsa_command must be a nonempty list of nonempty strings")
+        # Resolved here so the protocol identity names the executable that will actually run,
+        # not a bare word whose meaning depends on PATH at dispatch time.
+        absolute(command[0])
+    subdir = configuration.get("mmpbsa_subdir", "GMX_PROLIG_MMPBSA")
+    text(subdir, "mmpbsa_subdir")
+    if Path(subdir).is_absolute() or ".." in Path(subdir).parts:
+        raise ValueError("mmpbsa_subdir must be a relative path inside the run directory")
+
+    normalized = {"receptor_path": str(receptor), "python": str(interpreter),
+                  "production_ns": float(duration), "timeout_per_molecule": float(timeout),
+                  "seeds": list(seeds), "mmpbsa_subdir": subdir,
+                  "mmpbsa_command": list(command) if command is not None else None}
+    inputs = {str(path): _file_hash(path) for path in sorted({receptor, interpreter})}
+    if command is not None:
+        inputs[str(absolute(command[0]))] = _file_hash(absolute(command[0]))
+
+    from etalon.boundary.infra import load
+
+    infra = load("prism")
+    protocol = "prism-mmpbsa-replicated/1:" + digest({
+        "configuration": normalized, "inputs": inputs,
+        "energy_author": "etalon" if command is not None else "operator",
+        "infrastructure": {"source_commit": infra.source_commit, "tree_sha256": infra.tree_sha256,
+                           "version": infra.version}})
+    return normalized, inputs, protocol
 
 
 def _bridge_configuration(configuration: dict) -> tuple[dict, dict]:
@@ -302,6 +385,19 @@ def build_executor(database: str | Path, workspace: str | Path,
                 result = bridge(action, candidate, endpoint, grant)
             except ExecutionPending:
                 raise
+        elif record["kind"] == "prism_mmpbsa_replicated":
+            # Refused explicitly, because the alternative is worse than an error. Every kind
+            # that is not molcascade or the bridge falls into the legacy branch below, which
+            # builds a single PrismStage: a three-replica endpoint would quietly run as one
+            # unseeded trajectory per action and report the result under a protocol id that
+            # claims recorded seeds and a known energy author. Registration is complete and
+            # the frozen inputs stay valid; only dispatch is unwired.
+            return Evaluation(candidate.id, endpoint.id, None, endpoint.units, 0.0, status="blocked",
+                provenance={"phase": "executor_dispatch", "executor_id": record["executor_id"],
+                            "error": "UNSUPPORTED: prism_mmpbsa_replicated is registered but not "
+                                     "yet dispatchable; independent-replica MD and gmx_MMPBSA "
+                                     "execution are not wired. No trajectory was started.",
+                            "cost_basis": "not dispatched"})
         else:
             from etalon.active.adapters import StageExecutor
             from etalon.boundary.simulate import Simulate, discover
