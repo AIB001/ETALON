@@ -668,6 +668,66 @@ _ENERGY_LINE = re.compile(
     rf"({_ENERGY_NUMBER})[ \t]*$", re.MULTILINE,
 )
 
+#: The other layout current gmx_MMPBSA writes, which has no ``=`` and no ``+/-`` at all:
+#:
+#:     Energy Component       Average     SD(Prop.)         SD   SEM(Prop.)        SEM
+#:     ΔTOTAL                   15.79          0.00       0.00         0.00       0.00
+#:
+#: Measured against a real run of this project's own pipeline: the ``=`` pattern above
+#: matched zero lines in a finished 6,837-byte result, so a computed energy was read as a
+#: missing one and the molecule would have been withheld with "the calculation produced no
+#: result" -- which is the one thing a campaign must not be told about a number it has.
+#:
+#: Two separators minimum, so a component whose own name contains a space (``Δ1-4 VDW``)
+#: keeps it instead of losing the tail to the number group.
+_TABLE_LINE = re.compile(
+    rf"^[ \t]*(Δ[\w0-9 /-]*[\w0-9])[ \t]{{2,}}({_ENERGY_NUMBER})[ \t]+({_ENERGY_NUMBER})"
+    rf"[ \t]+({_ENERGY_NUMBER})[ \t]+({_ENERGY_NUMBER})[ \t]+({_ENERGY_NUMBER})[ \t]*$",
+    re.MULTILINE,
+)
+
+
+def _read_tabular_energy(path: Path, text: str) -> "BindingEnergy | None":
+    """Read the table layout, under the guards the ``=`` reader already applies.
+
+    **Scope, stated because it is a divergence.** The module docstring above says the ``=``
+    pattern was taken verbatim from PRISM's ``prism/mcp/analysis.py:397`` so that two
+    readings of one file cannot disagree. PRISM still reads only the ``=`` form, so after
+    this the two are no longer equally capable. What they cannot do is report *different*
+    numbers for the same file: this reader runs only when the ``=`` form is absent, so every
+    file PRISM can read is still read here by the identical pattern, and the divergence is
+    confined to files PRISM reads as nothing at all. ETALON reads a superset, never a
+    conflict. Fixing PRISM as well would remove even that, and belongs with the vendored
+    asset's own refresh rather than with a patch to a pinned tree.
+
+    ``SD`` is column three and that is the one taken, because :class:`BindingEnergy` defines
+    ``spread`` as the standard deviation across one trajectory's frames. ``SD(Prop.)`` is
+    propagated from the component deviations and answers a different question; taking it
+    because it happens to sit first would quietly change what the recorded number means.
+    """
+
+    matches = list(_TABLE_LINE.finditer(text))
+    if not matches:
+        return None
+    names = [match.group(1).strip() for match in matches]
+    # The same refusal as the ``=`` reader, for the same reason: a file may carry both a
+    # Generalized Born and a Poisson-Boltzmann section, there is no method selector in this
+    # API, and taking one total while the components came from the other would mix estimands.
+    if len(set(names)) != len(names) or names.count("ΔTOTAL") != 1:
+        return None
+    values = [(float(m.group(2)), float(m.group(4))) for m in matches]
+    if any(not math.isfinite(number) for pair in values for number in pair):
+        return None
+    if any(spread < 0 for _, spread in values):
+        return None
+    total_index = names.index("ΔTOTAL")
+    return BindingEnergy(
+        total_kcal_mol=values[total_index][0],
+        spread_kcal_mol=values[total_index][1],
+        components={name: value for name, (value, _) in zip(names, values, strict=True)},
+        source=path,
+    )
+
 
 @dataclass(frozen=True, slots=True)
 class BindingEnergy:
@@ -716,7 +776,7 @@ def read_binding_energy(mmpbsa_dir: str | Path) -> BindingEnergy | None:
         return None
     text = path.read_text(encoding="utf-8", errors="replace")
     if len(re.findall(r"^[ \t]*DELTA TOTAL[ \t]*=", text, re.MULTILINE)) != 1:
-        return None
+        return _read_tabular_energy(path, text)
     matches = list(_ENERGY_LINE.finditer(text))
     names = [match.group(1).strip() for match in matches]
     # A file can contain separate GB/PB sections. There is no method selector in this
@@ -1414,7 +1474,7 @@ def run_mmpbsa(
     md_dir = Path(record.md_dir)
     if not md_dir.is_dir():
         raise SimulationError(f"no built system at {md_dir}")
-    binary = Path(gmx) if gmx is not None else environment.tools.get("gmx")
+    binary = Path(gmx) if gmx is not None else environment.gmx
     if binary is None or not Path(binary).exists():
         return MmpbsaRecord(md_dir, False, None,
                             detail="no gmx binary: MM-PBSA needs one for make_ndx and grompp")
